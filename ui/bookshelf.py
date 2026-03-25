@@ -7,8 +7,8 @@ from PyQt6.QtWidgets import (
     QPushButton, QScrollArea, QFrame, QSizePolicy, QMenu,
     QMessageBox, QApplication
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QThread, QTimer, QPoint
-from PyQt6.QtGui import QPixmap, QColor, QPainter, QFont, QAction, QCursor
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QThread, QTimer, QPoint, QRect
+from PyQt6.QtGui import QPixmap, QColor, QPainter, QFont, QAction, QCursor, QPainterPath
 from config import app_state, THUMBNAIL_SIZE
 from .widgets import (
     make_placeholder_pixmap, TagFlowWidget, ClickableLabel,
