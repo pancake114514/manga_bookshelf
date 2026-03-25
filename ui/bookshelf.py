@@ -185,6 +185,7 @@ class BookshelfView(QWidget):
     书架主视图
     """
     object_opened = pyqtSignal(dict)
+    tags_updated = pyqtSignal()   # 标签有变动（编辑/删除），通知外部刷新侧边栏
 
     def __init__(self, storage_root: str, parent=None):
         super().__init__(parent)
@@ -276,6 +277,7 @@ class BookshelfView(QWidget):
             app_state.db.update_object_name(obj["id"], name)
             app_state.db.set_tags(obj["id"], tags)
             self.refresh()
+            self.tags_updated.emit()
 
     def _on_delete(self, obj: dict):
         reply = QMessageBox.question(
@@ -286,6 +288,7 @@ class BookshelfView(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             app_state.db.delete_object(obj["id"])
             self.refresh()
+            self.tags_updated.emit()
 
     def _on_change_cover(self, obj: dict):
         from PyQt6.QtWidgets import QFileDialog

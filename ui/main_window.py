@@ -85,7 +85,7 @@ class MainWindow(QMainWindow):
     def __init__(self, storage_root: str):
         super().__init__()
         self.storage_root = storage_root
-        self.setWindowTitle("MangaShelf")
+        self.setWindowTitle("MangaShelf — 二次元图片管理器")
         self.setMinimumSize(1000, 680)
         self.resize(1280, 800)
         self._current_obj = None
@@ -131,6 +131,7 @@ class MainWindow(QMainWindow):
         # 书架视图
         self.bookshelf = BookshelfView(self.storage_root)
         self.bookshelf.object_opened.connect(self._open_directory)
+        self.bookshelf.tags_updated.connect(self.sidebar.refresh_tags)
         self.stack.addWidget(self.bookshelf)   # index 0
 
         # 目录视图（动态创建，占位）

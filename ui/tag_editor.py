@@ -43,7 +43,7 @@ class MultiTagInput(QWidget):
         row.addWidget(self.input)
 
         btn = QPushButton("添加")
-        btn.setFixedWidth(56)
+        btn.setFixedWidth(72)
         btn.clicked.connect(self._add_current)
         row.addWidget(btn)
         layout.addLayout(row)
