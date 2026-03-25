@@ -41,6 +41,8 @@ class ObjectCard(QFrame):
 
     CARD_W = 180
     CARD_H = 280
+    COVER_MARGIN = 1  # 封面与边框的间距
+    BORDER_RADIUS = 10
 
     def __init__(self, obj: dict, cache_dir: str, parent=None):
         super().__init__(parent)
@@ -67,17 +69,29 @@ class ObjectCard(QFrame):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        # 封面图区域容器（用于添加 margin）
+        cover_container = QWidget()
+        cover_container.setStyleSheet("background: transparent;")
+        container_layout = QVBoxLayout(cover_container)
+        container_layout.setContentsMargins(
+            self.COVER_MARGIN, self.COVER_MARGIN, self.COVER_MARGIN, 0
+        )
+        container_layout.setSpacing(0)
+
         # 封面图区域
+        cover_size_w = self.CARD_W - self.COVER_MARGIN * 2
+        cover_size_h = 230 - self.COVER_MARGIN
         self.cover_label = QLabel()
-        self.cover_label.setFixedSize(self.CARD_W, 230)
+        self.cover_label.setFixedSize(cover_size_w, cover_size_h)
         self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.cover_label.setStyleSheet("""
             border-radius: 10px 10px 0 0;
-            background: #0e0d18;
+            background: #1a1828;
         """)
-        pm = make_placeholder_pixmap(self.CARD_W, 230, "📖", "#0e0d18")
+        pm = make_placeholder_pixmap(cover_size_w, cover_size_h, "📖", "#1a1828")
         self.cover_label.setPixmap(pm)
-        layout.addWidget(self.cover_label)
+        container_layout.addWidget(self.cover_label)
+        layout.addWidget(cover_container)
 
         # 名称区域
         info = QWidget()
@@ -132,14 +146,16 @@ class ObjectCard(QFrame):
     def _on_thumb_loaded(self, obj_id: str, thumb_path: str):
         if obj_id == self.obj["id"] and os.path.isfile(thumb_path):
             pm = QPixmap(thumb_path)
-            pm = pm.scaled(self.CARD_W, 230,
+            cover_w = self.CARD_W - self.COVER_MARGIN * 2
+            cover_h = 230 - self.COVER_MARGIN
+            pm = pm.scaled(cover_w, cover_h,
                            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                            Qt.TransformationMode.SmoothTransformation)
             # 居中裁剪
-            if pm.width() > self.CARD_W or pm.height() > 230:
-                x = (pm.width() - self.CARD_W) // 2
-                y = (pm.height() - 230) // 2
-                pm = pm.copy(x, y, self.CARD_W, 230)
+            if pm.width() > cover_w or pm.height() > cover_h:
+                x = (pm.width() - cover_w) // 2
+                y = (pm.height() - cover_h) // 2
+                pm = pm.copy(x, y, cover_w, cover_h)
             self.cover_label.setPixmap(pm)
 
     def set_pixmap(self, pm: QPixmap):

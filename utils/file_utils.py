@@ -16,19 +16,26 @@ def collect_images(directory: str) -> list[str]:
     return result
 
 
-def copy_image_to_storage(src_path: str, storage_obj_dir: str) -> str | None:
+def copy_image_to_storage(src_path: str, storage_obj_dir: str, overwrite: bool = True) -> str | None:
     """
     将图片复制到对象存储目录。
-    如文件名冲突则添加 uuid 前缀。
+    如文件名冲突：
+        - overwrite=True 时直接覆盖（默认）
+        - overwrite=False 时添加 uuid 后缀
     返回目标路径，失败返回 None。
     """
     os.makedirs(storage_obj_dir, exist_ok=True)
     filename = os.path.basename(src_path)
     dest = os.path.join(storage_obj_dir, filename)
     if os.path.exists(dest):
-        base, ext = os.path.splitext(filename)
-        filename = f"{base}_{uuid.uuid4().hex[:6]}{ext}"
-        dest = os.path.join(storage_obj_dir, filename)
+        if overwrite:
+            # 直接覆盖同名文件
+            pass
+        else:
+            # 添加 uuid 后缀避免冲突
+            base, ext = os.path.splitext(filename)
+            filename = f"{base}_{uuid.uuid4().hex[:6]}{ext}"
+            dest = os.path.join(storage_obj_dir, filename)
     try:
         shutil.copy2(src_path, dest)
         return dest
