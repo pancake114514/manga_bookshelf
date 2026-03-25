@@ -1,4 +1,4 @@
-# MangaShelf — 二次元图片管理器
+# MangaShelf — 本地漫画管理器
 
 基于 PyQt6 + SQLite + Pillow 的本地漫画/图片管理工具。
 
