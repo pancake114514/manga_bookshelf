@@ -1,5 +1,5 @@
 """
-MangaShelf - 二次元图片管理器
+MangaShelf - 漫画管理器
 入口文件
 """
 import sys

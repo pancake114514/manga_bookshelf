@@ -85,7 +85,7 @@ class MainWindow(QMainWindow):
     def __init__(self, storage_root: str):
         super().__init__()
         self.storage_root = storage_root
-        self.setWindowTitle("MangaShelf — 二次元图片管理器")
+        self.setWindowTitle("MangaShelf")
         self.setMinimumSize(1000, 680)
         self.resize(1280, 800)
         self._current_obj = None

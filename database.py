@@ -130,39 +130,39 @@ class Database:
 
     def delete_object(self, obj_id: str):
         """删除对象，并清理不再被其他对象使用的孤立标签"""
-        # 获取该对象的所有标签
-        tags_to_check = self._get_tags(obj_id)
-
         # 删除对象（会通过 CASCADE 删除 tags 表中的记录）
         self.conn.execute("DELETE FROM objects WHERE id=?", (obj_id,))
         self.conn.commit()
 
-        # 清理孤立标签（检查每个标签是否还有其他对象使用）
-        self._cleanup_orphan_tags(tags_to_check)
+        # 清理所有孤立标签（扫描整个标签库）
+        self.cleanup_all_orphan_tags()
+
+    def cleanup_all_orphan_tags(self):
+        """清理所有不再被任何对象使用的孤立标签"""
+        # 获取所有还有效的 object_id 列表
+        valid_objects = set(
+            row["id"] for row in self.conn.execute("SELECT id FROM objects").fetchall()
+        )
+
+        # 获取所有标签记录
+        all_tags = self.conn.execute("SELECT id, object_id, category, value FROM tags").fetchall()
+
+        # 找出孤立标签（object_id 不在有效对象列表中的记录）
+        orphan_tag_ids = []
+        for tag in all_tags:
+            if tag["object_id"] not in valid_objects:
+                orphan_tag_ids.append(tag["id"])
+
+        # 删除孤立标签
+        if orphan_tag_ids:
+            placeholders = ",".join("?" * len(orphan_tag_ids))
+            self.conn.execute(f"DELETE FROM tags WHERE id IN ({placeholders})", orphan_tag_ids)
+            self.conn.commit()
 
     def _cleanup_orphan_tags(self, tags: Dict):
-        """清理不再被任何对象使用的孤立标签"""
-        for cat, val in tags.items():
-            if cat == "r18":
-                # R-18 是布尔值，检查是否还有其他对象的 r18 标签
-                count = self.conn.execute(
-                    "SELECT COUNT(*) as cnt FROM tags WHERE category='r18' AND value='true'"
-                ).fetchone()["cnt"]
-                if count == 0:
-                    # 没有 R18 作品了，清理 R18 相关记录
-                    self.conn.execute("DELETE FROM tags WHERE category='r18' AND value='true'")
-                    self.conn.commit()
-            elif isinstance(val, list):
-                for v in val:
-                    if v:
-                        # 检查该标签是否还被其他对象使用
-                        count = self.conn.execute(
-                            "SELECT COUNT(*) as cnt FROM tags WHERE category=? AND value=?",
-                            (cat, v)
-                        ).fetchone()["cnt"]
-                        if count == 0:
-                            # 标签已无对象使用（记录已在 delete_object 时通过 CASCADE 删除）
-                            pass
+        """清理不再被任何对象使用的孤立标签（已弃用，改用 cleanup_all_orphan_tags）"""
+        # 为保持向后兼容，仍调用完整扫描方法
+        self.cleanup_all_orphan_tags()
 
     def search_objects(self, keyword: str, include_r18: bool = False) -> List[Dict]:
         keyword = f"%{keyword}%"
