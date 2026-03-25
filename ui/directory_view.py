@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QThread, QTimer
 from PyQt6.QtGui import QPixmap, QFont, QIcon
 from config import app_state, GRID_THUMB_SIZE
-from .widgets import TagFlowWidget, SectionLabel, make_placeholder_pixmap, ClickableLabel
+from .widgets import SectionLabel, make_placeholder_pixmap, ClickableLabel, TagBadge
 
 
 class GridThumbLoader(QThread):
@@ -104,7 +104,7 @@ class DirectoryView(QWidget):
         # ── 顶部信息栏 ────────────────────────────────────────────────────────
         info_bar = QFrame()
         info_bar.setObjectName("topbar")
-        info_bar.setFixedHeight(130)
+        info_bar.setMinimumHeight(130)
         info_bar.setStyleSheet("""
             QFrame#topbar {
                 background: #0e0d18;
@@ -148,8 +148,42 @@ class DirectoryView(QWidget):
         name_row.addWidget(self.read_btn)
         meta.addLayout(name_row)
 
-        self.tag_widget = TagFlowWidget(self.obj.get("tags", {}))
-        meta.addWidget(self.tag_widget)
+        # 按类别逐行展示标签
+        tags = self.obj.get("tags", {})
+        from config import TAG_CATEGORIES, TAG_CATEGORY_ORDER
+        has_any = False
+        for cat in TAG_CATEGORY_ORDER:
+            vals = tags.get(cat)
+            if not vals:
+                continue
+            if cat == "r18":
+                if not vals:
+                    continue
+                display = [("R-18", "r18")]
+            elif isinstance(vals, list):
+                display = [(v, cat) for v in vals if v]
+            else:
+                display = [(str(vals), cat)]
+            if not display:
+                continue
+            has_any = True
+            row = QHBoxLayout()
+            row.setSpacing(4)
+            row.setContentsMargins(0, 0, 0, 0)
+            cat_lbl = QLabel(TAG_CATEGORIES[cat] + "：")
+            cat_lbl.setStyleSheet(
+                "color: #5a5070; font-size: 11px; min-width: 36px;"
+            )
+            cat_lbl.setFixedWidth(40)
+            row.addWidget(cat_lbl)
+            for text, category in display:
+                row.addWidget(TagBadge(text, category))
+            row.addStretch()
+            meta.addLayout(row)
+        if not has_any:
+            no_tag = QLabel("暂无标签")
+            no_tag.setStyleSheet("color: #3a3060; font-size: 11px;")
+            meta.addWidget(no_tag)
         meta.addStretch()
         info_layout.addLayout(meta)
         layout.addWidget(info_bar)
