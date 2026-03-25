@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QScrollArea,
     QFrame, QPushButton, QHBoxLayout, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QRect, QRectF, QPropertyAnimation, QEasingCurve, pyqtProperty
+from PyQt6.QtCore import Qt, pyqtSignal, QRect, QRectF, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QPainterPath
 from config import app_state, TAG_CATEGORIES, TAG_CATEGORY_ORDER
 from .widgets import SectionLabel, Divider
@@ -58,46 +58,49 @@ class CheckBox(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        cy = self.height() // 2
+        # 计算居中绘图区
+        rect = self.rect()
         bx = 0
-        by = cy - self.BOX // 2
+        by = (rect.height() - self.BOX) // 2
+
+        # 1. 绘制背景方框
+        box_rect = QRectF(bx, by, self.BOX, self.BOX)
 
         if self._checked:
-            # 填充背景
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor("#5c3f8a"))
-            p.drawRoundedRect(bx, by, self.BOX, self.BOX, self.RADIUS, self.RADIUS)
-            # 边框
+            # 选中状态：紫色填充
             p.setPen(QPen(QColor("#9a7adb"), 1))
+            p.setBrush(QColor("#5c3f8a"))
+            p.drawRoundedRect(box_rect, self.RADIUS, self.RADIUS)
+
+            # 2. 绘制勾号 (使用 QPainterPath 保证折线平滑连接)
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawRoundedRect(bx, by, self.BOX, self.BOX, self.RADIUS, self.RADIUS)
-            # 绘制勾号（三点折线）
-            p.setPen(QPen(QColor("#ffffff"), 2, Qt.PenStyle.SolidLine,
-                          Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-            mx, my = bx + self.BOX // 2, by + self.BOX // 2
-            # 三个点：左下 → 中下 → 右上
-            p.drawLine(bx + 3, by + 8, bx + 6, by + 11)
-            p.drawLine(bx + 6, by + 11, bx + 12, by + 4)
+            tick_pen = QPen(QColor("#ffffff"), 2, Qt.PenStyle.SolidLine,
+                            Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+            p.setPen(tick_pen)
+
+            # 使用相对坐标计算打勾位置
+            path = QPainterPath()
+            path.moveTo(bx + self.BOX * 0.2, by + self.BOX * 0.5)
+            path.lineTo(bx + self.BOX * 0.45, by + self.BOX * 0.75)
+            path.lineTo(bx + self.BOX * 0.8, by + self.BOX * 0.25)
+            p.drawPath(path)
         else:
-            # 空框
+            # 未选中状态
             border_color = "#6a5a8a" if self._hovered else "#3a3060"
             p.setPen(QPen(QColor(border_color), 1))
             p.setBrush(QColor("#1e1c2a"))
-            p.drawRoundedRect(bx, by, self.BOX, self.BOX, self.RADIUS, self.RADIUS)
+            p.drawRoundedRect(box_rect, self.RADIUS, self.RADIUS)
 
-        # 文字
+        # 3. 绘制文字
         if self._text:
             text_color = "#e8e0f0" if self._checked else (
                 "#c8b8e8" if self._hovered else "#9a8abb"
             )
             p.setPen(QColor(text_color))
-            font = p.font()
-            font.setPointSize(9)
-            p.setFont(font)
-            text_rect = QRect(self.BOX + 8, 0, self.width() - self.BOX - 8, self.height())
-            p.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter, self._text)
-
-        p.end()
+            p.setFont(QFont("Segoe UI", 9))
+            # 偏移文字，避免紧贴方框
+            text_rect = rect.adjusted(self.BOX + 8, 0, 0, 0)
+            p.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self._text)
 
     # ── 事件 ──────────────────────────────────────────────────────────────────
 
@@ -206,16 +209,25 @@ class TagFilterGroup(QWidget):
         layout.addLayout(self.items_layout)
 
     def populate(self, values: list[str]):
+        # 获取当前已选中的标签，用于恢复状态
+        current_selected = self.get_selected()
+
+        # 只有当标签内容真的变了，才重新构建 UI
+        existing_tags = list(self._checkboxes.keys())
+        if set(existing_tags) == set(values):
+            return
+
+            # 清理旧控件
         for cb in self._checkboxes.values():
+            cb.setParent(None)
             cb.deleteLater()
         self._checkboxes.clear()
-        while self.items_layout.count():
-            item = self.items_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
 
+        # 重新添加
         for v in values:
             cb = CheckBox(v)
+            if v in current_selected:
+                cb.setChecked(True, emit=False)  # 恢复状态
             cb.stateChanged.connect(lambda _: self.filter_changed.emit())
             self.items_layout.addWidget(cb)
             self._checkboxes[v] = cb
