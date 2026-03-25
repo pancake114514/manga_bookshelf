@@ -17,6 +17,8 @@ class Database:
     def _init_tables(self):
         cur = self.conn.cursor()
         cur.executescript("""
+            PRAGMA foreign_keys = ON;
+
             CREATE TABLE IF NOT EXISTS config (
                 key   TEXT PRIMARY KEY,
                 value TEXT
@@ -35,18 +37,20 @@ class Database:
 
             CREATE TABLE IF NOT EXISTS tags (
                 id        INTEGER PRIMARY KEY AUTOINCREMENT,
-                object_id TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+                object_id TEXT NOT NULL,
                 category  TEXT NOT NULL,
-                value     TEXT NOT NULL
+                value     TEXT NOT NULL,
+                FOREIGN KEY (object_id) REFERENCES objects(id) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS images (
                 id         TEXT PRIMARY KEY,
-                object_id  TEXT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+                object_id  TEXT NOT NULL,
                 filename   TEXT NOT NULL,
                 filepath   TEXT NOT NULL,
                 sort_order INTEGER DEFAULT 0,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (object_id) REFERENCES objects(id) ON DELETE CASCADE
             );
 
             CREATE INDEX IF NOT EXISTS idx_tags_object ON tags(object_id);
@@ -125,8 +129,40 @@ class Database:
         self.conn.commit()
 
     def delete_object(self, obj_id: str):
+        """删除对象，并清理不再被其他对象使用的孤立标签"""
+        # 获取该对象的所有标签
+        tags_to_check = self._get_tags(obj_id)
+
+        # 删除对象（会通过 CASCADE 删除 tags 表中的记录）
         self.conn.execute("DELETE FROM objects WHERE id=?", (obj_id,))
         self.conn.commit()
+
+        # 清理孤立标签（检查每个标签是否还有其他对象使用）
+        self._cleanup_orphan_tags(tags_to_check)
+
+    def _cleanup_orphan_tags(self, tags: Dict):
+        """清理不再被任何对象使用的孤立标签"""
+        for cat, val in tags.items():
+            if cat == "r18":
+                # R-18 是布尔值，检查是否还有其他对象的 r18 标签
+                count = self.conn.execute(
+                    "SELECT COUNT(*) as cnt FROM tags WHERE category='r18' AND value='true'"
+                ).fetchone()["cnt"]
+                if count == 0:
+                    # 没有 R18 作品了，清理 R18 相关记录
+                    self.conn.execute("DELETE FROM tags WHERE category='r18' AND value='true'")
+                    self.conn.commit()
+            elif isinstance(val, list):
+                for v in val:
+                    if v:
+                        # 检查该标签是否还被其他对象使用
+                        count = self.conn.execute(
+                            "SELECT COUNT(*) as cnt FROM tags WHERE category=? AND value=?",
+                            (cat, v)
+                        ).fetchone()["cnt"]
+                        if count == 0:
+                            # 标签已无对象使用（记录已在 delete_object 时通过 CASCADE 删除）
+                            pass
 
     def search_objects(self, keyword: str, include_r18: bool = False) -> List[Dict]:
         keyword = f"%{keyword}%"
