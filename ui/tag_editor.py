@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from config import TAG_CATEGORIES, TAG_CATEGORY_ORDER, app_state
-from ui.widgets import SectionLabel, Divider, TagBadge
+from .widgets import SectionLabel, Divider, TagBadge
 
 
 class MultiTagInput(QWidget):

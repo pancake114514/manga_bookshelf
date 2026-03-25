@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QThread, QTimer
 from PyQt6.QtGui import QPixmap, QFont, QIcon
 from config import app_state, GRID_THUMB_SIZE
-from ui.widgets import TagFlowWidget, SectionLabel, make_placeholder_pixmap, ClickableLabel
+from .widgets import TagFlowWidget, SectionLabel, make_placeholder_pixmap, ClickableLabel
 
 
 class GridThumbLoader(QThread):
@@ -188,7 +188,8 @@ class DirectoryView(QWidget):
 
     def _load_images(self):
         self.images = app_state.db.get_images(self.obj["id"])
-        cols = max(1, (self.width() - 40) // (ImageThumbCard.W + 12)) or 6
+        effective_w = self.width() if self.width() > 100 else 900
+        cols = max(1, (effective_w - 40) // (ImageThumbCard.W + 12))
 
         tasks = []
         for i, img in enumerate(self.images):
@@ -219,12 +220,15 @@ class DirectoryView(QWidget):
         QTimer.singleShot(150, self._relayout)
 
     def _relayout(self):
+        """只重新排列已有卡片，不销毁重建，避免异步缩略图信号打到已销毁对象"""
         cols = max(1, (self.width() - 40) // (ImageThumbCard.W + 12)) or 6
+        # 取出所有卡片（保持顺序）
         items = []
         while self.grid_layout.count():
             item = self.grid_layout.takeAt(0)
             if item.widget():
                 items.append(item.widget())
+        # 按新列数重新放置（不 deleteLater）
         for i, card in enumerate(items):
             row, col = divmod(i, cols)
             self.grid_layout.addWidget(card, row, col)

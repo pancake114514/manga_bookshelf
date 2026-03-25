@@ -5,11 +5,11 @@
 import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QSlider, QSizePolicy, QShortcut, QApplication
+    QSlider, QSizePolicy, QApplication
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QRect, QPoint, QTimer
 from PyQt6.QtGui import (
-    QPixmap, QPainter, QColor, QFont, QKeySequence,
+    QPixmap, QPainter, QColor, QFont, QKeySequence, QShortcut,
     QPen, QBrush, QLinearGradient, QRadialGradient
 )
 from config import app_state, SUPPORTED_FORMATS
@@ -181,6 +181,19 @@ class ImageViewer(QWidget):
         self.filename_lbl.setStyleSheet("color: #4a4070; font-size: 11px;")
         top_layout.addWidget(self.filename_lbl)
 
+        fullscreen_btn = QPushButton("⛶")
+        fullscreen_btn.setFixedSize(32, 32)
+        fullscreen_btn.setToolTip("全屏 (F / F11)")
+        fullscreen_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent; border: 1px solid #2a2540;
+                border-radius: 5px; color: #7a6aab; font-size: 14px;
+            }
+            QPushButton:hover { border-color: #5c3f8a; color: #c8b8e8; }
+        """)
+        fullscreen_btn.clicked.connect(self._toggle_fullscreen)
+        top_layout.addWidget(fullscreen_btn)
+
         layout.addWidget(top)
 
         # ── 图片显示区域（可点击） ────────────────────────────────────────────
@@ -215,6 +228,24 @@ class ImageViewer(QWidget):
         QShortcut(QKeySequence(Qt.Key.Key_Up), self).activated.connect(self._prev_page)
         QShortcut(QKeySequence(Qt.Key.Key_Down), self).activated.connect(self._next_page)
         QShortcut(QKeySequence(Qt.Key.Key_Escape), self).activated.connect(self._on_back)
+        QShortcut(QKeySequence(Qt.Key.Key_F11), self).activated.connect(self._toggle_fullscreen)
+        QShortcut(QKeySequence(Qt.Key.Key_F), self).activated.connect(self._toggle_fullscreen)
+
+    def _toggle_fullscreen(self):
+        """切换全屏/窗口模式（F 或 F11）"""
+        parent = self.window()
+        if parent.isFullScreen():
+            parent.showNormal()
+        else:
+            parent.showFullScreen()
+
+    def wheelEvent(self, event):
+        """鼠标滚轮翻页"""
+        delta = event.angleDelta().y()
+        if delta < 0:
+            self._next_page()
+        elif delta > 0:
+            self._prev_page()
 
     def _go_to(self, idx: int):
         if not self.images:

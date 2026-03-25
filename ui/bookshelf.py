@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QThread, QTimer, QPoint
 from PyQt6.QtGui import QPixmap, QColor, QPainter, QFont, QAction, QCursor
 from config import app_state, THUMBNAIL_SIZE
-from ui.widgets import (
+from .widgets import (
     make_placeholder_pixmap, TagFlowWidget, ClickableLabel,
     SectionLabel, Divider, LoadingLabel
 )
@@ -24,7 +24,7 @@ class ThumbnailLoader(QThread):
         self.tasks = tasks
 
     def run(self):
-        from utils.thumbnail import generate_thumbnail, THUMBNAIL_SIZE
+        from utils.thumbnail import generate_thumbnail
         for obj_id, img_path, cache_dir in self.tasks:
             if img_path and os.path.isfile(img_path):
                 path = generate_thumbnail(img_path, cache_dir)
@@ -237,7 +237,8 @@ class BookshelfView(QWidget):
         self.empty_label.hide()
         self.scroll.show()
 
-        cols = max(1, (self.width() - 48) // (ObjectCard.CARD_W + 20))
+        effective_w = self.width() if self.width() > 200 else 900
+        cols = max(1, (effective_w - 48) // (ObjectCard.CARD_W + 20))
 
         for i, obj in enumerate(objects):
             card = ObjectCard(obj, self.cache_dir)
@@ -267,7 +268,7 @@ class BookshelfView(QWidget):
     # ── 右键菜单动作 ──────────────────────────────────────────────────────────
 
     def _on_edit(self, obj: dict):
-        from ui.tag_editor import TagEditorDialog
+        from .tag_editor import TagEditorDialog
         dlg = TagEditorDialog(obj, self)
         if dlg.exec() == TagEditorDialog.DialogCode.Accepted:
             name = dlg.get_name()

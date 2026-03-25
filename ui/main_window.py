@@ -11,12 +11,12 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSize
 from PyQt6.QtGui import QFont, QIcon, QKeySequence, QShortcut
 
 from config import app_state
-from ui.widgets import STYLE_MAIN, Divider
-from ui.sidebar import SidebarWidget
-from ui.bookshelf import BookshelfView
-from ui.directory_view import DirectoryView
-from ui.image_viewer import ImageViewer
-from ui.import_dialog import ImportDialog
+from .widgets import STYLE_MAIN, Divider
+from .sidebar import SidebarWidget
+from .bookshelf import BookshelfView
+from .directory_view import DirectoryView
+from .image_viewer import ImageViewer
+from .import_dialog import ImportDialog
 
 
 # 视图索引
@@ -85,7 +85,7 @@ class MainWindow(QMainWindow):
     def __init__(self, storage_root: str):
         super().__init__()
         self.storage_root = storage_root
-        self.setWindowTitle("MangaShelf — 二次元图片管理器")
+        self.setWindowTitle("MangaShelf")
         self.setMinimumSize(1000, 680)
         self.resize(1280, 800)
         self._current_obj = None
@@ -231,13 +231,19 @@ class MainWindow(QMainWindow):
         viewer.back_requested.connect(self._back_from_viewer)
         self.stack.insertWidget(VIEW_VIEWER, viewer)
         self.stack.setCurrentIndex(VIEW_VIEWER)
+        self.sidebar.hide()
+        self.topbar.hide()
 
     def _back_from_viewer(self):
-        # 刷新对象（更新阅读进度显示）
+        # 刷新阅读进度后直接切回目录视图，不重建 widget（避免 deleteLater 竞态）
         if self._current_obj:
             refreshed = app_state.db.get_object(self._current_obj["id"])
             if refreshed:
                 self._current_obj = refreshed
-                self._open_directory(refreshed)
-                return
-        self._show_bookshelf()
+                # 更新目录视图中「继续阅读」按钮指向的 obj
+                dir_view = self.stack.widget(VIEW_DIRECTORY)
+                if hasattr(dir_view, "obj"):
+                    dir_view.obj = refreshed
+        self.stack.setCurrentIndex(VIEW_DIRECTORY)
+        self.sidebar.show()
+        self.topbar.show()

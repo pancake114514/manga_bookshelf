@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from config import app_state, TAG_CATEGORIES, TAG_CATEGORY_ORDER
-from ui.widgets import SectionLabel, Divider
+from .widgets import SectionLabel, Divider
 
 
 class TagFilterGroup(QWidget):

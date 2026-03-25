@@ -11,8 +11,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QIcon
 from config import app_state, SUPPORTED_FORMATS
-from ui.widgets import SectionLabel, Divider
-from ui.tag_editor import TagEditorDialog
+from .widgets import SectionLabel, Divider
+from .tag_editor import TagEditorDialog
 import uuid
 
 
@@ -114,7 +114,7 @@ class ImportDialog(QDialog):
         self.btn_new.clicked.connect(self._import_new_directory)
         layout.addWidget(self.btn_new)
 
-        self.btn_existing = QPushButton("🖼  导入图片到已有目录对象")
+        self.btn_existing = QPushButton("🖼  导入文件夹到已有目录对象")
         self.btn_existing.setMinimumHeight(52)
         self.btn_existing.setStyleSheet("""
             QPushButton {
@@ -133,6 +133,26 @@ class ImportDialog(QDialog):
         """)
         self.btn_existing.clicked.connect(self._import_to_existing)
         layout.addWidget(self.btn_existing)
+
+        self.btn_files = QPushButton("📄  导入单张/多张图片到已有目录对象")
+        self.btn_files.setMinimumHeight(52)
+        self.btn_files.setStyleSheet("""
+            QPushButton {
+                background-color: #1f3a2a;
+                border: 1px solid #2a6a3a;
+                border-radius: 8px;
+                color: #b8e8c8;
+                font-size: 14px;
+                text-align: left;
+                padding: 0 20px;
+            }
+            QPushButton:hover {
+                background-color: #2f4a3a;
+                border-color: #4aab6a;
+            }
+        """)
+        self.btn_files.clicked.connect(self._import_single_files)
+        layout.addWidget(self.btn_files)
 
         cancel = QPushButton("取消")
         cancel.clicked.connect(self.reject)
@@ -204,6 +224,55 @@ class ImportDialog(QDialog):
 
         self._run_import(target_obj["id"], target_obj["name"], {},
                          folder, is_new=False)
+
+    def _import_single_files(self):
+        """选择单张或多张图片文件，复制到已存在的目录对象"""
+        db = app_state.db
+        objects = db.get_all_objects(include_r18=True)
+        dir_objs = [o for o in objects if o["type"] == "directory"]
+        if not dir_objs:
+            QMessageBox.information(self, "提示", "还没有目录对象，请先新建")
+            return
+
+        sel_dlg = _SelectObjectDialog(dir_objs, self)
+        if sel_dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        target_obj = sel_dlg.selected_object()
+        if not target_obj:
+            return
+
+        from config import SUPPORTED_FORMATS
+        ext_filter = "图片文件 (" + " ".join(f"*{e}" for e in SUPPORTED_FORMATS) + ")"
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "选择要导入的图片文件", "", ext_filter
+        )
+        if not paths:
+            return
+
+        storage_obj_dir = (target_obj.get("storage_path") or "").strip()
+        if not storage_obj_dir or not os.path.isdir(storage_obj_dir):
+            storage_obj_dir = os.path.join(self.storage_root, target_obj["name"])
+        os.makedirs(storage_obj_dir, exist_ok=True)
+
+        from utils.file_utils import copy_image_to_storage
+        ok, fail = 0, 0
+        cur_count = db.get_image_count(target_obj["id"])
+        for src in paths:
+            dest = copy_image_to_storage(src, storage_obj_dir)
+            if dest:
+                img_id = str(uuid.uuid4())
+                db.add_image(img_id, target_obj["id"],
+                             os.path.basename(dest), dest, cur_count + ok)
+                ok += 1
+            else:
+                fail += 1
+
+        msg = f"成功导入 {ok} 张图片"
+        if fail:
+            msg += f"，{fail} 张失败"
+        QMessageBox.information(self, "导入完成", msg)
+        self.accept()
+        self.import_done.emit(target_obj["id"])
 
     def _run_import(self, obj_id, name, tags, source_dir, is_new):
         prog = QProgressDialog("正在导入图片…", "取消", 0, 100, self)
