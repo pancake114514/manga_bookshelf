@@ -79,17 +79,6 @@ QCheckBox {
     color: #c8b8e8;
     spacing: 6px;
 }
-QCheckBox::indicator {
-    width: 16px; height: 16px;
-    border: 1px solid #4a3f6b;
-    border-radius: 4px;
-    background: #1e1c2a;
-}
-QCheckBox::indicator:checked {
-    background: #7a55aa;
-    border-color: #9a7adb;
-    image: none;
-}
 
 QComboBox {
     background-color: #1e1c2a;
