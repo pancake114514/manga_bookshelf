@@ -7,8 +7,8 @@ from PyQt6.QtWidgets import (
     QPushButton, QScrollArea, QFrame, QSizePolicy, QMenu,
     QMessageBox, QApplication
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QThread, QTimer, QPoint
-from PyQt6.QtGui import QPixmap, QColor, QPainter, QFont, QAction, QCursor
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QThread, QTimer, QPoint, QRect
+from PyQt6.QtGui import QPixmap, QColor, QPainter, QFont, QAction, QCursor, QPainterPath
 from config import app_state, THUMBNAIL_SIZE
 from .widgets import (
     make_placeholder_pixmap, TagFlowWidget, ClickableLabel,
@@ -79,16 +79,14 @@ class ObjectCard(QFrame):
         container_layout.setSpacing(0)
 
         # 封面图区域
-        cover_size_w = self.CARD_W - self.COVER_MARGIN * 2
-        cover_size_h = 230 - self.COVER_MARGIN
+        self._cover_w = self.CARD_W - self.COVER_MARGIN * 2
+        self._cover_h = 230 - self.COVER_MARGIN
         self.cover_label = QLabel()
-        self.cover_label.setFixedSize(cover_size_w, cover_size_h)
+        self.cover_label.setFixedSize(self._cover_w, self._cover_h)
         self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.cover_label.setStyleSheet("""
-            border-radius: 10px 10px 0 0;
-            background: #1a1828;
-        """)
-        pm = make_placeholder_pixmap(cover_size_w, cover_size_h, "📖", "#1a1828")
+        self.cover_label.setStyleSheet("background: #1a1828;")
+        # 生成带圆角的占位图
+        pm = self._create_rounded_pixmap(self._cover_w, self._cover_h, "📖", "#1a1828")
         self.cover_label.setPixmap(pm)
         container_layout.addWidget(self.cover_label)
         layout.addWidget(cover_container)
@@ -143,19 +141,54 @@ class ObjectCard(QFrame):
         self._loader.loaded.connect(self._on_thumb_loaded)
         self._loader.start()
 
+    def _create_rounded_pixmap(self, w: int, h: int, text: str, bg_color: str) -> QPixmap:
+        """创建带顶部圆角的图片"""
+        pm = QPixmap(w, h)
+        pm.fill(QColor(bg_color))
+        if text:
+            p = QPainter(pm)
+            p.setPen(QColor("#5a5070"))
+            font = p.font()
+            font.setPointSize(9)
+            p.setFont(font)
+            p.drawText(pm.rect(), Qt.AlignmentFlag.AlignCenter, text)
+            p.end()
+        return pm
+
+    def _get_top_rounded_path(self, w: int, h: int, r: int) -> QPainterPath:
+        """获取顶部圆角的路径"""
+        path = QPainterPath()
+        path.moveTo(0, r)
+        path.arcTo(0, 0, r * 2, r * 2, 180, 90)  # 左上圆角
+        path.lineTo(w - r, 0)
+        path.arcTo(w - r * 2, 0, r * 2, r * 2, 270, 90)  # 右上圆角
+        path.lineTo(w, h)
+        path.lineTo(0, h)
+        path.closeSubpath()
+        return path
+
     def _on_thumb_loaded(self, obj_id: str, thumb_path: str):
         if obj_id == self.obj["id"] and os.path.isfile(thumb_path):
-            pm = QPixmap(thumb_path)
-            cover_w = self.CARD_W - self.COVER_MARGIN * 2
-            cover_h = 230 - self.COVER_MARGIN
-            pm = pm.scaled(cover_w, cover_h,
-                           Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                           Qt.TransformationMode.SmoothTransformation)
+            src_pm = QPixmap(thumb_path)
+            cover_w = self._cover_w
+            cover_h = self._cover_h
+            src_pm = src_pm.scaled(cover_w, cover_h,
+                                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                                    Qt.TransformationMode.SmoothTransformation)
             # 居中裁剪
-            if pm.width() > cover_w or pm.height() > cover_h:
-                x = (pm.width() - cover_w) // 2
-                y = (pm.height() - cover_h) // 2
-                pm = pm.copy(x, y, cover_w, cover_h)
+            if src_pm.width() > cover_w or src_pm.height() > cover_h:
+                x = (src_pm.width() - cover_w) // 2
+                y = (src_pm.height() - cover_h) // 2
+                src_pm = src_pm.copy(x, y, cover_w, cover_h)
+
+            # 创建带圆角的输出图片
+            pm = QPixmap(cover_w, cover_h)
+            pm.fill(QColor("#1a1828"))
+            p = QPainter(pm)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            p.setClipPath(self._get_top_rounded_path(cover_w, cover_h, self.BORDER_RADIUS))
+            p.drawPixmap(0, 0, src_pm)
+            p.end()
             self.cover_label.setPixmap(pm)
 
     def set_pixmap(self, pm: QPixmap):
