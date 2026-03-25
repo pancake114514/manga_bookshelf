@@ -104,7 +104,7 @@ class DirectoryView(QWidget):
         # ── 顶部信息栏 ────────────────────────────────────────────────────────
         info_bar = QFrame()
         info_bar.setObjectName("topbar")
-        info_bar.setMinimumHeight(130)
+        info_bar.setMinimumHeight(216)
         info_bar.setStyleSheet("""
             QFrame#topbar {
                 background: #0e0d18;
@@ -115,23 +115,37 @@ class DirectoryView(QWidget):
         info_layout.setContentsMargins(16, 12, 16, 12)
         info_layout.setSpacing(16)
 
-        # 返回按钮
+        # ── 左侧固定区域（返回按钮 + 封面），固定宽度不随窗口缩放移动 ──
+        left_widget = QWidget()
+        left_widget.setFixedWidth(244)  # 80(btn) + 12(spacing) + 144(cover) + 8(余量)
+        left_widget.setStyleSheet("background: transparent;")
+        left_layout = QHBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(12)
+
         back_btn = QPushButton("◀ 书架")
         back_btn.setFixedWidth(80)
         back_btn.clicked.connect(self.back_requested)
-        info_layout.addWidget(back_btn, alignment=Qt.AlignmentFlag.AlignTop)
+        left_layout.addWidget(back_btn, alignment=Qt.AlignmentFlag.AlignTop)
 
-        # 封面缩略图
         self.cover_thumb = QLabel()
-        self.cover_thumb.setFixedSize(72, 96)
+        self.cover_thumb.setFixedSize(144, 192)
         self.cover_thumb.setStyleSheet("border-radius: 6px; background: #0e0d18;")
         self.cover_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        pm = make_placeholder_pixmap(72, 96, "📖", "#1a1828")
+        pm = make_placeholder_pixmap(144, 192, "📖", "#1a1828")
         self.cover_thumb.setPixmap(pm)
-        info_layout.addWidget(self.cover_thumb)
+        left_layout.addWidget(self.cover_thumb)
 
-        # 名称 + 标签
-        meta = QVBoxLayout()
+        info_layout.addWidget(left_widget, alignment=Qt.AlignmentFlag.AlignTop)
+
+        # ── 右侧弹性区域（标题 + 标签），随窗口宽度伸缩 ──
+        right_widget = QWidget()
+        right_widget.setStyleSheet("background: transparent;")
+        right_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        info_layout.addWidget(right_widget)
+
+        meta = QVBoxLayout(right_widget)
+        meta.setContentsMargins(0, 0, 0, 0)
         meta.setSpacing(6)
 
         name_row = QHBoxLayout()
@@ -185,7 +199,6 @@ class DirectoryView(QWidget):
             no_tag.setStyleSheet("color: #3a3060; font-size: 11px;")
             meta.addWidget(no_tag)
         meta.addStretch()
-        info_layout.addLayout(meta)
         layout.addWidget(info_bar)
 
         # ── 图片网格区域 ──────────────────────────────────────────────────────
@@ -213,9 +226,9 @@ class DirectoryView(QWidget):
                 cover = images[0]["filepath"]
         if cover and os.path.isfile(cover):
             from utils.thumbnail import generate_thumbnail
-            path = generate_thumbnail(cover, self.cache_dir, (72, 96))
+            path = generate_thumbnail(cover, self.cache_dir, (144, 192))
             if path:
-                pm = QPixmap(path).scaled(72, 96,
+                pm = QPixmap(path).scaled(144, 192,
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation)
                 self.cover_thumb.setPixmap(pm)
