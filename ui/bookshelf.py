@@ -41,13 +41,14 @@ class ObjectCard(QFrame):
 
     CARD_W = 180
     CARD_H = 280
-    COVER_MARGIN = 1  # 封面与边框的间距
+    COVER_MARGIN = 1
     BORDER_RADIUS = 10
 
     def __init__(self, obj: dict, cache_dir: str, parent=None):
         super().__init__(parent)
         self.obj = obj
         self.cache_dir = cache_dir
+        self._loader = None   # 持有线程引用，防止提前 GC
         self.setFixedSize(self.CARD_W, self.CARD_H)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setStyleSheet("""
@@ -69,7 +70,6 @@ class ObjectCard(QFrame):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # 封面图区域容器（用于添加 margin）
         cover_container = QWidget()
         cover_container.setStyleSheet("background: transparent;")
         container_layout = QVBoxLayout(cover_container)
@@ -78,7 +78,6 @@ class ObjectCard(QFrame):
         )
         container_layout.setSpacing(0)
 
-        # 封面图区域
         cover_size_w = self.CARD_W - self.COVER_MARGIN * 2
         cover_size_h = 230 - self.COVER_MARGIN
         self.cover_label = QLabel()
@@ -93,7 +92,6 @@ class ObjectCard(QFrame):
         container_layout.addWidget(self.cover_label)
         layout.addWidget(cover_container)
 
-        # 名称区域
         info = QWidget()
         info.setStyleSheet("background: transparent; border: none;")
         info_layout = QVBoxLayout(info)
@@ -108,7 +106,6 @@ class ObjectCard(QFrame):
             self.obj["name"], Qt.TextElideMode.ElideRight, self.CARD_W - 16))
         info_layout.addWidget(name)
 
-        # 图片数量
         count = app_state.db.get_image_count(self.obj["id"])
         count_lbl = QLabel(f"{count} 张图片")
         count_lbl.setStyleSheet("color: #5a5070; font-size: 10px; border: none;")
@@ -116,7 +113,6 @@ class ObjectCard(QFrame):
 
         layout.addWidget(info)
 
-        # R18 角标
         if self.obj.get("tags", {}).get("r18"):
             badge = QLabel("R18", self)
             badge.setFixedSize(32, 18)
@@ -131,7 +127,6 @@ class ObjectCard(QFrame):
     def _load_cover(self):
         cover = self.obj.get("cover_image")
         if not cover:
-            # 尝试获取第一张图片
             images = app_state.db.get_images(self.obj["id"])
             if images:
                 cover = images[0]["filepath"]
@@ -144,6 +139,12 @@ class ObjectCard(QFrame):
         self._loader.start()
 
     def _on_thumb_loaded(self, obj_id: str, thumb_path: str):
+        # 控件可能已被销毁，判断是否还存在
+        try:
+            if not self.isVisible() and not self.cover_label:
+                return
+        except RuntimeError:
+            return
         if obj_id == self.obj["id"] and os.path.isfile(thumb_path):
             pm = QPixmap(thumb_path)
             cover_w = self.CARD_W - self.COVER_MARGIN * 2
@@ -151,20 +152,14 @@ class ObjectCard(QFrame):
             pm = pm.scaled(cover_w, cover_h,
                            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                            Qt.TransformationMode.SmoothTransformation)
-            # 居中裁剪
             if pm.width() > cover_w or pm.height() > cover_h:
                 x = (pm.width() - cover_w) // 2
                 y = (pm.height() - cover_h) // 2
                 pm = pm.copy(x, y, cover_w, cover_h)
             self.cover_label.setPixmap(pm)
 
-    def set_pixmap(self, pm: QPixmap):
-        self.cover_label.setPixmap(pm)
-
     def update_object(self, obj: dict):
         self.obj = obj
-
-    # ── 事件 ──────────────────────────────────────────────────────────────────
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -185,7 +180,6 @@ class ObjectCard(QFrame):
         act_cover = menu.addAction("🖼  设置封面")
         menu.addSeparator()
         act_del = menu.addAction("🗑  删除对象")
-        act_del.setProperty("color", "#e86a6a")
 
         action = menu.exec(event.globalPos())
         if action == act_edit:
@@ -197,11 +191,8 @@ class ObjectCard(QFrame):
 
 
 class BookshelfView(QWidget):
-    """
-    书架主视图
-    """
     object_opened = pyqtSignal(dict)
-    tags_updated = pyqtSignal()   # 标签有变动（编辑/删除），通知外部刷新侧边栏
+    tags_updated = pyqtSignal()
 
     def __init__(self, storage_root: str, parent=None):
         super().__init__(parent)
@@ -209,6 +200,9 @@ class BookshelfView(QWidget):
         self.cache_dir = os.path.join(storage_root, ".thumbcache")
         os.makedirs(self.cache_dir, exist_ok=True)
         self._cards: dict[str, ObjectCard] = {}
+        self._resize_timer = QTimer()
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.timeout.connect(self._relayout)
         self._build()
 
     def _build(self):
@@ -216,7 +210,6 @@ class BookshelfView(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # 滚动区域
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -234,12 +227,12 @@ class BookshelfView(QWidget):
 
         self.empty_label = QLabel("书架空空如也\n点击右上角「导入」添加图片吧 📚")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_label.setStyleSheet("color: #3a3060; font-size: 18px; line-height: 2;")
+        self.empty_label.setStyleSheet("color: #3a3060; font-size: 18px;")
         self.empty_label.hide()
         layout.addWidget(self.empty_label)
 
     def load_objects(self, objects: list):
-        # 清除旧卡片
+        """完整重建卡片列表，仅在数据变化时调用"""
         self._cards.clear()
         while self.grid_layout.count():
             item = self.grid_layout.takeAt(0)
@@ -254,9 +247,7 @@ class BookshelfView(QWidget):
         self.empty_label.hide()
         self.scroll.show()
 
-        effective_w = self.width() if self.width() > 200 else 900
-        cols = max(1, (effective_w - 48) // (ObjectCard.CARD_W + 20))
-
+        cols = self._calc_cols()
         for i, obj in enumerate(objects):
             card = ObjectCard(obj, self.cache_dir)
             card.double_clicked.connect(self.object_opened)
@@ -268,19 +259,29 @@ class BookshelfView(QWidget):
             self._cards[obj["id"]] = card
 
     def refresh(self):
-        """重新从数据库加载"""
         objects = app_state.db.get_all_objects(include_r18=app_state.show_r18)
         self.load_objects(objects)
 
+    def _calc_cols(self) -> int:
+        effective_w = self.width() if self.width() > 200 else 900
+        return max(1, (effective_w - 48) // (ObjectCard.CARD_W + 20))
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # 延迟重排，避免 resize 时频繁重绘
-        QTimer.singleShot(100, self._relayout)
+        # 用单次定时器防抖，resize 停止 200ms 后才重排，避免连续触发
+        self._resize_timer.start(200)
 
     def _relayout(self):
-        objects = [c.obj for c in self._cards.values()]
-        if objects:
-            self.load_objects(objects)
+        """仅重新排列已有卡片，不销毁重建，不触发缩略图加载"""
+        cols = self._calc_cols()
+        items = []
+        while self.grid_layout.count():
+            item = self.grid_layout.takeAt(0)
+            if item.widget():
+                items.append(item.widget())
+        for i, card in enumerate(items):
+            row, col = divmod(i, cols)
+            self.grid_layout.addWidget(card, row, col)
 
     # ── 右键菜单动作 ──────────────────────────────────────────────────────────
 
@@ -312,8 +313,6 @@ class BookshelfView(QWidget):
         if not images:
             QMessageBox.information(self, "提示", "该对象中没有图片")
             return
-
-        # 弹出当前目录中图片选择
         storage = app_state.db.get_object(obj["id"]).get("storage_path", "")
         path, _ = QFileDialog.getOpenFileName(
             self, "选择封面图片", storage,
