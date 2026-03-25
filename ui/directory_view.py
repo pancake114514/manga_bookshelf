@@ -101,65 +101,59 @@ class DirectoryView(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # ── 顶部信息栏 ────────────────────────────────────────────────────────
+        # ── 顶部信息栏（纵向：返回按钮 → 封面+元信息横排）────────────────────
         info_bar = QFrame()
         info_bar.setObjectName("topbar")
-        info_bar.setMinimumHeight(216)
+        info_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         info_bar.setStyleSheet("""
             QFrame#topbar {
                 background: #0e0d18;
                 border-bottom: 1px solid #2a2540;
             }
         """)
-        info_layout = QHBoxLayout(info_bar)
-        info_layout.setContentsMargins(16, 12, 16, 12)
-        info_layout.setSpacing(16)
 
-        # ── 左侧固定区域（返回按钮 + 封面），固定宽度不随窗口缩放移动 ──
-        left_widget = QWidget()
-        left_widget.setFixedWidth(244)  # 80(btn) + 12(spacing) + 144(cover) + 8(余量)
-        left_widget.setStyleSheet("background: transparent;")
-        left_layout = QHBoxLayout(left_widget)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(12)
+        # 外层纵向布局
+        info_outer = QVBoxLayout(info_bar)
+        info_outer.setContentsMargins(16, 10, 16, 12)
+        info_outer.setSpacing(10)
 
+        # 第一行：返回按钮（靠左）
         back_btn = QPushButton("◀ 书架")
         back_btn.setFixedWidth(80)
         back_btn.clicked.connect(self.back_requested)
-        left_layout.addWidget(back_btn, alignment=Qt.AlignmentFlag.AlignTop)
+        info_outer.addWidget(back_btn, alignment=Qt.AlignmentFlag.AlignLeft)
 
+        # 第二行：封面 + 右侧元信息
+        content_row = QHBoxLayout()
+        content_row.setContentsMargins(0, 0, 0, 0)
+        content_row.setSpacing(16)
+
+        # 封面缩略图（固定尺寸）
         self.cover_thumb = QLabel()
         self.cover_thumb.setFixedSize(144, 192)
-        self.cover_thumb.setStyleSheet("border-radius: 6px; background: #0e0d18;")
+        self.cover_thumb.setStyleSheet("border-radius: 6px; background: #1a1828;")
         self.cover_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
         pm = make_placeholder_pixmap(144, 192, "📖", "#1a1828")
         self.cover_thumb.setPixmap(pm)
-        left_layout.addWidget(self.cover_thumb)
+        content_row.addWidget(self.cover_thumb, alignment=Qt.AlignmentFlag.AlignTop)
 
-        info_layout.addWidget(left_widget, alignment=Qt.AlignmentFlag.AlignTop)
-
-        # ── 右侧弹性区域（标题 + 标签），随窗口宽度伸缩 ──
-        right_widget = QWidget()
-        right_widget.setStyleSheet("background: transparent;")
-        right_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        info_layout.addWidget(right_widget)
-
-        meta = QVBoxLayout(right_widget)
-        meta.setContentsMargins(0, 0, 0, 0)
-        meta.setSpacing(6)
+        # 右侧：标题 + 阅读按钮 + 标签
+        meta = QVBoxLayout()
+        meta.setContentsMargins(0, 4, 0, 0)
+        meta.setSpacing(8)
 
         name_row = QHBoxLayout()
+        name_row.setSpacing(12)
         self.title_label = QLabel(self.obj["name"])
         self.title_label.setStyleSheet("font-size: 18px; font-weight: 700; color: #f0e8ff;")
+        self.title_label.setWordWrap(True)
         name_row.addWidget(self.title_label)
         name_row.addStretch()
-
-        # 阅读按钮
         self.read_btn = QPushButton("▶ 继续阅读")
         self.read_btn.setObjectName("accent")
         self.read_btn.setFixedWidth(110)
         self.read_btn.clicked.connect(self._on_continue_read)
-        name_row.addWidget(self.read_btn)
+        name_row.addWidget(self.read_btn, alignment=Qt.AlignmentFlag.AlignTop)
         meta.addLayout(name_row)
 
         # 按类别逐行展示标签
@@ -171,8 +165,6 @@ class DirectoryView(QWidget):
             if not vals:
                 continue
             if cat == "r18":
-                if not vals:
-                    continue
                 display = [("R-18", "r18")]
             elif isinstance(vals, list):
                 display = [(v, cat) for v in vals if v]
@@ -185,9 +177,7 @@ class DirectoryView(QWidget):
             row.setSpacing(4)
             row.setContentsMargins(0, 0, 0, 0)
             cat_lbl = QLabel(TAG_CATEGORIES[cat] + "：")
-            cat_lbl.setStyleSheet(
-                "color: #5a5070; font-size: 11px; min-width: 36px;"
-            )
+            cat_lbl.setStyleSheet("color: #5a5070; font-size: 11px;")
             cat_lbl.setFixedWidth(40)
             row.addWidget(cat_lbl)
             for text, category in display:
@@ -198,7 +188,9 @@ class DirectoryView(QWidget):
             no_tag = QLabel("暂无标签")
             no_tag.setStyleSheet("color: #3a3060; font-size: 11px;")
             meta.addWidget(no_tag)
-        meta.addStretch()
+
+        content_row.addLayout(meta)
+        info_outer.addLayout(content_row)
         layout.addWidget(info_bar)
 
         # ── 图片网格区域 ──────────────────────────────────────────────────────
