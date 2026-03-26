@@ -160,6 +160,8 @@ class DirectoryView(QWidget):
         name_row.addStretch()
         self.read_btn = QPushButton("▶ 继续阅读")
         self.read_btn.setObjectName("accent")
+        # 在这里添加 color 属性
+        self.read_btn.setStyleSheet("color: #2A2418; font-weight: bold;")
         self.read_btn.setFixedWidth(110)
         self.read_btn.clicked.connect(self._on_continue_read)
         name_row.addWidget(self.read_btn, alignment=Qt.AlignmentFlag.AlignTop)

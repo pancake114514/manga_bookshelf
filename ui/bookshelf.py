@@ -178,14 +178,32 @@ class ObjectCard(QFrame):
 
     def contextMenuEvent(self, event):
         menu = QMenu(self)
+
+        # --- 关键修改：设置窗口标志，去掉边框并允许透明 ---
+        menu.setWindowFlags(
+            menu.windowFlags() | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
+        menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)  # 允许透明，圆角才真正有效
+
         menu.setStyleSheet("""
             QMenu {
-                background: #f5f0e8; border: 1px solid #c8bfaa;
-                border-radius: 8px; padding: 4px;
+                background: #f5f0e8; 
+                border: 1px solid #c8bfaa;
+                border-radius: 8px; 
+                padding: 4px;
             }
-            QMenu::item { padding: 8px 20px; border-radius: 4px; color: #2a2418; }
-            QMenu::item:selected { background: #e4ddd2; }
-            QMenu::separator { background: #c8bfaa; height: 1px; margin: 4px 8px; }
+            QMenu::item { 
+                padding: 8px 20px; 
+                border-radius: 4px; /* 菜单项悬停时的圆角 */
+                color: #2a2418; 
+            }
+            QMenu::item:selected { 
+                background: #e4ddd2; 
+            }
+            QMenu::separator { 
+                background: #c8bfaa; 
+                height: 1px; 
+                margin: 4px 8px; 
+            }
         """)
         act_edit = menu.addAction("✏️  编辑信息")
         act_cover = menu.addAction("🖼  设置封面")
