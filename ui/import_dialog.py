@@ -36,7 +36,9 @@ class ImportWorker(QThread):
         try:
             import sys
             sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-            from utils.file_utils import collect_images, copy_image_to_storage
+            from utils.file_utils import (
+                collect_images, copy_image_with_seq_name, next_seq_number
+            )
             db = app_state.db
 
             storage_obj_dir = os.path.join(self.storage_root, self.obj_name)
@@ -49,18 +51,22 @@ class ImportWorker(QThread):
 
             images = collect_images(self.source_dir)
             total = len(images)
+            # 接续已有文件的序号
+            seq = next_seq_number(storage_obj_dir)
+            sort_start = db.get_image_count(self.obj_id)
             for i, src in enumerate(images):
-                dest = copy_image_to_storage(src, storage_obj_dir)
+                filename, dest = copy_image_with_seq_name(src, storage_obj_dir, seq)
                 if dest:
                     img_id = str(uuid.uuid4())
-                    db.add_image(img_id, self.obj_id,
-                                 os.path.basename(dest), dest, i)
+                    db.add_image(img_id, self.obj_id, filename, dest, sort_start + i)
+                    seq += 1
                 self.progress.emit(i + 1, total)
 
-            # 自动设置封面为第一张
-            first_img = db.get_images(self.obj_id)
-            if first_img and not db.get_object(self.obj_id).get("cover_image"):
-                db.update_object_cover(self.obj_id, first_img[0]["filepath"])
+            # 自动设置封面为第一张（仅新建对象时）
+            if self.is_new:
+                first_img = db.get_images(self.obj_id)
+                if first_img and not db.get_object(self.obj_id).get("cover_image"):
+                    db.update_object_cover(self.obj_id, first_img[0]["filepath"])
 
             self.finished.emit(self.obj_id)
         except Exception as e:
@@ -254,16 +260,21 @@ class ImportDialog(QDialog):
             storage_obj_dir = os.path.join(self.storage_root, target_obj["name"])
         os.makedirs(storage_obj_dir, exist_ok=True)
 
-        from utils.file_utils import copy_image_to_storage
+        from utils.file_utils import copy_image_with_seq_name, next_seq_number
         ok, fail = 0, 0
         cur_count = db.get_image_count(target_obj["id"])
-        for src in paths:
-            dest = copy_image_to_storage(src, storage_obj_dir)
+        # 按文件名排序后导入，接续已有序号
+        seq = next_seq_number(storage_obj_dir)
+        for src in sorted(paths, key=lambda p: os.path.basename(p)):
+            if os.path.basename(src).startswith("."):
+                continue
+            filename, dest = copy_image_with_seq_name(src, storage_obj_dir, seq)
             if dest:
                 img_id = str(uuid.uuid4())
                 db.add_image(img_id, target_obj["id"],
-                             os.path.basename(dest), dest, cur_count + ok)
+                             filename, dest, cur_count + ok)
                 ok += 1
+                seq += 1
             else:
                 fail += 1
 

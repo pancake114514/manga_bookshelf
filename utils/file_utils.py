@@ -3,59 +3,60 @@
 """
 import os
 import shutil
-import uuid
 from config import SUPPORTED_FORMATS
 
 
 def collect_images(directory: str) -> list[str]:
-    """收集目录中所有支持格式的图片，按文件名排序"""
+    """
+    收集目录中所有支持格式的图片，按文件名升序排列。
+    以 '.' 开头的隐藏文件不收集。
+    """
     result = []
     for fname in sorted(os.listdir(directory)):
+        if fname.startswith("."):
+            continue
         if os.path.splitext(fname)[1].lower() in SUPPORTED_FORMATS:
             result.append(os.path.join(directory, fname))
     return result
 
 
-def copy_image_to_storage(src_path: str, storage_obj_dir: str, overwrite: bool = True) -> str | None:
+def next_seq_number(storage_obj_dir: str) -> int:
     """
-    将图片复制到对象存储目录。
-    如文件名冲突：
-        - overwrite=True 时直接覆盖（默认）
-        - overwrite=False 时添加 uuid 后缀
-    返回目标路径，失败返回 None。
+    扫描存储目录，返回下一个可用序号（已有文件最大序号 + 1，从 1 开始）。
+    只识别形如 000001.ext 的文件名（纯数字部分）。
+    """
+    max_seq = 0
+    if os.path.isdir(storage_obj_dir):
+        for fname in os.listdir(storage_obj_dir):
+            if fname.startswith("."):
+                continue
+            base, ext = os.path.splitext(fname)
+            if ext.lower() in SUPPORTED_FORMATS and base.isdigit():
+                max_seq = max(max_seq, int(base))
+    return max_seq + 1
+
+
+def copy_image_with_seq_name(src_path: str, storage_obj_dir: str,
+                              seq: int) -> tuple[str, str] | tuple[None, None]:
+    """
+    将图片复制到存储目录，以 7 位序号重命名（如 000001.jpg）。
+    返回 (filename, dest_path)，失败返回 (None, None)。
     """
     os.makedirs(storage_obj_dir, exist_ok=True)
-    filename = os.path.basename(src_path)
+    ext = os.path.splitext(src_path)[1].lower()
+    filename = f"{seq:07d}{ext}"
     dest = os.path.join(storage_obj_dir, filename)
-    if os.path.exists(dest):
-        if overwrite:
-            # 直接覆盖同名文件
-            pass
-        else:
-            # 添加 uuid 后缀避免冲突
-            base, ext = os.path.splitext(filename)
-            filename = f"{base}_{uuid.uuid4().hex[:6]}{ext}"
-            dest = os.path.join(storage_obj_dir, filename)
+    # 序号冲突时继续递增（理论上不应发生，防御性处理）
+    while os.path.exists(dest):
+        seq += 1
+        filename = f"{seq:07d}{ext}"
+        dest = os.path.join(storage_obj_dir, filename)
     try:
         shutil.copy2(src_path, dest)
-        return dest
+        return filename, dest
     except Exception as e:
         print(f"[FileUtils] Copy error: {e}")
-        return None
-
-
-def import_directory_to_storage(src_dir: str, storage_obj_dir: str) -> list[tuple[str, str]]:
-    """
-    将源目录中的所有图片复制到存储目录。
-    返回 [(filename, dest_path), ...] 列表。
-    """
-    images = collect_images(src_dir)
-    results = []
-    for src in images:
-        dest = copy_image_to_storage(src, storage_obj_dir)
-        if dest:
-            results.append((os.path.basename(dest), dest))
-    return results
+        return None, None
 
 
 def validate_windows_path_name(name: str) -> tuple[bool, str]:
