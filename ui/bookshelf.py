@@ -7,8 +7,8 @@ from PyQt6.QtWidgets import (
     QPushButton, QScrollArea, QFrame, QSizePolicy, QMenu,
     QMessageBox, QApplication
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QThread, QTimer, QPoint, QRect
-from PyQt6.QtGui import QPixmap, QColor, QPainter, QFont, QAction, QCursor, QPainterPath
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QThread, QTimer, QPoint
+from PyQt6.QtGui import QPixmap, QColor, QPainter, QFont, QAction, QCursor
 from config import app_state, THUMBNAIL_SIZE
 from .widgets import (
     make_placeholder_pixmap, TagFlowWidget, ClickableLabel,
@@ -161,6 +161,16 @@ class ObjectCard(QFrame):
     def update_object(self, obj: dict):
         self.obj = obj
 
+    def _open_in_explorer(self):
+        import subprocess
+        obj = app_state.db.get_object(self.obj["id"])
+        path = (obj or {}).get("storage_path", "")
+        if path and os.path.isdir(path):
+            subprocess.Popen(["explorer", os.path.normpath(path)])
+        else:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(None, "提示", "找不到对应的存储目录")
+
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.double_clicked.emit(self.obj)
@@ -178,6 +188,7 @@ class ObjectCard(QFrame):
         """)
         act_edit = menu.addAction("✏️  编辑信息")
         act_cover = menu.addAction("🖼  设置封面")
+        act_explore = menu.addAction("📂  在资源管理器中打开")
         menu.addSeparator()
         act_del = menu.addAction("🗑  删除对象")
 
@@ -186,6 +197,8 @@ class ObjectCard(QFrame):
             self.edit_requested.emit(self.obj)
         elif action == act_cover:
             self.cover_change_requested.emit(self.obj)
+        elif action == act_explore:
+            self._open_in_explorer()
         elif action == act_del:
             self.delete_requested.emit(self.obj)
 

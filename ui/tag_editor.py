@@ -3,7 +3,7 @@
 """
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QCheckBox, QScrollArea, QWidget, QFrame,
+    QPushButton, QScrollArea, QWidget, QFrame, QCheckBox,
     QDialogButtonBox, QMessageBox, QCompleter, QListWidget,
     QListWidgetItem, QAbstractItemView, QGroupBox, QSizePolicy,
     QSpacerItem
@@ -12,6 +12,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from config import TAG_CATEGORIES, TAG_CATEGORY_ORDER, app_state
 from .widgets import SectionLabel, Divider, TagBadge
+from .sidebar import CheckBox as R18CheckBox
 
 
 class MultiTagInput(QWidget):
@@ -137,9 +138,8 @@ class TagEditorDialog(QDialog):
         for cat in TAG_CATEGORY_ORDER:
             label = TAG_CATEGORIES[cat]
             if cat == "r18":
-                cb = QCheckBox(f"  {label}")
-                cb.setChecked(bool(tags.get("r18", False)))
-                cb.setStyleSheet("font-size: 13px; color: #e86a6a; padding: 4px 0;")
+                cb = R18CheckBox(f"  {label}")
+                cb.setChecked(bool(tags.get("r18", False)), emit=False)
                 self.tag_inputs[cat] = cb
                 inner_layout.addWidget(cb)
             elif cat == "censored":
@@ -174,6 +174,10 @@ class TagEditorDialog(QDialog):
         layout.addWidget(btns)
 
     def _on_accept(self):
+        # 把所有输入框中未点击「添加」的文字自动提交
+        for widget in self.tag_inputs.values():
+            if isinstance(widget, MultiTagInput):
+                widget._add_current()
         name = self.name_input.text().strip()
         if not name:
             from PyQt6.QtWidgets import QMessageBox
@@ -187,7 +191,7 @@ class TagEditorDialog(QDialog):
     def get_tags(self) -> dict:
         result = {}
         for cat, widget in self.tag_inputs.items():
-            if isinstance(widget, QCheckBox):
+            if isinstance(widget, R18CheckBox):
                 result[cat] = widget.isChecked()
             else:
                 result[cat] = widget.get_values()
