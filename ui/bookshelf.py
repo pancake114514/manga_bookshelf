@@ -12,7 +12,7 @@ from PyQt6.QtGui import QPixmap, QColor, QPainter, QFont, QAction, QCursor
 from config import app_state, THUMBNAIL_SIZE
 from .widgets import (
     make_placeholder_pixmap, TagFlowWidget, ClickableLabel,
-    SectionLabel, Divider, LoadingLabel
+    SectionLabel, Divider, LoadingLabel, C
 )
 
 
@@ -51,16 +51,16 @@ class ObjectCard(QFrame):
         self._loader = None   # 持有线程引用，防止提前 GC
         self.setFixedSize(self.CARD_W, self.CARD_H)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setStyleSheet("""
-            QFrame {
-                background-color: #1a1828;
-                border: 1px solid #2a2540;
+        self.setStyleSheet(f"""
+            QFrame {{
+                background-color: {C['bg']};
+                border: 1px solid {C['border']};
                 border-radius: 10px;
-            }
-            QFrame:hover {
-                border-color: #5c3f8a;
-                background-color: #1e1c30;
-            }
+            }}
+            QFrame:hover {{
+                border-color: {C['accent_bd']};
+                background-color: {C['accent_bg']};
+            }}
         """)
         self._build()
         self._load_cover()
@@ -83,11 +83,11 @@ class ObjectCard(QFrame):
         self.cover_label = QLabel()
         self.cover_label.setFixedSize(cover_size_w, cover_size_h)
         self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.cover_label.setStyleSheet("""
+        self.cover_label.setStyleSheet(f"""
             border-radius: 10px 10px 0 0;
-            background: #1a1828;
+            background: {C['bg3']};
         """)
-        pm = make_placeholder_pixmap(cover_size_w, cover_size_h, "📖", "#1a1828")
+        pm = make_placeholder_pixmap(cover_size_w, cover_size_h, "📖", C['bg3'])
         self.cover_label.setPixmap(pm)
         container_layout.addWidget(self.cover_label)
         layout.addWidget(cover_container)
@@ -99,7 +99,7 @@ class ObjectCard(QFrame):
         info_layout.setSpacing(2)
 
         name = QLabel(self.obj["name"])
-        name.setStyleSheet("color: #e8e0f0; font-size: 12px; font-weight: 600; border: none;")
+        name.setStyleSheet(f"color: {C['text']}; font-size: 12px; font-weight: 600; border: none;")
         name.setWordWrap(False)
         name.setMaximumWidth(self.CARD_W - 16)
         name.setText(name.fontMetrics().elidedText(
@@ -108,7 +108,7 @@ class ObjectCard(QFrame):
 
         count = app_state.db.get_image_count(self.obj["id"])
         count_lbl = QLabel(f"{count} 张图片")
-        count_lbl.setStyleSheet("color: #5a5070; font-size: 10px; border: none;")
+        count_lbl.setStyleSheet(f"color: {C['text3']}; font-size: 10px; border: none; font-family: 'Georgia', serif;")
         info_layout.addWidget(count_lbl)
 
         layout.addWidget(info)
@@ -117,10 +117,11 @@ class ObjectCard(QFrame):
             badge = QLabel("R18", self)
             badge.setFixedSize(32, 18)
             badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            badge.setStyleSheet("""
-                background-color: #8a1a1a; color: #ffaaaa;
+            badge.setStyleSheet(f"""
+                background-color: #8b2a2a; color: #f5ddd8;
                 font-size: 9px; font-weight: 700;
                 border-radius: 4px;
+                font-family: 'Georgia', serif;
             """)
             badge.move(self.CARD_W - 40, 8)
 
@@ -179,12 +180,12 @@ class ObjectCard(QFrame):
         menu = QMenu(self)
         menu.setStyleSheet("""
             QMenu {
-                background: #1a1828; border: 1px solid #3a2d60;
+                background: #f5f0e8; border: 1px solid #c8bfaa;
                 border-radius: 8px; padding: 4px;
             }
-            QMenu::item { padding: 8px 20px; border-radius: 4px; color: #c8b8e8; }
-            QMenu::item:selected { background: #2a2050; }
-            QMenu::separator { background: #2a2540; height: 1px; margin: 4px 8px; }
+            QMenu::item { padding: 8px 20px; border-radius: 4px; color: #2a2418; }
+            QMenu::item:selected { background: #e4ddd2; }
+            QMenu::separator { background: #c8bfaa; height: 1px; margin: 4px 8px; }
         """)
         act_edit = menu.addAction("✏️  编辑信息")
         act_cover = menu.addAction("🖼  设置封面")
@@ -229,7 +230,7 @@ class BookshelfView(QWidget):
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         self.grid_widget = QWidget()
-        self.grid_widget.setStyleSheet("background: transparent;")
+        self.grid_widget.setStyleSheet("background: #f5f0e8;")
         self.grid_layout = QGridLayout(self.grid_widget)
         self.grid_layout.setContentsMargins(24, 24, 24, 24)
         self.grid_layout.setSpacing(20)
@@ -240,7 +241,7 @@ class BookshelfView(QWidget):
 
         self.empty_label = QLabel("书架空空如也\n点击右上角「导入」添加图片吧 📚")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_label.setStyleSheet("color: #3a3060; font-size: 18px;")
+        self.empty_label.setStyleSheet(f"color: {C['text3']}; font-size: 18px;")
         self.empty_label.hide()
         layout.addWidget(self.empty_label)
 

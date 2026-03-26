@@ -2,8 +2,6 @@
 数据库层 - 使用 SQLite 管理所有数据
 """
 import sqlite3
-import json
-import os
 from typing import Optional, List, Dict, Any
 
 

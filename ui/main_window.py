@@ -11,7 +11,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSize
 from PyQt6.QtGui import QFont, QIcon, QKeySequence, QShortcut
 
 from config import app_state
-from .widgets import STYLE_MAIN, Divider
+from .widgets import STYLE_MAIN, Divider, FramelessMixin, C
 from .sidebar import SidebarWidget
 from .bookshelf import BookshelfView
 from .directory_view import DirectoryView
@@ -48,14 +48,14 @@ class TopBar(QFrame):
         self.search.textChanged.connect(self.search_changed)
         self.search.setStyleSheet("""
             QLineEdit {
-                background: #1a1828;
-                border: 1px solid #2a2540;
+                background: #ffffff;
+                border: 1px solid #c8bfaa;
                 border-radius: 17px;
                 padding: 0 16px;
-                color: #c8b8e8;
+                color: #2a2418;
                 font-size: 13px;
             }
-            QLineEdit:focus { border-color: #5c3f8a; }
+            QLineEdit:focus { border-color: #c4856a; }
         """)
         layout.addWidget(self.search)
         layout.addStretch()
@@ -67,21 +67,21 @@ class TopBar(QFrame):
         import_btn.setObjectName("accent")
         import_btn.setStyleSheet("""
             QPushButton {
-                background: #5c3f8a;
-                border: 1px solid #9a7adb;
+                background: #6b3a2a;
+                border: 1px solid #8b4a35;
                 border-radius: 6px;
-                color: #f0e8ff;
+                color: #f5ede8;
                 font-size: 13px;
                 font-weight: 600;
             }
-            QPushButton:hover { background: #7a55aa; }
-            QPushButton:pressed { background: #3a2568; }
+            QPushButton:hover { background: #8b4a35; }
+            QPushButton:pressed { background: #5a2f20; }
         """)
         import_btn.clicked.connect(self.import_clicked)
         layout.addWidget(import_btn)
 
 
-class MainWindow(QMainWindow):
+class MainWindow(FramelessMixin, QMainWindow):
     def __init__(self, storage_root: str):
         super().__init__()
         self.storage_root = storage_root
@@ -91,6 +91,7 @@ class MainWindow(QMainWindow):
         self._current_obj = None
         self._images_for_viewer: list = []
         self._build()
+        self.setup_frameless("MangaShelf", "📚")
         self._load_shelf()
 
     def _build(self):
@@ -121,12 +122,12 @@ class MainWindow(QMainWindow):
         # 分隔线
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.VLine)
-        sep.setStyleSheet("color: #2a2540; background: #2a2540; border: none; max-width: 1px;")
+        sep.setStyleSheet("color: #c8bfaa; background: #c8bfaa; border: none; max-width: 1px;")
         content.addWidget(sep)
 
         # 堆叠视图
         self.stack = QStackedWidget()
-        self.stack.setStyleSheet("background: #12111a;")
+        self.stack.setStyleSheet("background: #f5f0e8;")
 
         # 书架视图
         self.bookshelf = BookshelfView(self.storage_root)

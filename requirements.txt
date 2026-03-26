@@ -1,2 +1,4 @@
 PyQt6>=6.5.0
 Pillow>=10.0.0
+
+pyqt6-sip

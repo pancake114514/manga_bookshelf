@@ -3,7 +3,7 @@
 """
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QScrollArea, QWidget, QFrame, QCheckBox,
+    QPushButton, QScrollArea, QWidget, QFrame,QCheckBox,
     QDialogButtonBox, QMessageBox, QCompleter, QListWidget,
     QListWidgetItem, QAbstractItemView, QGroupBox, QSizePolicy,
     QSpacerItem
@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from config import TAG_CATEGORIES, TAG_CATEGORY_ORDER, app_state
-from .widgets import SectionLabel, Divider, TagBadge
+from .widgets import SectionLabel, Divider, TagBadge, FramelessDialog, C
 from .sidebar import CheckBox as R18CheckBox
 
 
@@ -97,18 +97,18 @@ class MultiTagInput(QWidget):
         return list(self._values)
 
 
-class TagEditorDialog(QDialog):
+class TagEditorDialog(FramelessDialog):
     """
     标签和名称编辑对话框
     """
     def __init__(self, obj: dict = None, parent=None):
-        super().__init__(parent)
+        super().__init__("编辑对象信息", parent)
         self.obj = obj or {}
         tags = obj.get("tags", {}) if obj else {}
-        self.setWindowTitle("编辑对象信息")
         self.setMinimumWidth(520)
         self.setModal(True)
         self._build(tags)
+        self._install_titlebar()
 
     def _build(self, tags: dict):
         layout = QVBoxLayout(self)
@@ -128,7 +128,9 @@ class TagEditorDialog(QDialog):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("background: #f5f0e8;")
         inner = QWidget()
+        inner.setStyleSheet("background: #f5f0e8;")
         inner_layout = QVBoxLayout(inner)
         inner_layout.setSpacing(8)
         inner_layout.setContentsMargins(0, 0, 8, 0)

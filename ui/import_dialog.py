@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QIcon
 from config import app_state, SUPPORTED_FORMATS
-from .widgets import SectionLabel, Divider
+from .widgets import SectionLabel, Divider, FramelessDialog, C
 from .tag_editor import TagEditorDialog
 import uuid
 
@@ -73,7 +73,7 @@ class ImportWorker(QThread):
             self.error.emit(str(e))
 
 
-class ImportDialog(QDialog):
+class ImportDialog(FramelessDialog):
     """
     导入对话框：
     - 新建目录对象（选择文件夹）
@@ -82,12 +82,12 @@ class ImportDialog(QDialog):
     import_done = pyqtSignal(str)   # 导入完成，传 obj_id
 
     def __init__(self, storage_root: str, parent=None):
-        super().__init__(parent)
+        super().__init__("导入图片", parent)
         self.storage_root = storage_root
-        self.setWindowTitle("导入图片")
         self.setMinimumWidth(480)
         self.setModal(True)
         self._build()
+        self._install_titlebar("📥")
 
     def _build(self):
         layout = QVBoxLayout(self)
@@ -102,60 +102,60 @@ class ImportDialog(QDialog):
         self.btn_new = QPushButton("📁  新建目录对象（导入文件夹）")
         self.btn_new.setObjectName("accent")
         self.btn_new.setMinimumHeight(52)
-        self.btn_new.setStyleSheet("""
-            QPushButton {
-                background-color: #2a1f4a;
-                border: 1px solid #5c3f8a;
+        self.btn_new.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {C['accent_bg']};
+                border: 1px solid {C['accent_bd']};
                 border-radius: 8px;
-                color: #c8b8f8;
+                color: {C['accent']};
                 font-size: 14px;
                 text-align: left;
                 padding: 0 20px;
-            }
-            QPushButton:hover {
-                background-color: #3a2f5a;
-                border-color: #9a7adb;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {C['bg3']};
+                border-color: {C['accent2']};
+            }}
         """)
         self.btn_new.clicked.connect(self._import_new_directory)
         layout.addWidget(self.btn_new)
 
         self.btn_existing = QPushButton("🖼  导入文件夹到已有目录对象")
         self.btn_existing.setMinimumHeight(52)
-        self.btn_existing.setStyleSheet("""
-            QPushButton {
-                background-color: #1f2a3a;
-                border: 1px solid #3a5a6a;
+        self.btn_existing.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {C['bg2']};
+                border: 1px solid {C['border']};
                 border-radius: 8px;
-                color: #b8d0e8;
+                color: {C['blue']};
                 font-size: 14px;
                 text-align: left;
                 padding: 0 20px;
-            }
-            QPushButton:hover {
-                background-color: #2f3a4a;
-                border-color: #5a9aab;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {C['bg3']};
+                border-color: {C['border2']};
+            }}
         """)
         self.btn_existing.clicked.connect(self._import_to_existing)
         layout.addWidget(self.btn_existing)
 
         self.btn_files = QPushButton("📄  导入单张/多张图片到已有目录对象")
         self.btn_files.setMinimumHeight(52)
-        self.btn_files.setStyleSheet("""
-            QPushButton {
-                background-color: #1f3a2a;
-                border: 1px solid #2a6a3a;
+        self.btn_files.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {C['bg2']};
+                border: 1px solid {C['border']};
                 border-radius: 8px;
-                color: #b8e8c8;
+                color: {C['green']};
                 font-size: 14px;
                 text-align: left;
                 padding: 0 20px;
-            }
-            QPushButton:hover {
-                background-color: #2f4a3a;
-                border-color: #4aab6a;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {C['bg3']};
+                border-color: {C['border2']};
+            }}
         """)
         self.btn_files.clicked.connect(self._import_single_files)
         layout.addWidget(self.btn_files)
@@ -317,16 +317,16 @@ class ImportDialog(QDialog):
         self.worker.start()
 
 
-class _SelectObjectDialog(QDialog):
+class _SelectObjectDialog(FramelessDialog):
     def __init__(self, objects: list, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("选择目标目录对象")
+        super().__init__("选择目标目录对象", parent)
         self.setMinimumWidth(360)
         self._objects = objects
         self._selected = None
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setContentsMargins(0, 0, 20, 20)
         layout.setSpacing(12)
+        self._install_titlebar()
 
         layout.addWidget(QLabel("请选择要导入到的目录对象："))
 
