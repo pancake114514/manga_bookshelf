@@ -4,9 +4,7 @@
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QScrollArea, QWidget, QFrame,QCheckBox,
-    QDialogButtonBox, QMessageBox, QCompleter, QListWidget,
-    QListWidgetItem, QAbstractItemView, QGroupBox, QSizePolicy,
-    QSpacerItem
+    QDialogButtonBox, QMessageBox, QCompleter
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -101,39 +99,65 @@ class TagEditorDialog(FramelessDialog):
     """
     标签和名称编辑对话框
     """
+
     def __init__(self, obj: dict = None, parent=None):
         super().__init__("编辑对象信息", parent)
         self.obj = obj or {}
         tags = obj.get("tags", {}) if obj else {}
         self.setMinimumWidth(520)
         self.setModal(True)
+
+        # === 修改 1: 为对话框外部添加浅棕色描边 ===
+        self.setObjectName("TagEditorDialog")
+        self.setStyleSheet("""
+                    #TagEditorDialog {
+                        border: 1px solid #c4a484; 
+                        background: #f5f0e8;
+                        padding: 1px; /* 强制内边距1px，防止所有贴边子控件盖住边框 */
+                    }
+                """)
+
         self._build(tags)
         self._install_titlebar()
 
     def _build(self, tags: dict):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
+        # 主布局边距
         layout.setContentsMargins(20, 20, 20, 20)
 
-        # 对象名
-        layout.addWidget(SectionLabel("对象名称"))
+        # --- 顶部“对象名称”区域 ---
+        name_layout = QVBoxLayout()
+        name_layout.setContentsMargins(8, 0, 8, 0)  # 左右各 8px 间距
+        name_layout.setSpacing(4)
+
+        name_layout.addWidget(SectionLabel("对象名称"))
         self.name_input = QLineEdit(self.obj.get("name", ""))
         self.name_input.setPlaceholderText("输入对象名称")
-        layout.addWidget(self.name_input)
+        name_layout.addWidget(self.name_input)
+        layout.addLayout(name_layout)
 
         layout.addWidget(Divider())
 
-        # 滚动区域放标签输入
+        # --- 滚动区域容器（解决滚动条遮挡边框） ---
+        scroll_wrapper = QWidget()
+        scroll_wrapper.setStyleSheet("background: transparent;")
+        wrapper_layout = QVBoxLayout(scroll_wrapper)
+        # 左右设置 2px 边距，确保滚动条不盖住窗口描边
+        wrapper_layout.setContentsMargins(2, 0, 2, 0)
+        wrapper_layout.setSpacing(0)
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("background: #f5f0e8;")
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+
         inner = QWidget()
-        inner.setStyleSheet("background: #f5f0e8;")
+        inner.setStyleSheet("background: transparent;")
         inner_layout = QVBoxLayout(inner)
         inner_layout.setSpacing(8)
-        inner_layout.setContentsMargins(0, 0, 8, 0)
+        inner_layout.setContentsMargins(8, 0, 8, 0)
 
         self.tag_inputs: dict[str, MultiTagInput | QCheckBox] = {}
 
@@ -145,9 +169,10 @@ class TagEditorDialog(FramelessDialog):
                 self.tag_inputs[cat] = cb
                 inner_layout.addWidget(cb)
             elif cat == "censored":
-                widget = MultiTagInput(cat, label,
-                    initial=tags.get(cat, []) if isinstance(tags.get(cat), list)
-                            else ([tags[cat]] if tags.get(cat) else []))
+                initial_val = tags.get(cat, [])
+                if not isinstance(initial_val, list):
+                    initial_val = [initial_val] if initial_val else []
+                widget = MultiTagInput(cat, label, initial=initial_val)
                 self.tag_inputs[cat] = widget
                 inner_layout.addWidget(widget)
             else:
@@ -157,18 +182,24 @@ class TagEditorDialog(FramelessDialog):
                 widget = MultiTagInput(cat, label, initial=initial)
                 self.tag_inputs[cat] = widget
                 inner_layout.addWidget(widget)
+
             if cat != TAG_CATEGORY_ORDER[-1]:
                 inner_layout.addWidget(Divider())
 
         inner_layout.addStretch()
         scroll.setWidget(inner)
         scroll.setMinimumHeight(320)
-        layout.addWidget(scroll)
 
-        # 按钮
+        wrapper_layout.addWidget(scroll)
+        layout.addWidget(scroll_wrapper)
+
+        # --- 修改处：底部按钮区域 ---
         btns = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
+        # 设置按钮盒子的内边距，使其左右缩进 8px，不再贴边
+        btns.setContentsMargins(8, 0, 8, 0)
+
         btns.button(QDialogButtonBox.StandardButton.Ok).setText("确定")
         btns.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
         btns.accepted.connect(self._on_accept)
