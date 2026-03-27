@@ -13,6 +13,23 @@ from PyQt6.QtGui import (
     QPen, QBrush, QLinearGradient, QRadialGradient
 )
 from config import app_state, SUPPORTED_FORMATS
+# from .widgets import C
+
+# ─── 看图界面深色主题颜色 ───────────────────────────────────────────────────
+C = {
+    "bg":        "#f5f0e8",   # 主背景：暖米白
+    "bg2":       "#ede8df",   # 次级背景：稍深米色
+    "track":     "#29251C",   # 进度条轨道
+    "accent":    "#F7D9BA",   # 主强调色
+    "accent2":   "#F6A452",   # 强调深色
+    "knob":      "#CC9933",   # 滑块主体
+    "knob_bd":   "#ECECBD",   # 滑块边框
+    "text":      "#2a2418",   # 主文字：深墨
+    "text2":     "#5a5040",   # 次级文字
+    "text3":     "#8a7f6a",   # 弱文字
+    "border":    "#2a2540",   # 边框
+    "border_h":  "#5c3f8a",   # 边框悬停
+}
 
 
 class MangaProgressBar(QWidget):
@@ -65,7 +82,7 @@ class MangaProgressBar(QWidget):
 
         # 轨道背景
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#1e1c2a"))
+        painter.setBrush(QColor(C["track"]))
         painter.drawRoundedRect(pad, bar_y - bar_h // 2, w, bar_h, 2, 2)
 
         # 已读进度（右侧起点 → 当前位置）
@@ -74,8 +91,8 @@ class MangaProgressBar(QWidget):
             filled_w = int(w * ratio)
             # 右侧开始填充
             grad = QLinearGradient(self.width() - pad, 0, self.width() - pad - filled_w, 0)
-            grad.setColorAt(0, QColor("#9a7adb"))
-            grad.setColorAt(1, QColor("#5c3f8a"))
+            grad.setColorAt(0, QColor(C["accent"]))
+            grad.setColorAt(1, QColor(C["accent2"]))
             painter.setBrush(grad)
             painter.drawRoundedRect(
                 self.width() - pad - filled_w,
@@ -92,19 +109,20 @@ class MangaProgressBar(QWidget):
         knob_r = 8
 
         # 外发光
+        accent_rgb = QColor(C["accent"]).getRgb()
         glow = QRadialGradient(knob_x, bar_y, knob_r * 2)
-        glow.setColorAt(0, QColor(154, 122, 219, 80))
-        glow.setColorAt(1, QColor(154, 122, 219, 0))
+        glow.setColorAt(0, QColor(accent_rgb[0], accent_rgb[1], accent_rgb[2], 80))
+        glow.setColorAt(1, QColor(accent_rgb[0], accent_rgb[1], accent_rgb[2], 0))
         painter.setBrush(glow)
         painter.drawEllipse(QPoint(knob_x, bar_y), knob_r * 2, knob_r * 2)
 
         # 主体
-        painter.setBrush(QColor("#c8a8f8"))
-        painter.setPen(QPen(QColor("#7a5aab"), 1.5))
+        painter.setBrush(QColor(C["knob"]))
+        painter.setPen(QPen(QColor(C["knob_bd"]), 1.5))
         painter.drawEllipse(QPoint(knob_x, bar_y), knob_r, knob_r)
 
         # 页码文字
-        painter.setPen(QColor("#7a6aab"))
+        painter.setPen(QColor(C["text2"]))
         font = painter.font()
         font.setPointSize(9)
         painter.setFont(font)
@@ -150,46 +168,46 @@ class ImageViewer(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        self.setStyleSheet("background: #08070f;")
+        self.setStyleSheet(f"background: {C['bg']};")
 
         # ── 顶部栏 ────────────────────────────────────────────────────────────
         top = QWidget()
         top.setFixedHeight(44)
-        top.setStyleSheet("background: rgba(10,9,20,0.95); border-bottom: 1px solid #1a1828;")
+        top.setStyleSheet(f"background: {C['bg']}; border-bottom: 1px solid {C['bg2']};")
         top_layout = QHBoxLayout(top)
         top_layout.setContentsMargins(12, 0, 12, 0)
         top_layout.setSpacing(12)
 
         back_btn = QPushButton("◀ 返回")
         back_btn.setFixedWidth(72)
-        back_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent; border: 1px solid #2a2540;
-                border-radius: 5px; color: #7a6aab; font-size: 12px; padding: 4px 8px;
-            }
-            QPushButton:hover { border-color: #5c3f8a; color: #c8b8e8; }
+        back_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; border: 1px solid {C['border']};
+                border-radius: 5px; color: {C['text2']}; font-size: 12px; padding: 4px 8px;
+            }}
+            QPushButton:hover {{ border-color: {C['border_h']}; color: {C['text']}; }}
         """)
         back_btn.clicked.connect(self._on_back)
         top_layout.addWidget(back_btn)
 
         self.title_lbl = QLabel(self.obj["name"])
-        self.title_lbl.setStyleSheet("color: #c8b8e8; font-size: 13px; font-weight: 600;")
+        self.title_lbl.setStyleSheet(f"color: {C['text']}; font-size: 13px; font-weight: 600;")
         top_layout.addWidget(self.title_lbl)
         top_layout.addStretch()
 
         self.filename_lbl = QLabel()
-        self.filename_lbl.setStyleSheet("color: #4a4070; font-size: 11px;")
+        self.filename_lbl.setStyleSheet(f"color: {C['text3']}; font-size: 11px;")
         top_layout.addWidget(self.filename_lbl)
 
         fullscreen_btn = QPushButton("⛶")
         fullscreen_btn.setFixedSize(32, 32)
         fullscreen_btn.setToolTip("全屏 (F / F11)")
-        fullscreen_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent; border: 1px solid #2a2540;
-                border-radius: 5px; color: #7a6aab; font-size: 14px;
-            }
-            QPushButton:hover { border-color: #5c3f8a; color: #c8b8e8; }
+        fullscreen_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; border: 1px solid {C['border']};
+                border-radius: 5px; color: {C['text2']}; font-size: 14px;
+            }}
+            QPushButton:hover {{ border-color: {C['border_h']}; color: {C['text']}; }}
         """)
         fullscreen_btn.clicked.connect(self._toggle_fullscreen)
         top_layout.addWidget(fullscreen_btn)
@@ -319,7 +337,7 @@ class _ClickableImageArea(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._pixmap: QPixmap | None = None
-        self.setStyleSheet("background: #08070f;")
+        self.setStyleSheet(f"background: {C['bg']};")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def set_pixmap(self, pm: QPixmap | None):
@@ -328,7 +346,7 @@ class _ClickableImageArea(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("#08070f"))
+        painter.fillRect(self.rect(), QColor(C["bg"]))
         if self._pixmap and not self._pixmap.isNull():
             scaled = self._pixmap.scaled(
                 self.size(),
@@ -339,7 +357,7 @@ class _ClickableImageArea(QWidget):
             y = (self.height() - scaled.height()) // 2
             painter.drawPixmap(x, y, scaled)
         else:
-            painter.setPen(QColor("#2a2540"))
+            painter.setPen(QColor(C["border"]))
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "图片加载失败")
         painter.end()
 
