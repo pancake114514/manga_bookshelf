@@ -148,8 +148,9 @@ class DirectoryView(QWidget):
 
         # 右侧：标题 + 阅读按钮 + 标签
         meta = QVBoxLayout()
-        meta.setContentsMargins(0, 4, 0, 0)
+        meta.setContentsMargins(0, 0, 0, 0)
         meta.setSpacing(8)
+        meta.setAlignment(Qt.AlignmentFlag.AlignTop)  # 顶部对齐，确保标题与缩略图顶端平齐
 
         name_row = QHBoxLayout()
         name_row.setSpacing(12)
