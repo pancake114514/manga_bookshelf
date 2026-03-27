@@ -88,7 +88,7 @@ class DirectoryView(QWidget):
 
     def __init__(self, obj: dict, storage_root: str, parent=None):
         super().__init__(parent)
-        self.setStyleSheet("background: #f5f0e8;")
+        self.setStyleSheet("background-color: transparent;")
         self.obj = obj
         self.storage_root = storage_root
         self.cache_dir = os.path.join(storage_root, ".thumbcache")
@@ -188,7 +188,7 @@ class DirectoryView(QWidget):
             row.setSpacing(4)
             row.setContentsMargins(0, 0, 0, 0)
             cat_lbl = QLabel(TAG_CATEGORIES[cat] + "：")
-            cat_lbl.setStyleSheet(f"color: {C['text3']}; font-size: 11px; font-family: 'Georgia', serif;")
+            cat_lbl.setStyleSheet(f"color: {C['text3']}; font-size: 12px; font-family: 'Georgia', serif;")
             cat_lbl.setFixedWidth(40)
             row.addWidget(cat_lbl)
             for text, category in display:
@@ -197,7 +197,7 @@ class DirectoryView(QWidget):
             meta.addLayout(row)
         if not has_any:
             no_tag = QLabel("暂无标签")
-            no_tag.setStyleSheet("color: #8a7f6a; font-size: 11px;")
+            no_tag.setStyleSheet("color: #8a7f6a; font-size: 12px;")
             meta.addWidget(no_tag)
 
         content_row.addLayout(meta)

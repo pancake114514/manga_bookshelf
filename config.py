@@ -14,7 +14,7 @@ TAG_CATEGORIES = {
     "work":      "作品",
     "author":    "作者",
     "character": "角色",
-    "cm":        "CM/活动",
+    "cm":        "CM",
     "r18":       "R-18",
     "censored":  "修正",
 }
