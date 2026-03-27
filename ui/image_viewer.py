@@ -206,7 +206,7 @@ class ImageViewer(QWidget):
         top_layout.addWidget(self.filename_lbl)
 
         fullscreen_btn = QPushButton("⛶")
-        fullscreen_btn.setFixedSize(32, 32)
+        fullscreen_btn.setFixedSize(16, 16)
         fullscreen_btn.setToolTip("全屏 (F / F11)")
         fullscreen_btn.setStyleSheet(f"""
             QPushButton {{
