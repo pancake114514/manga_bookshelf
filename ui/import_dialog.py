@@ -80,13 +80,26 @@ class ImportDialog(FramelessDialog):
         self._install_titlebar("📥")
 
     def _build(self):
-        # 主布局，它的边距通常会被 _install_titlebar 清零
+        # 主布局，将间距设为 0，确保标题栏和下方内容无缝衔接
         main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(0)
 
-        # 创建一个专门的内容子布局，在这里设置你想要的 10 像素边距
-        content_layout = QVBoxLayout()
+        # 创建内容框架 QFrame
+        self.content_frame = QFrame(self)
+        self.content_frame.setObjectName("ContentFrame")
+        # 仅为该 Frame 设置左右下边框（U型边框），避开标题栏
+        self.content_frame.setStyleSheet("""
+            #ContentFrame {
+                border-left: 1px solid #c4a484;
+                border-right: 1px solid #c4a484;
+                border-bottom: 1px solid #c4a484;
+                border-top: none;
+            }
+        """)
+
+        # 将之前的内容布局放入 QFrame 中
+        content_layout = QVBoxLayout(self.content_frame)
         content_layout.setSpacing(16)
-        # 设置边距：左 10, 上 10, 右 10, 下 20
         content_layout.setContentsMargins(10, 10, 10, 20)
 
         title = QLabel("选择导入方式")
@@ -158,8 +171,8 @@ class ImportDialog(FramelessDialog):
         cancel.clicked.connect(self.reject)
         content_layout.addWidget(cancel)
 
-        # 最后将装满内容并设好边距的子布局加入主布局
-        main_layout.addLayout(content_layout)
+        # 最后把装载了所有内容的 QFrame 添加进主布局
+        main_layout.addWidget(self.content_frame)
 
     def _import_new_directory(self):
         folder = QFileDialog.getExistingDirectory(
@@ -316,12 +329,24 @@ class _SelectObjectDialog(FramelessDialog):
         self._objects = objects
         self._selected = None
 
+        # 将间距设为 0，防止和标题栏出现空隙
         main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(0)
         self._install_titlebar()
 
-        # 同理，为子窗口也建立独立的子布局来保护间距不被覆盖
-        content_layout = QVBoxLayout()
-        # 左右下各 10px，让两个弹窗的风格保持一致
+        # 同样使用 QFrame 来实现下半部分的边框包围
+        content_frame = QFrame(self)
+        content_frame.setObjectName("ContentFrame")
+        content_frame.setStyleSheet("""
+            #ContentFrame {
+                border-left: 1px solid #c4a484;
+                border-right: 1px solid #c4a484;
+                border-bottom: 1px solid #c4a484;
+                border-top: none;
+            }
+        """)
+
+        content_layout = QVBoxLayout(content_frame)
         content_layout.setContentsMargins(10, 10, 10, 10)
         content_layout.setSpacing(12)
 
@@ -346,7 +371,7 @@ class _SelectObjectDialog(FramelessDialog):
         btns.rejected.connect(self.reject)
         content_layout.addWidget(btns)
 
-        main_layout.addLayout(content_layout)
+        main_layout.addWidget(content_frame)
 
     def selected_object(self):
         item = self.list_widget.currentItem()
