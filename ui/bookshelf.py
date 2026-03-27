@@ -48,7 +48,7 @@ class ObjectCard(QFrame):
         super().__init__(parent)
         self.obj = obj
         self.cache_dir = cache_dir
-        self._loader = None   # 持有线程引用，防止提前 GC
+        self._loader = None
         self.setFixedSize(self.CARD_W, self.CARD_H)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setStyleSheet(f"""
@@ -140,7 +140,6 @@ class ObjectCard(QFrame):
         self._loader.start()
 
     def _on_thumb_loaded(self, obj_id: str, thumb_path: str):
-        # 控件可能已被销毁，判断是否还存在
         try:
             if not self.isVisible() and not self.cover_label:
                 return
@@ -178,31 +177,28 @@ class ObjectCard(QFrame):
 
     def contextMenuEvent(self, event):
         menu = QMenu(self)
-
-        # --- 关键修改：设置窗口标志，去掉边框并允许透明 ---
         menu.setWindowFlags(
             menu.windowFlags() | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
-        menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)  # 允许透明，圆角才真正有效
-
+        menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         menu.setStyleSheet("""
             QMenu {
-                background: #f5f0e8; 
+                background: #f5f0e8;
                 border: 1px solid #c8bfaa;
-                border-radius: 8px; 
+                border-radius: 8px;
                 padding: 4px;
             }
-            QMenu::item { 
-                padding: 8px 20px; 
-                border-radius: 4px; /* 菜单项悬停时的圆角 */
-                color: #2a2418; 
+            QMenu::item {
+                padding: 8px 20px;
+                border-radius: 4px;
+                color: #2a2418;
             }
-            QMenu::item:selected { 
-                background: #e4ddd2; 
+            QMenu::item:selected {
+                background: #e4ddd2;
             }
-            QMenu::separator { 
-                background: #c8bfaa; 
-                height: 1px; 
-                margin: 4px 8px; 
+            QMenu::separator {
+                background: #c8bfaa;
+                height: 1px;
+                margin: 4px 8px;
             }
         """)
         act_edit = menu.addAction("✏️  编辑信息")
@@ -264,7 +260,6 @@ class BookshelfView(QWidget):
         layout.addWidget(self.empty_label)
 
     def load_objects(self, objects: list):
-        """完整重建卡片列表，仅在数据变化时调用"""
         self._cards.clear()
         while self.grid_layout.count():
             item = self.grid_layout.takeAt(0)
@@ -300,11 +295,9 @@ class BookshelfView(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # 用单次定时器防抖，resize 停止 200ms 后才重排，避免连续触发
         self._resize_timer.start(200)
 
     def _relayout(self):
-        """仅重新排列已有卡片，不销毁重建，不触发缩略图加载"""
         cols = self._calc_cols()
         items = []
         while self.grid_layout.count():
@@ -314,8 +307,6 @@ class BookshelfView(QWidget):
         for i, card in enumerate(items):
             row, col = divmod(i, cols)
             self.grid_layout.addWidget(card, row, col)
-
-    # ── 右键菜单动作 ──────────────────────────────────────────────────────────
 
     def _on_edit(self, obj: dict):
         from .tag_editor import TagEditorDialog
