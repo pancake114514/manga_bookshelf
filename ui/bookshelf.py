@@ -5,14 +5,13 @@ import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
     QPushButton, QScrollArea, QFrame, QSizePolicy, QMenu,
-    QMessageBox, QApplication
+    QMessageBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QThread, QTimer, QPoint
-from PyQt6.QtGui import QPixmap, QColor, QPainter, QFont, QAction, QCursor
+from PyQt6.QtGui import QPixmap, QColor, QPainter, QPainterPath
 from config import app_state, THUMBNAIL_SIZE
 from .widgets import (
-    make_placeholder_pixmap, TagFlowWidget, ClickableLabel,
-    SectionLabel, Divider, LoadingLabel, C
+    make_placeholder_pixmap, C
 )
 
 
@@ -32,12 +31,6 @@ class ThumbnailLoader(QThread):
                     self.loaded.emit(obj_id, path)
 
 
-import os
-from PyQt6.QtWidgets import (
-    QFrame, QVBoxLayout, QLabel, QWidget, QMenu
-)
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QPixmap, QPainter, QPainterPath
 
 
 class ObjectCard(QFrame):
@@ -52,6 +45,8 @@ class ObjectCard(QFrame):
     # 封面图相对于边框的内缩边距
     CONTENT_PADDING = 3
     BORDER_RADIUS = 10
+    # 卡片外边距（用于容纳圆角，防止被父容器裁剪）
+    CARD_MARGIN = 2
 
     def __init__(self, obj: dict, cache_dir: str, parent=None):
         super().__init__(parent)
@@ -78,30 +73,37 @@ class ObjectCard(QFrame):
         self._load_cover()
 
     def _build(self):
-        # 主布局：不设置边距，由内部容器控制
+        # 主布局：设置边距以容纳圆角，防止被父容器裁剪
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setContentsMargins(self.CARD_MARGIN, self.CARD_MARGIN, self.CARD_MARGIN, self.CARD_MARGIN)
         self.main_layout.setSpacing(0)
 
-        # --- 1. 封面图封装层 ---
-        # 这个 wrapper 占据卡片上半部分，负责将内容水平居中
         self.cover_wrapper = QWidget()
-        self.cover_wrapper.setFixedHeight(235)  # 稍微给高一点
+        self.cover_wrapper.setFixedHeight(235)
+
         wrapper_layout = QVBoxLayout(self.cover_wrapper)
+        wrapper_layout.setContentsMargins(
+            self.CONTENT_PADDING,
+            self.CONTENT_PADDING,
+            self.CONTENT_PADDING,
+            self.CONTENT_PADDING
+        )
+        wrapper_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
 
-        # 关键点：居中对齐，不设边距，手动计算 Label 尺寸
-        wrapper_layout.setContentsMargins(0, self.CONTENT_PADDING, 0, 0)
-        wrapper_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-
-        # 精确计算图片宽度：180 - (3 * 2) = 174px
-        self.cover_w = self.CARD_W - (self.CONTENT_PADDING * 2)
-        self.cover_h = 230 - self.CONTENT_PADDING
+        self.cover_w = self.CARD_W - self.CONTENT_PADDING * 2
+        self.cover_h = 235 - self.CONTENT_PADDING * 2  # ✅ 和 wrapper 对齐
 
         self.cover_label = QLabel()
-        self.cover_label.setFixedSize(self.cover_w, self.cover_h)
+
+        self.cover_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed
+        )
+        self.cover_label.setFixedHeight(self.cover_h)
+
+        self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.cover_label.setStyleSheet("background: transparent; border: none;")
 
-        # 初始占位图
         pm = make_placeholder_pixmap(self.cover_w, self.cover_h, "📖", "transparent")
         self.cover_label.setPixmap(pm)
 
