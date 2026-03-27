@@ -270,40 +270,166 @@ class TitleBar(QWidget):
 
 class FramelessMixin:
     """
-    混入类：去掉系统边框，插入自定义标题栏。
+    混入类：去掉系统边框，插入自定义标题栏，并实现边缘拖拽缩放。
     用法：class MyWindow(FramelessMixin, QMainWindow): ...
     在 __init__ 末尾调用 self.setup_frameless(title, icon)
     """
+
+    _EDGE = 6   # 边缘检测宽度（像素）
+
+    # 方向常量
+    _NONE   = 0
+    _LEFT   = 1
+    _RIGHT  = 2
+    _TOP    = 4
+    _BOTTOM = 8
+
+    # 方向 → 光标形状
+    _CURSORS = {
+        _LEFT:            Qt.CursorShape.SizeHorCursor,
+        _RIGHT:           Qt.CursorShape.SizeHorCursor,
+        _TOP:             Qt.CursorShape.SizeVerCursor,
+        _BOTTOM:          Qt.CursorShape.SizeVerCursor,
+        _LEFT  | _TOP:    Qt.CursorShape.SizeFDiagCursor,
+        _RIGHT | _BOTTOM: Qt.CursorShape.SizeFDiagCursor,
+        _RIGHT | _TOP:    Qt.CursorShape.SizeBDiagCursor,
+        _LEFT  | _BOTTOM: Qt.CursorShape.SizeBDiagCursor,
+    }
+
     def setup_frameless(self, title: str = "", icon: str = "📚"):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
-        # 保留任务栏显示
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        self.setMouseTracking(True)
+        self._resize_edge = self._NONE
+        self._resize_start_pos = None
+        self._resize_start_geom = None
 
-        # 在 central widget 外层包一个容器，把标题栏插在最顶部
         if isinstance(self, QMainWindow):
             container = QWidget()
             container.setStyleSheet(f"background: {C['bg']};")
+            container.setMouseTracking(True)
             vbox = QVBoxLayout(container)
             vbox.setContentsMargins(0, 0, 0, 0)
             vbox.setSpacing(0)
             self._titlebar = TitleBar(self, title, icon)
             vbox.addWidget(self._titlebar)
-            # 把原 central widget 移过来
             old = self.centralWidget()
             if old:
                 vbox.addWidget(old)
             self.setCentralWidget(container)
         else:
-            # QDialog 等：在已有 layout 前插入标题栏
             layout = self.layout()
             if layout:
                 self._titlebar = TitleBar(self, title, icon)
                 layout.insertWidget(0, self._titlebar)
                 layout.setContentsMargins(0, 0, 0, 0)
 
+        # 安装应用级事件过滤器，捕获所有子控件的鼠标事件
+        # 这样即使鼠标在子控件上也能更新边缘光标和处理缩放
+        QApplication.instance().installEventFilter(self)
+
     def update_title(self, title: str):
         if hasattr(self, "_titlebar"):
             self._titlebar.set_title(title)
+
+    def _get_edge(self, pos) -> int:
+        """根据鼠标位置（窗口坐标）返回边缘方向标志位"""
+        e = self._EDGE
+        x, y = pos.x(), pos.y()
+        w, h = self.width(), self.height()
+        edge = self._NONE
+        if x <= e:         edge |= self._LEFT
+        if x >= w - e:     edge |= self._RIGHT
+        if y <= e:         edge |= self._TOP
+        if y >= h - e:     edge |= self._BOTTOM
+        return edge
+
+    def eventFilter(self, obj, event):
+        """拦截所有子控件的鼠标事件，统一处理边缘光标和缩放"""
+        from PyQt6.QtCore import QEvent
+        if self.isMaximized():
+            return super().eventFilter(obj, event)
+
+        t = event.type()
+
+        if t == QEvent.Type.MouseMove:
+            # 把全局坐标转为本窗口坐标
+            gpos = event.globalPosition().toPoint()
+            local = self.mapFromGlobal(gpos)
+            edge = self._get_edge(local)
+
+            if self._resize_start_pos and event.buttons() == Qt.MouseButton.LeftButton:
+                self._do_resize(gpos)
+                return False  # 不拦截，让子控件也能收到
+
+            cursor = self._CURSORS.get(edge, None)
+            if cursor is not None:
+                # 在边缘区域：强制覆盖光标
+                QApplication.setOverrideCursor(cursor)
+            else:
+                # 不在边缘：恢复默认（让子控件自己决定光标）
+                QApplication.restoreOverrideCursor()
+
+        elif t == QEvent.Type.MouseButtonPress:
+            gpos = event.globalPosition().toPoint()
+            local = self.mapFromGlobal(gpos)
+            edge = self._get_edge(local)
+            if edge != self._NONE and event.button() == Qt.MouseButton.LeftButton:
+                self._resize_edge = edge
+                self._resize_start_pos = gpos
+                self._resize_start_geom = self.geometry()
+                QApplication.setOverrideCursor(
+                    self._CURSORS.get(edge, Qt.CursorShape.ArrowCursor)
+                )
+                return True  # 拦截，防止子控件误处理
+
+        elif t == QEvent.Type.MouseButtonRelease:
+            if self._resize_start_pos:
+                self._resize_edge = self._NONE
+                self._resize_start_pos = None
+                self._resize_start_geom = None
+                QApplication.restoreOverrideCursor()
+
+        elif t == QEvent.Type.Leave:
+            # 鼠标离开窗口时恢复光标
+            if obj is self:
+                QApplication.restoreOverrideCursor()
+
+        return super().eventFilter(obj, event)
+
+    def mousePressEvent(self, event):
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+
+    def _do_resize(self, global_pos):
+        """根据拖拽计算并应用新的窗口几何"""
+        from PyQt6.QtCore import QRect
+        dx = global_pos.x() - self._resize_start_pos.x()
+        dy = global_pos.y() - self._resize_start_pos.y()
+        g = self._resize_start_geom
+        min_w, min_h = self.minimumWidth(), self.minimumHeight()
+
+        x, y, w, h = g.x(), g.y(), g.width(), g.height()
+
+        if self._resize_edge & self._LEFT:
+            new_w = max(min_w, w - dx)
+            x = g.right() - new_w + 1
+            w = new_w
+        if self._resize_edge & self._RIGHT:
+            w = max(min_w, w + dx)
+        if self._resize_edge & self._TOP:
+            new_h = max(min_h, h - dy)
+            y = g.bottom() - new_h + 1
+            h = new_h
+        if self._resize_edge & self._BOTTOM:
+            h = max(min_h, h + dy)
+
+        self.setGeometry(QRect(x, y, w, h))
 
 
 class FramelessDialog(QDialog):
