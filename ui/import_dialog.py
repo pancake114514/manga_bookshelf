@@ -1,6 +1,3 @@
-"""
-导入对话框
-"""
 import os
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
@@ -18,8 +15,8 @@ import uuid
 
 class ImportWorker(QThread):
     """后台导入线程"""
-    progress = pyqtSignal(int, int)   # current, total
-    finished = pyqtSignal(str)         # obj_id
+    progress = pyqtSignal(int, int)
+    finished = pyqtSignal(str)
     error = pyqtSignal(str)
 
     def __init__(self, obj_id: str, obj_name: str, tags: dict,
@@ -51,7 +48,6 @@ class ImportWorker(QThread):
 
             images = collect_images(self.source_dir)
             total = len(images)
-            # 接续已有文件的序号
             seq = next_seq_number(storage_obj_dir)
             sort_start = db.get_image_count(self.obj_id)
             for i, src in enumerate(images):
@@ -62,7 +58,6 @@ class ImportWorker(QThread):
                     seq += 1
                 self.progress.emit(i + 1, total)
 
-            # 自动设置封面为第一张（仅新建对象时）
             if self.is_new:
                 first_img = db.get_images(self.obj_id)
                 if first_img and not db.get_object(self.obj_id).get("cover_image"):
@@ -74,12 +69,7 @@ class ImportWorker(QThread):
 
 
 class ImportDialog(FramelessDialog):
-    """
-    导入对话框：
-    - 新建目录对象（选择文件夹）
-    - 导入到已存在的目录对象（选择文件后复制）
-    """
-    import_done = pyqtSignal(str)   # 导入完成，传 obj_id
+    import_done = pyqtSignal(str)
 
     def __init__(self, storage_root: str, parent=None):
         super().__init__("导入图片", parent)
@@ -90,15 +80,19 @@ class ImportDialog(FramelessDialog):
         self._install_titlebar("📥")
 
     def _build(self):
-        layout = QVBoxLayout(self)
-        layout.setSpacing(16)
-        layout.setContentsMargins(24, 24, 24, 24)
+        # 主布局，它的边距通常会被 _install_titlebar 清零
+        main_layout = QVBoxLayout(self)
+
+        # 创建一个专门的内容子布局，在这里设置你想要的 10 像素边距
+        content_layout = QVBoxLayout()
+        content_layout.setSpacing(16)
+        # 设置边距：左 10, 上 10, 右 10, 下 20
+        content_layout.setContentsMargins(10, 10, 10, 20)
 
         title = QLabel("选择导入方式")
-        title.setStyleSheet("font-size: 16px; font-weight: 600; color: #e8e0f0;")
-        layout.addWidget(title)
+        title.setStyleSheet(f"font-size: 16px; font-weight: 600; color: {C['text']};")
+        content_layout.addWidget(title)
 
-        # 选项卡
         self.btn_new = QPushButton("📁  新建目录对象（导入文件夹）")
         self.btn_new.setObjectName("accent")
         self.btn_new.setMinimumHeight(52)
@@ -118,7 +112,7 @@ class ImportDialog(FramelessDialog):
             }}
         """)
         self.btn_new.clicked.connect(self._import_new_directory)
-        layout.addWidget(self.btn_new)
+        content_layout.addWidget(self.btn_new)
 
         self.btn_existing = QPushButton("🖼  导入文件夹到已有目录对象")
         self.btn_existing.setMinimumHeight(52)
@@ -138,7 +132,7 @@ class ImportDialog(FramelessDialog):
             }}
         """)
         self.btn_existing.clicked.connect(self._import_to_existing)
-        layout.addWidget(self.btn_existing)
+        content_layout.addWidget(self.btn_existing)
 
         self.btn_files = QPushButton("📄  导入单张/多张图片到已有目录对象")
         self.btn_files.setMinimumHeight(52)
@@ -158,11 +152,14 @@ class ImportDialog(FramelessDialog):
             }}
         """)
         self.btn_files.clicked.connect(self._import_single_files)
-        layout.addWidget(self.btn_files)
+        content_layout.addWidget(self.btn_files)
 
         cancel = QPushButton("取消")
         cancel.clicked.connect(self.reject)
-        layout.addWidget(cancel)
+        content_layout.addWidget(cancel)
+
+        # 最后将装满内容并设好边距的子布局加入主布局
+        main_layout.addLayout(content_layout)
 
     def _import_new_directory(self):
         folder = QFileDialog.getExistingDirectory(
@@ -172,7 +169,6 @@ class ImportDialog(FramelessDialog):
         if not folder:
             return
 
-        # 统计图片数量
         from utils.file_utils import collect_images
         images = collect_images(folder)
         if not images:
@@ -206,7 +202,6 @@ class ImportDialog(FramelessDialog):
             QMessageBox.information(self, "提示", "还没有目录对象，请先新建")
             return
 
-        # 选择目标对象
         sel_dlg = _SelectObjectDialog(dir_objs, self)
         if sel_dlg.exec() != QDialog.DialogCode.Accepted:
             return
@@ -214,7 +209,6 @@ class ImportDialog(FramelessDialog):
         if not target_obj:
             return
 
-        # 选择文件夹
         folder = QFileDialog.getExistingDirectory(
             self, "选择要导入图片的文件夹", "",
             QFileDialog.Option.ShowDirsOnly
@@ -232,7 +226,6 @@ class ImportDialog(FramelessDialog):
                          folder, is_new=False)
 
     def _import_single_files(self):
-        """选择单张或多张图片文件，复制到已存在的目录对象"""
         db = app_state.db
         objects = db.get_all_objects(include_r18=True)
         dir_objs = [o for o in objects if o["type"] == "directory"]
@@ -263,7 +256,6 @@ class ImportDialog(FramelessDialog):
         from utils.file_utils import copy_image_with_seq_name, next_seq_number
         ok, fail = 0, 0
         cur_count = db.get_image_count(target_obj["id"])
-        # 按文件名排序后导入，接续已有序号
         seq = next_seq_number(storage_obj_dir)
         for src in sorted(paths, key=lambda p: os.path.basename(p)):
             if os.path.basename(src).startswith("."):
@@ -323,12 +315,17 @@ class _SelectObjectDialog(FramelessDialog):
         self.setMinimumWidth(360)
         self._objects = objects
         self._selected = None
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 20, 20)
-        layout.setSpacing(12)
+
+        main_layout = QVBoxLayout(self)
         self._install_titlebar()
 
-        layout.addWidget(QLabel("请选择要导入到的目录对象："))
+        # 同理，为子窗口也建立独立的子布局来保护间距不被覆盖
+        content_layout = QVBoxLayout()
+        # 左右下各 10px，让两个弹窗的风格保持一致
+        content_layout.setContentsMargins(10, 10, 10, 10)
+        content_layout.setSpacing(12)
+
+        content_layout.addWidget(QLabel("请选择要导入到的目录对象："))
 
         self.list_widget = QListWidget()
         for obj in objects:
@@ -337,7 +334,7 @@ class _SelectObjectDialog(FramelessDialog):
             self.list_widget.addItem(item)
         self.list_widget.setCurrentRow(0)
         self.list_widget.itemDoubleClicked.connect(lambda: self.accept())
-        layout.addWidget(self.list_widget)
+        content_layout.addWidget(self.list_widget)
 
         from PyQt6.QtWidgets import QDialogButtonBox
         btns = QDialogButtonBox(
@@ -347,7 +344,9 @@ class _SelectObjectDialog(FramelessDialog):
         btns.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
-        layout.addWidget(btns)
+        content_layout.addWidget(btns)
+
+        main_layout.addLayout(content_layout)
 
     def selected_object(self):
         item = self.list_widget.currentItem()
