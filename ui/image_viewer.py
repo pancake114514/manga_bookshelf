@@ -123,8 +123,18 @@ class MangaProgressBar(QWidget):
         # font.setBold(True) # 如果觉得文字不够清晰可以取消这行的注释
         painter.setFont(font)
         text = f"{self._value + 1} / {self._maximum + 1}"
-        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, text)
-
+        text_offset_y = 15  # 向下偏移的像素，可自行微调
+        text_rect = self.rect().adjusted(
+            0,
+            text_offset_y,
+            0,
+            text_offset_y
+        )
+        painter.drawText(
+            text_rect,
+            Qt.AlignmentFlag.AlignCenter,
+            text
+        )
         painter.end()
 
     # --- 鼠标事件保持不变 ---
