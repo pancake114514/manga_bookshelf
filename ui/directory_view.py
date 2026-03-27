@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QFileDialog, QMessageBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QThread, QTimer
-from PyQt6.QtGui import QPixmap, QFont, QIcon
+from PyQt6.QtGui import QPixmap, QFont, QIcon, QPainter, QPainterPath
 from config import app_state, GRID_THUMB_SIZE
 from .widgets import SectionLabel, make_placeholder_pixmap, ClickableLabel, TagBadge, C
 
@@ -35,6 +35,9 @@ class ImageThumbCard(QWidget):
     double_clicked = pyqtSignal(int)  # 图片在列表中的 index
 
     W, H = 150, 150
+    THUMB_W = W - 4
+    THUMB_H = H - 4
+    BORDER_RADIUS = 6  # 圆角半径，与样式表中的 border-radius 保持一致
 
     def __init__(self, img: dict, idx: int, parent=None):
         super().__init__(parent)
@@ -68,11 +71,39 @@ class ImageThumbCard(QWidget):
             QWidget:hover { border-color: #c4856a; background: #f0e6e0; }
         """)
 
+    def _get_rounded_pixmap(self, src_pixmap: QPixmap) -> QPixmap:
+        """对图片应用圆角裁剪"""
+        width = src_pixmap.width()
+        height = src_pixmap.height()
+
+        target = QPixmap(width, height)
+        target.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(target)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
+        path = QPainterPath()
+        path.addRoundedRect(0, 0, width, height, self.BORDER_RADIUS, self.BORDER_RADIUS)
+
+        painter.setClipPath(path)
+        painter.drawPixmap(0, 0, src_pixmap)
+        painter.end()
+        return target
+
     def set_pixmap(self, pm: QPixmap):
-        scaled = pm.scaled(self.W - 4, self.H - 4,
-                           Qt.AspectRatioMode.KeepAspectRatio,
+        # 缩放到目标尺寸
+        scaled = pm.scaled(self.THUMB_W, self.THUMB_H,
+                           Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                            Qt.TransformationMode.SmoothTransformation)
-        self.thumb.setPixmap(scaled)
+        # 居中裁剪
+        if scaled.width() > self.THUMB_W or scaled.height() > self.THUMB_H:
+            x = (scaled.width() - self.THUMB_W) // 2
+            y = (scaled.height() - self.THUMB_H) // 2
+            scaled = scaled.copy(x, y, self.THUMB_W, self.THUMB_H)
+        # 应用圆角
+        rounded = self._get_rounded_pixmap(scaled)
+        self.thumb.setPixmap(rounded)
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
