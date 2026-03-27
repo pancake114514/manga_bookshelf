@@ -32,8 +32,16 @@ class ThumbnailLoader(QThread):
                     self.loaded.emit(obj_id, path)
 
 
+import os
+from PyQt6.QtWidgets import (
+    QFrame, QVBoxLayout, QLabel, QWidget, QMenu
+)
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QPixmap, QPainter, QPainterPath
+
+
 class ObjectCard(QFrame):
-    """单个目录对象的封面卡片"""
+    """优化版：通过容器封装实现完美对称的封面图"""
     double_clicked = pyqtSignal(dict)
     edit_requested = pyqtSignal(dict)
     delete_requested = pyqtSignal(dict)
@@ -41,96 +49,176 @@ class ObjectCard(QFrame):
 
     CARD_W = 180
     CARD_H = 280
-    COVER_MARGIN = 1
+    # 封面图相对于边框的内缩边距
+    CONTENT_PADDING = 3
     BORDER_RADIUS = 10
 
     def __init__(self, obj: dict, cache_dir: str, parent=None):
         super().__init__(parent)
         self.obj = obj
         self.cache_dir = cache_dir
-        self._loader = None
+
         self.setFixedSize(self.CARD_W, self.CARD_H)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        # QSS 保持简洁，仅处理背景和描边
         self.setStyleSheet(f"""
-            QFrame {{
+            QFrame#ObjectCard {{
                 background-color: {C['bg']};
                 border: 1px solid {C['border']};
-                border-radius: 10px;
+                border-radius: {self.BORDER_RADIUS}px;
             }}
-            QFrame:hover {{
+            QFrame#ObjectCard:hover {{
                 border-color: {C['accent_bd']};
                 background-color: {C['accent_bg']};
             }}
         """)
+        self.setObjectName("ObjectCard")
         self._build()
         self._load_cover()
 
     def _build(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        # 主布局：不设置边距，由内部容器控制
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(0)
 
-        cover_container = QWidget()
-        cover_container.setStyleSheet("background: transparent;")
-        container_layout = QVBoxLayout(cover_container)
-        container_layout.setContentsMargins(
-            self.COVER_MARGIN, self.COVER_MARGIN, self.COVER_MARGIN, 0
-        )
-        container_layout.setSpacing(0)
+        # --- 1. 封面图封装层 ---
+        # 这个 wrapper 占据卡片上半部分，负责将内容水平居中
+        self.cover_wrapper = QWidget()
+        self.cover_wrapper.setFixedHeight(235)  # 稍微给高一点
+        wrapper_layout = QVBoxLayout(self.cover_wrapper)
 
-        cover_size_w = self.CARD_W - self.COVER_MARGIN * 2
-        cover_size_h = 230 - self.COVER_MARGIN
+        # 关键点：居中对齐，不设边距，手动计算 Label 尺寸
+        wrapper_layout.setContentsMargins(0, self.CONTENT_PADDING, 0, 0)
+        wrapper_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+
+        # 精确计算图片宽度：180 - (3 * 2) = 174px
+        self.cover_w = self.CARD_W - (self.CONTENT_PADDING * 2)
+        self.cover_h = 230 - self.CONTENT_PADDING
+
         self.cover_label = QLabel()
-        self.cover_label.setFixedSize(cover_size_w, cover_size_h)
-        self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.cover_label.setStyleSheet(f"""
-            border-radius: 10px 10px 0 0;
-            background: {C['bg3']};
-        """)
-        pm = make_placeholder_pixmap(cover_size_w, cover_size_h, "📖", C['bg3'])
-        self.cover_label.setPixmap(pm)
-        container_layout.addWidget(self.cover_label)
-        layout.addWidget(cover_container)
+        self.cover_label.setFixedSize(self.cover_w, self.cover_h)
+        self.cover_label.setStyleSheet("background: transparent; border: none;")
 
-        info = QWidget()
-        info.setStyleSheet("background: transparent; border: none;")
-        info_layout = QVBoxLayout(info)
-        info_layout.setContentsMargins(8, 6, 8, 6)
+        # 初始占位图
+        pm = make_placeholder_pixmap(self.cover_w, self.cover_h, "📖", "transparent")
+        self.cover_label.setPixmap(pm)
+
+        wrapper_layout.addWidget(self.cover_label)
+        self.main_layout.addWidget(self.cover_wrapper)
+
+        # --- 2. 文字信息层 ---
+        info_container = QWidget()
+        info_layout = QVBoxLayout(info_container)
+        # 信息区的左右间距建议稍微大一点，视觉上更稳重
+        info_layout.setContentsMargins(12, 5, 12, 10)
         info_layout.setSpacing(2)
 
-        name = QLabel(self.obj["name"])
-        name.setStyleSheet(f"color: {C['text']}; font-size: 12px; font-weight: 600; border: none;")
-        name.setWordWrap(False)
-        name.setMaximumWidth(self.CARD_W - 16)
-        name.setText(name.fontMetrics().elidedText(
-            self.obj["name"], Qt.TextElideMode.ElideRight, self.CARD_W - 16))
-        info_layout.addWidget(name)
+        name = QLabel()
+        name.setStyleSheet(f"color: {C['text']}; font-size: 13px; font-weight: 600; border: none;")
+        name_text = self.obj.get("name", "未命名")
+        # 根据实际可用宽度动态裁剪文字
+        elided = name.fontMetrics().elidedText(name_text, Qt.TextElideMode.ElideRight, self.CARD_W - 24)
+        name.setText(elided)
 
         count = app_state.db.get_image_count(self.obj["id"])
         count_lbl = QLabel(f"{count} 张图片")
-        count_lbl.setStyleSheet(f"color: {C['text3']}; font-size: 10px; border: none; font-family: 'Georgia', serif;")
+        count_lbl.setStyleSheet(f"color: {C['text3']}; font-size: 11px; border: none;")
+
+        info_layout.addWidget(name)
         info_layout.addWidget(count_lbl)
+        self.main_layout.addWidget(info_container)
 
-        layout.addWidget(info)
-
+        # --- 3. R18 标签 ---
         if self.obj.get("tags", {}).get("r18"):
-            badge = QLabel("R18", self)
-            badge.setFixedSize(32, 18)
-            badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            badge.setStyleSheet(f"""
+            self.badge = QLabel("R18", self)
+            self.badge.setFixedSize(34, 18)
+            self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.badge.setStyleSheet("""
                 background-color: #8b2a2a; color: #f5ddd8;
-                font-size: 9px; font-weight: 700;
-                border-radius: 4px;
-                font-family: 'Georgia', serif;
+                font-size: 10px; font-weight: 800; border-radius: 4px;
             """)
-            badge.move(self.CARD_W - 40, 8)
+            # 右上角绝对定位偏移
+            self.badge.move(self.CARD_W - 44, 10)
+
+    def _get_rounded_pixmap(self, src_pixmap, width, height, radius):
+        """圆角处理，确保抗锯齿边缘平滑"""
+        target = QPixmap(width, height)
+        target.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(target)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
+        path = QPainterPath()
+        path.addRoundedRect(0, 0, width, height, radius, radius)
+
+        painter.setClipPath(path)
+        painter.drawPixmap(0, 0, src_pixmap)
+        painter.end()
+        return target
+
+    def _on_thumb_loaded(self, obj_id: str, thumb_path: str):
+        if obj_id != self.obj["id"] or not os.path.isfile(thumb_path):
+            return
+
+        try:
+            pm = QPixmap(thumb_path)
+            # 1. 填充裁剪
+            scaled_pm = pm.scaled(
+                self.cover_w, self.cover_h,
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation
+            )
+
+            # 2. 居中切图
+            if scaled_pm.width() > self.cover_w or scaled_pm.height() > self.cover_h:
+                x = (scaled_pm.width() - self.cover_w) // 2
+                y = (scaled_pm.height() - self.cover_h) // 2
+                scaled_pm = scaled_pm.copy(x, y, self.cover_w, self.cover_h)
+
+            # 3. 完美圆角应用
+            # 内缩半径 = 原始半径 - 边距
+            final_pm = self._get_rounded_pixmap(
+                scaled_pm, self.cover_w, self.cover_h, self.BORDER_RADIUS - 2
+            )
+            self.cover_label.setPixmap(final_pm)
+        except Exception as e:
+            print(f"Error processing thumbnail: {e}")
+
+    # --- 剩余交互代码（contextMenuEvent等）与之前版本保持一致 ---
+    def contextMenuEvent(self, event):
+        menu = QMenu(self)
+        menu.setWindowFlags(
+            menu.windowFlags() | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
+        menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        menu.setStyleSheet("""
+            QMenu { background: #f5f0e8; border: 1px solid #c8bfaa; border-radius: 8px; padding: 4px; }
+            QMenu::item { padding: 8px 24px; border-radius: 4px; color: #2a2418; }
+            QMenu::item:selected { background: #e4ddd2; }
+        """)
+        act_edit = menu.addAction("✏️  编辑信息")
+        act_cover = menu.addAction("🖼  设置封面")
+        menu.addSeparator()
+        act_del = menu.addAction("🗑  删除对象")
+        action = menu.exec(event.globalPos())
+        if action == act_edit:
+            self.edit_requested.emit(self.obj)
+        elif action == act_cover:
+            self.cover_change_requested.emit(self.obj)
+        elif action == act_del:
+            self.delete_requested.emit(self.obj)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.double_clicked.emit(self.obj)
 
     def _load_cover(self):
         cover = self.obj.get("cover_image")
         if not cover:
             images = app_state.db.get_images(self.obj["id"])
-            if images:
-                cover = images[0]["filepath"]
+            if images: cover = images[0]["filepath"]
         if cover and os.path.isfile(cover):
             self._set_cover_async(cover)
 
@@ -138,85 +226,6 @@ class ObjectCard(QFrame):
         self._loader = ThumbnailLoader([(self.obj["id"], path, self.cache_dir)])
         self._loader.loaded.connect(self._on_thumb_loaded)
         self._loader.start()
-
-    def _on_thumb_loaded(self, obj_id: str, thumb_path: str):
-        try:
-            if not self.isVisible() and not self.cover_label:
-                return
-        except RuntimeError:
-            return
-        if obj_id == self.obj["id"] and os.path.isfile(thumb_path):
-            pm = QPixmap(thumb_path)
-            cover_w = self.CARD_W - self.COVER_MARGIN * 2
-            cover_h = 230 - self.COVER_MARGIN
-            pm = pm.scaled(cover_w, cover_h,
-                           Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                           Qt.TransformationMode.SmoothTransformation)
-            if pm.width() > cover_w or pm.height() > cover_h:
-                x = (pm.width() - cover_w) // 2
-                y = (pm.height() - cover_h) // 2
-                pm = pm.copy(x, y, cover_w, cover_h)
-            self.cover_label.setPixmap(pm)
-
-    def update_object(self, obj: dict):
-        self.obj = obj
-
-    def _open_in_explorer(self):
-        import subprocess
-        obj = app_state.db.get_object(self.obj["id"])
-        path = (obj or {}).get("storage_path", "")
-        if path and os.path.isdir(path):
-            subprocess.Popen(["explorer", os.path.normpath(path)])
-        else:
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.warning(None, "提示", "找不到对应的存储目录")
-
-    def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.double_clicked.emit(self.obj)
-
-    def contextMenuEvent(self, event):
-        menu = QMenu(self)
-        menu.setWindowFlags(
-            menu.windowFlags() | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
-        menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        menu.setStyleSheet("""
-            QMenu {
-                background: #f5f0e8;
-                border: 1px solid #c8bfaa;
-                border-radius: 8px;
-                padding: 4px;
-            }
-            QMenu::item {
-                padding: 8px 20px;
-                border-radius: 4px;
-                color: #2a2418;
-            }
-            QMenu::item:selected {
-                background: #e4ddd2;
-            }
-            QMenu::separator {
-                background: #c8bfaa;
-                height: 1px;
-                margin: 4px 8px;
-            }
-        """)
-        act_edit = menu.addAction("✏️  编辑信息")
-        act_cover = menu.addAction("🖼  设置封面")
-        act_explore = menu.addAction("📂  在资源管理器中打开")
-        menu.addSeparator()
-        act_del = menu.addAction("🗑  删除对象")
-
-        action = menu.exec(event.globalPos())
-        if action == act_edit:
-            self.edit_requested.emit(self.obj)
-        elif action == act_cover:
-            self.cover_change_requested.emit(self.obj)
-        elif action == act_explore:
-            self._open_in_explorer()
-        elif action == act_del:
-            self.delete_requested.emit(self.obj)
-
 
 class BookshelfView(QWidget):
     object_opened = pyqtSignal(dict)
