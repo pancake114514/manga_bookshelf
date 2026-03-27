@@ -37,7 +37,7 @@ class MangaProgressBar(QWidget):
     自定义进度条：
     - 从右向左增长（右侧=第一页）
     - 滑块为圆形
-    - 深色渐变风格
+    - 扁平化纯色风格，背景 #DDD6C8
     """
     value_changed = pyqtSignal(int)
 
@@ -75,62 +75,59 @@ class MangaProgressBar(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
+        # --- 1. 绘制整体背景 ---
+        painter.fillRect(self.rect(), QColor("transparent"))
+
         pad = 20
         bar_y = self.height() // 2
         bar_h = 4
         w = self.width() - 2 * pad
 
-        # 轨道背景
+        # --- 2. 轨道背景 (未读部分) ---
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(C["track"]))
+        painter.setBrush(QColor("#C4BCAD"))  # 稍深一点的底色作为轨道
         painter.drawRoundedRect(pad, bar_y - bar_h // 2, w, bar_h, 2, 2)
 
-        # 已读进度（右侧起点 → 当前位置）
+        # --- 3. 已读进度 (右侧起点 → 当前位置) ---
         if self._maximum > 0:
             ratio = self._value / self._maximum
             filled_w = int(w * ratio)
-            # 右侧开始填充
-            grad = QLinearGradient(self.width() - pad, 0, self.width() - pad - filled_w, 0)
-            grad.setColorAt(0, QColor(C["accent"]))
-            grad.setColorAt(1, QColor(C["accent2"]))
-            painter.setBrush(grad)
+
+            # 【修改点】移除线性渐变，改用纯色填充 (深咖啡色，与背景契合)
+            painter.setBrush(QColor("#6A5C4D"))
             painter.drawRoundedRect(
                 self.width() - pad - filled_w,
                 bar_y - bar_h // 2,
                 filled_w, bar_h, 2, 2
             )
 
-        # 圆形滑块
+        # --- 4. 圆形滑块 ---
         if self._maximum > 0:
             ratio = self._value / self._maximum
             knob_x = self.width() - pad - int(w * ratio)
         else:
             knob_x = self.width() - pad
+
         knob_r = 8
 
-        # 外发光
-        accent_rgb = QColor(C["accent"]).getRgb()
-        glow = QRadialGradient(knob_x, bar_y, knob_r * 2)
-        glow.setColorAt(0, QColor(accent_rgb[0], accent_rgb[1], accent_rgb[2], 80))
-        glow.setColorAt(1, QColor(accent_rgb[0], accent_rgb[1], accent_rgb[2], 0))
-        painter.setBrush(glow)
-        painter.drawEllipse(QPoint(knob_x, bar_y), knob_r * 2, knob_r * 2)
-
-        # 主体
-        painter.setBrush(QColor(C["knob"]))
-        painter.setPen(QPen(QColor(C["knob_bd"]), 1.5))
+        # 【修改点】移除外发光渐变，直接绘制扁平化圆形滑块
+        painter.setBrush(QColor("#F4EFE6"))  # 滑块内部颜色（亮米色）
+        painter.setPen(QPen(QColor("#6A5C4D"), 2.0))  # 滑块边框颜色（同进度条颜色）
         painter.drawEllipse(QPoint(knob_x, bar_y), knob_r, knob_r)
 
-        # 页码文字
-        painter.setPen(QColor(C["text2"]))
+        # --- 5. 页码文字 ---
+        # 设置字体颜色与滑块边框一致，保持整体视觉统一
+        painter.setPen(QColor("#4A3F35"))
         font = painter.font()
         font.setPointSize(9)
+        # font.setBold(True) # 如果觉得文字不够清晰可以取消这行的注释
         painter.setFont(font)
         text = f"{self._value + 1} / {self._maximum + 1}"
-        painter.drawText(QRect(0, 0, self.width(), self.height()),
-                         Qt.AlignmentFlag.AlignCenter, text)
+        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, text)
+
         painter.end()
 
+    # --- 鼠标事件保持不变 ---
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._dragging = True
@@ -146,7 +143,6 @@ class MangaProgressBar(QWidget):
 
     def mouseReleaseEvent(self, event):
         self._dragging = False
-
 
 class ImageViewer(QWidget):
     """
@@ -225,9 +221,8 @@ class ImageViewer(QWidget):
         # ── 进度条区域 ────────────────────────────────────────────────────────
         bottom = QWidget()
         bottom.setFixedHeight(56)
-        bottom.setStyleSheet("""
-            background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-                stop:0 transparent, stop:1 rgba(8,7,15,0.98));
+        bottom.setStyleSheet(F"""
+            background: color: {C['bg2']}
         """)
         bottom_layout = QVBoxLayout(bottom)
         bottom_layout.setContentsMargins(24, 4, 24, 8)
