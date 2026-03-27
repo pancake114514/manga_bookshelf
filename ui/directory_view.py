@@ -78,7 +78,8 @@ class ImageThumbCard(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             self.double_clicked.emit(self.idx)
 
-
+cover_w = 180
+cover_h = 240
 class DirectoryView(QWidget):
     """
     点击书架上的对象后进入的目录视图
@@ -139,10 +140,10 @@ class DirectoryView(QWidget):
 
         # 封面缩略图（固定尺寸）
         self.cover_thumb = QLabel()
-        self.cover_thumb.setFixedSize(144, 192)
+        self.cover_thumb.setFixedSize(cover_w, cover_h)
         self.cover_thumb.setStyleSheet(f"border-radius: 6px; background: {C['bg3']};")
         self.cover_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        pm = make_placeholder_pixmap(144, 192, "📖", "#e4ddd2")
+        pm = make_placeholder_pixmap(cover_w, cover_h, "📖", "#e4ddd2")
         self.cover_thumb.setPixmap(pm)
         content_row.addWidget(self.cover_thumb, alignment=Qt.AlignmentFlag.AlignTop)
 
@@ -231,9 +232,9 @@ class DirectoryView(QWidget):
                 cover = images[0]["filepath"]
         if cover and os.path.isfile(cover):
             from utils.thumbnail import generate_thumbnail
-            path = generate_thumbnail(cover, self.cache_dir, (144, 192))
+            path = generate_thumbnail(cover, self.cache_dir, (cover_w, cover_h))
             if path:
-                pm = QPixmap(path).scaled(144, 192,
+                pm = QPixmap(path).scaled(cover_w, cover_h,
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation)
                 self.cover_thumb.setPixmap(pm)
