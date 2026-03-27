@@ -20,7 +20,10 @@ def _thumb_path(cache_dir: str, source_path: str, size: tuple) -> str:
 
 def generate_thumbnail(source_path: str, cache_dir: str,
                         size: tuple = THUMBNAIL_SIZE) -> str | None:
-    """生成缩略图，返回缓存路径；失败返回 None"""
+    """
+    生成缩略图，返回缓存路径；失败返回 None。
+    策略：等比缩放后居中裁剪到目标尺寸，不填充任何背景色。
+    """
     if not os.path.isfile(source_path):
         return None
     ext = os.path.splitext(source_path)[1].lower()
@@ -33,13 +36,29 @@ def generate_thumbnail(source_path: str, cache_dir: str,
 
     try:
         img = Image.open(source_path)
+        # 处理 EXIF 旋转
+        try:
+            from PIL import ImageOps
+            img = ImageOps.exif_transpose(img)
+        except Exception:
+            pass
+
         img = img.convert("RGB")
-        img.thumbnail(size, Image.LANCZOS)
-        # 创建带背景的缩略图（保持比例，填充黑色）
-        bg = Image.new("RGB", size, (20, 20, 30))
-        offset = ((size[0] - img.width) // 2, (size[1] - img.height) // 2)
-        bg.paste(img, offset)
-        bg.save(thumb_path, "JPEG", quality=85)
+        target_w, target_h = size
+        src_w, src_h = img.size
+
+        # 计算等比缩放后能覆盖目标尺寸的最小缩放比
+        scale = max(target_w / src_w, target_h / src_h)
+        new_w = round(src_w * scale)
+        new_h = round(src_h * scale)
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+
+        # 居中裁剪到目标尺寸
+        left = (new_w - target_w) // 2
+        top  = (new_h - target_h) // 2
+        img = img.crop((left, top, left + target_w, top + target_h))
+
+        img.save(thumb_path, "JPEG", quality=85)
         return thumb_path
     except Exception as e:
         print(f"[Thumbnail] Error: {e} | {source_path}")
