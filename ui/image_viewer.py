@@ -27,8 +27,8 @@ C = {
     "text":      "#2a2418",   # 主文字：深墨
     "text2":     "#5a5040",   # 次级文字
     "text3":     "#8a7f6a",   # 弱文字
-    "border":    "#2a2540",   # 边框
-    "border_h":  "#5c3f8a",   # 边框悬停
+    "border":    "#c4856a",   # 边框
+    "border_h":  "#c4856a",   # 边框悬停
 }
 
 
@@ -205,13 +205,14 @@ class ImageViewer(QWidget):
         self.filename_lbl.setStyleSheet(f"color: {C['text3']}; font-size: 11px;")
         top_layout.addWidget(self.filename_lbl)
 
-        fullscreen_btn = QPushButton("⛶")
-        fullscreen_btn.setFixedSize(16, 16)
-        fullscreen_btn.setToolTip("全屏 (F / F11)")
+        fullscreen_btn = QPushButton("⛶ 全屏")
+        fullscreen_btn.setFixedHeight(28)
+        fullscreen_btn.setMinimumWidth(72)
+
         fullscreen_btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent; border: 1px solid {C['border']};
-                border-radius: 5px; color: {C['text2']}; font-size: 14px;
+                border-radius: 5px; color: {C['text2']}; font-size: 12px; padding: 4px 8px;
             }}
             QPushButton:hover {{ border-color: {C['border_h']}; color: {C['text']}; }}
         """)
