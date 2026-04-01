@@ -332,7 +332,7 @@ class BookshelfView(QWidget):
 
     def _on_delete(self, obj: dict):
         """删除对象，可选择是否同时删除本地文件"""
-        dlg = FramelessDialog("确认删除", self)
+        dlg = FramelessDialog("🗑️?", self)
         dlg.setMinimumWidth(400)
         dlg.setModal(True)
 
@@ -408,6 +408,16 @@ class BookshelfView(QWidget):
 
         # 在所有布局组装完成后，安装自定义标题栏
         dlg._install_titlebar()
+        layout = dlg.layout()
+        l, t, r, b = layout.getContentsMargins()
+        print(l,t,r,b)
+        layout.setContentsMargins(
+            l,
+            t + 5,
+            2,  # 右边距按“当前底部距离”对齐（减 1px）
+            -2
+        )
+        dlg.adjustSize()
 
         # --- 后续执行逻辑 ---
         if dlg.exec() == QDialog.DialogCode.Accepted:
