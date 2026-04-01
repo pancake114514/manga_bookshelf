@@ -94,7 +94,7 @@ class ImportDialog(FramelessDialog):
         title.setStyleSheet(f"font-size: 16px; font-weight: 600; color: {C['text']};")
         cl.addWidget(title)
 
-        self.btn_new = QPushButton("📁  新建目录对象（导入文件夹）")
+        self.btn_new = QPushButton("📁  新建目录（导入文件夹）")
         self.btn_new.setMinimumHeight(52)
         self.btn_new.setStyleSheet(f"""
             QPushButton {{
@@ -114,7 +114,7 @@ class ImportDialog(FramelessDialog):
         self.btn_new.clicked.connect(self._import_new_directory)
         cl.addWidget(self.btn_new)
 
-        self.btn_existing = QPushButton("🖼  导入文件夹到已有目录对象")
+        self.btn_existing = QPushButton("🖼  导入文件夹到已有目录")
         self.btn_existing.setMinimumHeight(52)
         self.btn_existing.setStyleSheet(f"""
             QPushButton {{
@@ -134,7 +134,7 @@ class ImportDialog(FramelessDialog):
         self.btn_existing.clicked.connect(self._import_to_existing)
         cl.addWidget(self.btn_existing)
 
-        self.btn_files = QPushButton("📄  导入单张/多张图片到已有目录对象")
+        self.btn_files = QPushButton("📄  导入单张/多张图片到已有目录")
         self.btn_files.setMinimumHeight(52)
         self.btn_files.setStyleSheet(f"""
             QPushButton {{
@@ -178,7 +178,7 @@ class ImportDialog(FramelessDialog):
         obj_id = str(uuid.uuid4())
 
         dlg = TagEditorDialog({"name": default_name, "tags": {}}, self)
-        dlg.setWindowTitle(f"新建目录对象 — 共 {len(images)} 张图片")
+        dlg.setWindowTitle(f"新建目录 — 共 {len(images)} 张图片")
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
@@ -198,7 +198,7 @@ class ImportDialog(FramelessDialog):
         objects = db.get_all_objects(include_r18=True)
         dir_objs = [o for o in objects if o["type"] == "directory"]
         if not dir_objs:
-            QMessageBox.information(self, "提示", "还没有目录对象，请先新建")
+            QMessageBox.information(self, "提示", "还没有创建目录，请先新建")
             return
 
         sel_dlg = _SelectObjectDialog(dir_objs, self)
@@ -229,7 +229,7 @@ class ImportDialog(FramelessDialog):
         objects = db.get_all_objects(include_r18=True)
         dir_objs = [o for o in objects if o["type"] == "directory"]
         if not dir_objs:
-            QMessageBox.information(self, "提示", "还没有目录对象，请先新建")
+            QMessageBox.information(self, "提示", "还没有创建目录，请先新建")
             return
 
         sel_dlg = _SelectObjectDialog(dir_objs, self)
