@@ -431,9 +431,27 @@ class FramelessMixin:
 
         self.setGeometry(QRect(x, y, w, h))
 
+class _DialogTitleBar(TitleBar):
+    def __init__(self, parent, title="", icon=""):
+        super().__init__(parent, title, icon)
+        self.setAutoFillBackground(False)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        r = self.rect().adjusted(0, 0, -1, -1)
+        p.fillRect(r, QColor(C['titlebar']))  # 背景缩进
+        p.setPen(QPen(QColor(C['border']), 1))
+        p.drawLine(r.topLeft(), r.topRight())
+        p.drawLine(r.topLeft(), r.bottomLeft())
+        p.drawLine(r.topRight(), r.bottomRight())
+        p.end()
+    # def paintEvent(self, event):
+    #     p = QPainter(self)
+    #     p.fillRect(self.rect(), QColor(C['titlebar']))
+    #     p.end()
 
 class FramelessDialog(QDialog):
-    """无边框对话框基类，自带自定义标题栏"""
+    """无边框对话框基类，自带自定义标题栏，三边有边框，标题栏底部无分割线"""
 
     def __init__(self, title: str = "", parent=None):
         super().__init__(parent)
@@ -441,17 +459,26 @@ class FramelessDialog(QDialog):
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.Dialog
         )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self._drag_pos = None
         self._dialog_title = title
-        # 子类在 _build() 后调用 _install_titlebar()
 
     def _install_titlebar(self, icon: str = ""):
         layout = self.layout()
         if layout:
-            tb = TitleBar(self, self._dialog_title, icon)
+            tb = _DialogTitleBar(self, self._dialog_title, icon)
             layout.insertWidget(0, tb)
-            layout.setContentsMargins(0, 0, 0, 12)
+            layout.setContentsMargins(0, 0, 0, 0)  # 全部为0，不用margin控制边框
 
+    def paintEvent(self, event):
+        p = QPainter(self)
+        r = self.rect().adjusted(0, 0, -1, -1)
+        p.fillRect(r, QColor(C['bg']))  # 背景也缩进，不覆盖右边框
+        p.setPen(QPen(QColor(C['border']), 1))
+        p.drawLine(r.bottomLeft(), r.bottomRight())
+        p.drawLine(r.topLeft(), r.bottomLeft())
+        p.drawLine(r.topRight(), r.bottomRight())
+        p.end()
 
 # ─── 工具函数 ──────────────────────────────────────────────────────────────────
 
