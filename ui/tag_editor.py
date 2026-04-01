@@ -131,7 +131,7 @@ class TagEditorDialog(FramelessDialog):
         content.setStyleSheet("background: transparent;")
         layout = QVBoxLayout(content)
         layout.setSpacing(12)
-        layout.setContentsMargins(20, 12, 1, 16)  # 右侧1px，加上root的1px共2px
+        layout.setContentsMargins(20, 12, 2, 16)  # 右侧1px，加上root的1px共2px
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)

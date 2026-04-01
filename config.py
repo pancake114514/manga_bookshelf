@@ -15,11 +15,11 @@ TAG_CATEGORIES = {
     "author":    "作者",
     "character": "角色",
     "cm":        "CM",
-    "r18":       "R-18",
     "censored":  "修正",
+    "r18": "R-18",
 }
 
-TAG_CATEGORY_ORDER = ["work", "author", "character", "cm", "r18", "censored"]
+TAG_CATEGORY_ORDER = ["work", "author", "character", "cm", "censored", "r18"]
 
 
 class AppState:

@@ -596,7 +596,7 @@ class SectionLabel(QLabel):
         self.setObjectName("section_title")
         self.setStyleSheet(f"""
             color: {C['text3']};
-            font-size: 10px;
+            font-size: 12px;
             font-weight: 700;
             font-family: "Georgia", "Times New Roman", serif;
             letter-spacing: 2px;
