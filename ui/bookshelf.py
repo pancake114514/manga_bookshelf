@@ -5,7 +5,7 @@ import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
     QPushButton, QScrollArea, QFrame, QSizePolicy, QMenu,
-    QMessageBox
+    QMessageBox, QCheckBox, QDialog
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QThread, QTimer, QPoint
 from PyQt6.QtGui import QPixmap, QColor, QPainter, QPainterPath
@@ -331,13 +331,79 @@ class BookshelfView(QWidget):
             self.tags_updated.emit()
 
     def _on_delete(self, obj: dict):
-        reply = QMessageBox.question(
-            self, "确认删除",
-            f"确定要从书架删除「{obj['name']}」吗？\n（本地图片文件不会被删除）",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+        """删除对象，可选择是否同时删除本地文件"""
+        # 创建自定义对话框
+        dlg = QDialog(self)
+        dlg.setWindowTitle("确认删除")
+        dlg.setMinimumWidth(400)
+        dlg.setModal(True)
+
+        layout = QVBoxLayout(dlg)
+        layout.setSpacing(16)
+
+        # 消息文本
+        msg = QLabel(f"确定要从书架删除「{obj['name']}」吗？")
+        msg.setStyleSheet("font-size: 14px; color: #2a2418;")
+        layout.addWidget(msg)
+
+        # 警告文本
+        warn = QLabel("注意：删除后此操作无法撤销！")
+        warn.setStyleSheet("font-size: 12px; color: #8b2a2a;")
+        layout.addWidget(warn)
+
+        # 复选框
+        checkbox = QCheckBox("同时删除本地图片文件")
+        checkbox.setStyleSheet("font-size: 13px; color: #5a5040;")
+        layout.addWidget(checkbox)
+
+        # 按钮
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        cancel_btn = QPushButton("取消")
+        cancel_btn.setFixedWidth(80)
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background: #ede8df; border: 1px solid #c8bfaa;
+                border-radius: 5px; color: #5a5040; padding: 6px 12px;
+            }
+            QPushButton:hover { background: #e4ddd2; }
+        """)
+        cancel_btn.clicked.connect(dlg.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        confirm_btn = QPushButton("确认删除")
+        confirm_btn.setFixedWidth(100)
+        confirm_btn.setStyleSheet("""
+            QPushButton {
+                background: #8b2a2a; border: 1px solid #6b1a1a;
+                border-radius: 5px; color: #f5ede8; padding: 6px 12px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background: #a03030; }
+        """)
+        confirm_btn.clicked.connect(dlg.accept)
+        btn_layout.addWidget(confirm_btn)
+        layout.addLayout(btn_layout)
+
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            delete_files = checkbox.isChecked()
+
+            # 先删除数据库记录
             app_state.db.delete_object(obj["id"])
+
+            # 如果勾选了删除文件，则删除本地目录
+            if delete_files:
+                storage_path = obj.get("storage_path", "")
+                if storage_path and os.path.isdir(storage_path):
+                    import shutil
+                    try:
+                        shutil.rmtree(storage_path)
+                    except Exception as e:
+                        QMessageBox.warning(
+                            self, "删除失败",
+                            f"无法删除本地文件：{e}\n数据库记录已删除。"
+                        )
+
             self.refresh()
             self.tags_updated.emit()
 
