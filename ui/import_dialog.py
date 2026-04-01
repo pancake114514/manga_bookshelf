@@ -2,10 +2,10 @@ import os
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QFileDialog, QMessageBox, QProgressDialog, QApplication,
-    QFrame, QListWidget, QListWidgetItem, QRadioButton,
+    QFrame, QListWidget, QListWidgetItem, QRadioButton,QDialogButtonBox,
     QButtonGroup, QWidget, QGroupBox, QComboBox, QSizePolicy
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal,QPoint
 from PyQt6.QtGui import QIcon
 from config import app_state, SUPPORTED_FORMATS
 from .widgets import SectionLabel, Divider, FramelessDialog, C
@@ -322,57 +322,175 @@ class ImportDialog(FramelessDialog):
         self.worker.start()
 
 
-class _SelectObjectDialog(FramelessDialog):
+class _SelectObjectDialog(QDialog):
     def __init__(self, objects: list, parent=None):
-        super().__init__("选择目标目录对象", parent)
-        self.setMinimumWidth(360)
+        super().__init__(parent)
+        # 设置无边框窗口标志
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+        self.setMinimumWidth(380)
         self._objects = objects
         self._selected = None
+        self._drag_pos = QPoint()
 
-        # 将间距设为 0，防止和标题栏出现空隙
+        # 主布局
         main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
-        self._install_titlebar()
 
-        # 同样使用 QFrame 来实现下半部分的边框包围
+        # 1. 安装自定义标题栏
+        self._install_titlebar(main_layout)
+
+        # 2. 内容区域（带边框）
         content_frame = QFrame(self)
         content_frame.setObjectName("ContentFrame")
         content_frame.setStyleSheet("""
             #ContentFrame {
+                background-color: #f5f0e8;
                 border-left: 1px solid #c4a484;
                 border-right: 1px solid #c4a484;
                 border-bottom: 1px solid #c4a484;
                 border-top: none;
             }
+            QLabel {
+                font-size: 13px;
+                color: #5a5040;
+            }
+            QListWidget {
+                background: #ffffff;
+                border: 1px solid #c8bfaa;
+                border-radius: 4px;
+                font-size: 13px;
+                color: #2a2418;
+                outline: none;
+            }
+            QListWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #f0e6e0;
+            }
+            QListWidget::item:selected {
+                background: #e4ddd2;
+                color: #6b3a2a;
+            }
+            QPushButton {
+                min-width: 80px;
+                height: 28px;
+                border-radius: 4px;
+                font-size: 13px;
+            }
         """)
 
         content_layout = QVBoxLayout(content_frame)
-        content_layout.setContentsMargins(10, 10, 10, 10)
+        content_layout.setContentsMargins(20, 15, 20, 20)
         content_layout.setSpacing(12)
 
-        content_layout.addWidget(QLabel("请选择要导入到的目录对象："))
+        content_layout.addWidget(QLabel("请选择要导入到的目标目录："))
 
+        # 列表控件
         self.list_widget = QListWidget()
         for obj in objects:
             item = QListWidgetItem(obj["name"])
             item.setData(Qt.ItemDataRole.UserRole, obj)
             self.list_widget.addItem(item)
-        self.list_widget.setCurrentRow(0)
+
+        if objects:
+            self.list_widget.setCurrentRow(0)
+
         self.list_widget.itemDoubleClicked.connect(lambda: self.accept())
         content_layout.addWidget(self.list_widget)
 
-        from PyQt6.QtWidgets import QDialogButtonBox
+        # 按钮栏
         btns = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        btns.button(QDialogButtonBox.StandardButton.Ok).setText("确定")
-        btns.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+
+        # 按钮样式
+        ok_btn = btns.button(QDialogButtonBox.StandardButton.Ok)
+        ok_btn.setText("确定")
+        ok_btn.setStyleSheet("""
+            QPushButton { background: #6b3a2a; color: white; border: none; font-weight: bold; }
+            QPushButton:hover { background: #8b4a35; }
+        """)
+
+        cancel_btn = btns.button(QDialogButtonBox.StandardButton.Cancel)
+        cancel_btn.setText("取消")
+        cancel_btn.setStyleSheet("""
+            QPushButton { background: #ede8df; color: #5a5040; border: 1px solid #c8bfaa; }
+            QPushButton:hover { background: #e4ddd2; }
+        """)
+
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         content_layout.addWidget(btns)
 
         main_layout.addWidget(content_frame)
 
+    def _install_titlebar(self, layout: QVBoxLayout):
+        """构建并添加自定义标题栏"""
+        title_bar = QFrame()
+        title_bar.setFixedHeight(36)
+        title_bar.setObjectName("TitleBar")
+        title_bar.setStyleSheet("""
+            #TitleBar {
+                background-color: #d9ceb2;
+                border-left: 1px solid #c4a484;
+                border-right: 1px solid #c4a484;
+                border-top: 1px solid #c4a484;
+                border-top-left-radius: 0px;
+                border-top-right-radius: 0px;
+            }
+            QLabel {
+                background: transparent;  /* 确保背景透明 */
+                font-size: 13px;
+                font-weight: bold;
+                color: #4a3a2a;
+            }
+            QPushButton#CloseBtn {
+                background: transparent;
+                color: #4a3a2a;
+                font-size: 18px;
+                border: none;
+            }
+            QPushButton#CloseBtn:hover {
+                background: #c4856a;
+                color: white;
+                border-top-right-radius: 6px;
+            }
+        """)
+
+        t_layout = QHBoxLayout(title_bar)
+        t_layout.setContentsMargins(12, 0, 0, 0)
+        t_layout.setSpacing(0)
+
+        # 标题文字
+        title_label = QLabel("选择目标目录")
+        # 也可以在这里单独设置，但写在上面的 QSS 里更整洁
+        # title_label.setStyleSheet("background: transparent;")
+
+        t_layout.addWidget(title_label)
+        t_layout.addStretch()
+
+        # 关闭按钮
+        close_btn = QPushButton("×")
+        close_btn.setObjectName("CloseBtn")
+        close_btn.setFixedSize(36, 36)
+        close_btn.clicked.connect(self.reject)
+        t_layout.addWidget(close_btn)
+
+        layout.addWidget(title_bar)
+
     def selected_object(self):
         item = self.list_widget.currentItem()
         return item.data(Qt.ItemDataRole.UserRole) if item else None
+
+    # --- 无边框拖动支持 ---
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
