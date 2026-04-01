@@ -11,7 +11,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QSize, QThread, QTimer, QPoint
 from PyQt6.QtGui import QPixmap, QColor, QPainter, QPainterPath
 from config import app_state, THUMBNAIL_SIZE
 from .widgets import (
-    make_placeholder_pixmap, C
+    make_placeholder_pixmap, C, FramelessDialog
 )
 
 
@@ -332,33 +332,53 @@ class BookshelfView(QWidget):
 
     def _on_delete(self, obj: dict):
         """删除对象，可选择是否同时删除本地文件"""
-        # 创建自定义对话框
-        dlg = QDialog(self)
-        dlg.setWindowTitle("确认删除")
+        dlg = FramelessDialog("确认删除", self)
         dlg.setMinimumWidth(400)
         dlg.setModal(True)
 
+        # 应用与 TagEditorDialog 相同的外框描边和背景样式
+        dlg.setObjectName("DeleteConfirmDialog")
+        dlg.setStyleSheet("""
+            #DeleteConfirmDialog {
+                border: 1px solid #c4a484; 
+                background: #f5f0e8;
+                padding: 1px; /* 强制内边距1px，防止背景色吞噬边框 */
+            }
+        """)
+
+        # 1. 主布局：设置与 TagEditorDialog 相同的 20px 基础边距
         layout = QVBoxLayout(dlg)
         layout.setSpacing(16)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # 2. 文本内容区域：使用独立布局包装，并追加左右 8px 内边距防止贴边
+        content_layout = QVBoxLayout()
+        content_layout.setContentsMargins(8, 0, 8, 0)
+        content_layout.setSpacing(12)
 
         # 消息文本
         msg = QLabel(f"确定要从书架删除「{obj['name']}」吗？")
         msg.setStyleSheet("font-size: 14px; color: #2a2418;")
-        layout.addWidget(msg)
+        content_layout.addWidget(msg)
 
         # 警告文本
         warn = QLabel("注意：删除后此操作无法撤销！")
         warn.setStyleSheet("font-size: 12px; color: #8b2a2a;")
-        layout.addWidget(warn)
+        content_layout.addWidget(warn)
 
         # 复选框
         checkbox = QCheckBox("同时删除本地图片文件")
         checkbox.setStyleSheet("font-size: 13px; color: #5a5040;")
-        layout.addWidget(checkbox)
+        content_layout.addWidget(checkbox)
 
-        # 按钮
+        # 将内容布局加入主布局
+        layout.addLayout(content_layout)
+
+        # 3. 按钮区域：同样追加左右 8px 内边距
         btn_layout = QHBoxLayout()
+        btn_layout.setContentsMargins(8, 0, 8, 0)
         btn_layout.addStretch()
+
         cancel_btn = QPushButton("取消")
         cancel_btn.setFixedWidth(80)
         cancel_btn.setStyleSheet("""
@@ -383,8 +403,13 @@ class BookshelfView(QWidget):
         """)
         confirm_btn.clicked.connect(dlg.accept)
         btn_layout.addWidget(confirm_btn)
+
         layout.addLayout(btn_layout)
 
+        # 在所有布局组装完成后，安装自定义标题栏
+        dlg._install_titlebar()
+
+        # --- 后续执行逻辑 ---
         if dlg.exec() == QDialog.DialogCode.Accepted:
             delete_files = checkbox.isChecked()
 
