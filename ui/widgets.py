@@ -467,8 +467,23 @@ class FramelessDialog(QDialog):
         layout = self.layout()
         if layout:
             tb = _DialogTitleBar(self, self._dialog_title, icon)
-            layout.insertWidget(0, tb)
-            layout.setContentsMargins(0, 0, 0, 0)  # 全部为0，不用margin控制边框
+            tb.setParent(self)
+
+            # 标题栏绝对定位，铺满顶部全宽
+            tb.setGeometry(0, 0, self.width(), tb.height())
+
+            # 窗口大小变化时同步更新标题栏宽度
+            self._titlebar = tb
+
+            # 根 layout 顶部留出标题栏高度，右侧留1px给边框
+            layout.setContentsMargins(0, tb.height(), 1, 0)
+
+            tb.show()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, '_titlebar'):
+            self._titlebar.setGeometry(0, 0, self.width(), self._titlebar.height())
 
     def paintEvent(self, event):
         p = QPainter(self)
