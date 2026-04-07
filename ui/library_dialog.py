@@ -63,10 +63,30 @@ class LibraryDialog(FramelessDialog):
         browse_btn.clicked.connect(self._browse)
         btn_row.addWidget(browse_btn)
 
-        save_btn = QPushButton("开始迁移")
-        # save_btn.setObjectName("accent")
-        save_btn.clicked.connect(self._save)
-        btn_row.addWidget(save_btn)
+        self.save_btn = QPushButton("开始迁移")
+        self.save_btn.setStyleSheet("""
+            QPushButton {
+                background: #ede8df;
+                border: 1px solid #c8bfaa;
+                border-radius: 5px;
+                color: #5a5040;
+                padding: 5px 14px;
+                font-weight: 500;
+            }
+            QPushButton:hover:!disabled {
+                background: #BFBFBF;
+                border-color: #c8bfaa;
+                color: #2a2418;
+            }
+            QPushButton:disabled {
+                background: #BFBFBF;
+                border: 1px solid #c8bfaa;
+                color: #d7d1c7;
+            }
+        """)
+        self.save_btn.setEnabled(False)
+        self.save_btn.clicked.connect(self._save)
+        btn_row.addWidget(self.save_btn)
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
@@ -92,6 +112,8 @@ class LibraryDialog(FramelessDialog):
 
     def _refresh_path_label(self):
         self.path_label.setText(self._selected_path or "未设置")
+        changed = os.path.normcase((self._selected_path or "").strip()) != os.path.normcase((self._current_path or "").strip())
+        self.save_btn.setEnabled(changed)
 
     def _browse(self):
         path = QFileDialog.getExistingDirectory(self, "选择新的图库目录")
