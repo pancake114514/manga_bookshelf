@@ -1,8 +1,5 @@
-"""
-数据库层 - 使用 SQLite 管理所有数据
-"""
 import sqlite3
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
 
 class Database:
@@ -10,7 +7,25 @@ class Database:
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        self._in_transaction = False
         self._init_tables()
+
+    def begin(self):
+        if not self._in_transaction:
+            self.conn.execute("BEGIN")
+            self._in_transaction = True
+
+    def commit(self):
+        self.conn.commit()
+        self._in_transaction = False
+
+    def rollback(self):
+        self.conn.rollback()
+        self._in_transaction = False
+
+    def _commit_if_needed(self):
+        if not self._in_transaction:
+            self.conn.commit()
 
     def _init_tables(self):
         cur = self.conn.cursor()
@@ -54,9 +69,7 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_tags_object ON tags(object_id);
             CREATE INDEX IF NOT EXISTS idx_images_object ON images(object_id);
         """)
-        self.conn.commit()
-
-    # ── Config ────────────────────────────────────────────────────────────────
+        self._commit_if_needed()
 
     def get_config(self, key: str) -> Optional[str]:
         row = self.conn.execute(
@@ -68,9 +81,7 @@ class Database:
         self.conn.execute(
             "INSERT OR REPLACE INTO config(key,value) VALUES(?,?)", (key, value)
         )
-        self.conn.commit()
-
-    # ── Objects ───────────────────────────────────────────────────────────────
+        self._commit_if_needed()
 
     def create_object(self, obj_id: str, obj_type: str, name: str,
                       source_path: str, storage_path: str) -> bool:
@@ -80,7 +91,7 @@ class Database:
                    VALUES(?,?,?,?,?)""",
                 (obj_id, obj_type, name, source_path, storage_path)
             )
-            self.conn.commit()
+            self._commit_if_needed()
             return True
         except sqlite3.IntegrityError:
             return False
@@ -112,54 +123,52 @@ class Database:
         self.conn.execute(
             "UPDATE objects SET name=? WHERE id=?", (name, obj_id)
         )
-        self.conn.commit()
+        self._commit_if_needed()
 
     def update_object_cover(self, obj_id: str, cover_image: str):
         self.conn.execute(
             "UPDATE objects SET cover_image=? WHERE id=?", (cover_image, obj_id)
         )
-        self.conn.commit()
+        self._commit_if_needed()
+
+    def update_object_storage_path(self, obj_id: str, storage_path: str):
+        self.conn.execute(
+            "UPDATE objects SET storage_path=? WHERE id=?", (storage_path, obj_id)
+        )
+        self._commit_if_needed()
 
     def update_last_read(self, obj_id: str, idx: int):
         self.conn.execute(
             "UPDATE objects SET last_read_idx=? WHERE id=?", (idx, obj_id)
         )
-        self.conn.commit()
+        self._commit_if_needed()
 
     def delete_object(self, obj_id: str):
-        """删除对象，并清理不再被其他对象使用的孤立标签"""
-        # 删除对象（会通过 CASCADE 删除 tags 表中的记录）
         self.conn.execute("DELETE FROM objects WHERE id=?", (obj_id,))
-        self.conn.commit()
-
-        # 清理所有孤立标签（扫描整个标签库）
+        self._commit_if_needed()
         self.cleanup_all_orphan_tags()
 
     def cleanup_all_orphan_tags(self):
-        """清理所有不再被任何对象使用的孤立标签"""
-        # 获取所有还有效的 object_id 列表
         valid_objects = set(
             row["id"] for row in self.conn.execute("SELECT id FROM objects").fetchall()
         )
+        all_tags = self.conn.execute(
+            "SELECT id, object_id, category, value FROM tags"
+        ).fetchall()
 
-        # 获取所有标签记录
-        all_tags = self.conn.execute("SELECT id, object_id, category, value FROM tags").fetchall()
-
-        # 找出孤立标签（object_id 不在有效对象列表中的记录）
         orphan_tag_ids = []
         for tag in all_tags:
             if tag["object_id"] not in valid_objects:
                 orphan_tag_ids.append(tag["id"])
 
-        # 删除孤立标签
         if orphan_tag_ids:
             placeholders = ",".join("?" * len(orphan_tag_ids))
-            self.conn.execute(f"DELETE FROM tags WHERE id IN ({placeholders})", orphan_tag_ids)
-            self.conn.commit()
+            self.conn.execute(
+                f"DELETE FROM tags WHERE id IN ({placeholders})", orphan_tag_ids
+            )
+            self._commit_if_needed()
 
     def _cleanup_orphan_tags(self, tags: Dict):
-        """清理不再被任何对象使用的孤立标签（已弃用，改用 cleanup_all_orphan_tags）"""
-        # 为保持向后兼容，仍调用完整扫描方法
         self.cleanup_all_orphan_tags()
 
     def search_objects(self, keyword: str, include_r18: bool = False) -> List[Dict]:
@@ -182,7 +191,6 @@ class Database:
 
     def filter_by_tags(self, tag_filters: Dict[str, List[str]],
                        include_r18: bool = False) -> List[Dict]:
-        """按标签过滤对象，tag_filters 是 {category: [value, ...]} 的字典"""
         all_objs = self.get_all_objects(include_r18)
         if not tag_filters:
             return all_objs
@@ -203,8 +211,6 @@ class Database:
                 result.append(obj)
         return result
 
-    # ── Tags ──────────────────────────────────────────────────────────────────
-
     def _get_tags(self, obj_id: str) -> Dict:
         rows = self.conn.execute(
             "SELECT category, value FROM tags WHERE object_id=?", (obj_id,)
@@ -221,7 +227,6 @@ class Database:
         return tags
 
     def set_tags(self, obj_id: str, tags: Dict):
-        """完整替换某对象的标签"""
         self.conn.execute("DELETE FROM tags WHERE object_id=?", (obj_id,))
         rows = []
         for cat, val in tags.items():
@@ -238,7 +243,7 @@ class Database:
             self.conn.executemany(
                 "INSERT INTO tags(object_id,category,value) VALUES(?,?,?)", rows
             )
-        self.conn.commit()
+        self._commit_if_needed()
 
     def get_all_tag_values(self, category: str) -> List[str]:
         rows = self.conn.execute(
@@ -247,8 +252,6 @@ class Database:
         ).fetchall()
         return [r["value"] for r in rows]
 
-    # ── Images ────────────────────────────────────────────────────────────────
-
     def add_image(self, img_id: str, obj_id: str, filename: str,
                   filepath: str, sort_order: int = 0):
         self.conn.execute(
@@ -256,7 +259,13 @@ class Database:
                VALUES(?,?,?,?,?)""",
             (img_id, obj_id, filename, filepath, sort_order)
         )
-        self.conn.commit()
+        self._commit_if_needed()
+
+    def update_image_filepath(self, img_id: str, filepath: str):
+        self.conn.execute(
+            "UPDATE images SET filepath=? WHERE id=?", (filepath, img_id)
+        )
+        self._commit_if_needed()
 
     def get_images(self, obj_id: str) -> List[Dict]:
         rows = self.conn.execute(

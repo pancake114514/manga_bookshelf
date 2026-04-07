@@ -19,13 +19,13 @@ class ImportWorker(QThread):
     error = pyqtSignal(str)
 
     def __init__(self, obj_id: str, obj_name: str, tags: dict,
-                 source_dir: str, storage_root: str, is_new: bool):
+                 source_dir: str, target_dir: str, is_new: bool):
         super().__init__()
         self.obj_id = obj_id
         self.obj_name = obj_name
         self.tags = tags
         self.source_dir = source_dir
-        self.storage_root = storage_root
+        self.target_dir = target_dir
         self.is_new = is_new
 
     def run(self):
@@ -37,7 +37,7 @@ class ImportWorker(QThread):
             )
             db = app_state.db
 
-            storage_obj_dir = os.path.join(self.storage_root, self.obj_name)
+            storage_obj_dir = self.target_dir
             os.makedirs(storage_obj_dir, exist_ok=True)
 
             if self.is_new:
@@ -221,8 +221,12 @@ class ImportDialog(FramelessDialog):
             QMessageBox.warning(self, "提示", "所选文件夹中没有支持的图片文件")
             return
 
+        target_dir = (target_obj.get("storage_path") or "").strip()
+        if not target_dir or not os.path.isdir(target_dir):
+            target_dir = os.path.join(self.storage_root, target_obj["name"])
+
         self._run_import(target_obj["id"], target_obj["name"], {},
-                         folder, is_new=False)
+                         folder, is_new=False, target_dir=target_dir)
 
     def _import_single_files(self):
         db = app_state.db
@@ -276,15 +280,16 @@ class ImportDialog(FramelessDialog):
         self.accept()
         self.import_done.emit(target_obj["id"])
 
-    def _run_import(self, obj_id, name, tags, source_dir, is_new):
+    def _run_import(self, obj_id, name, tags, source_dir, is_new, target_dir=None):
         prog = QProgressDialog("正在导入图片…", "取消", 0, 100, self)
         prog.setWindowTitle("导入中")
         prog.setModal(True)
         prog.setMinimumWidth(320)
         prog.show()
 
+        target_dir = target_dir or os.path.join(self.storage_root, name)
         self.worker = ImportWorker(obj_id, name, tags, source_dir,
-                                   self.storage_root, is_new)
+                                   target_dir, is_new)
 
         def on_progress(cur, total):
             if total > 0:

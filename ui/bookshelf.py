@@ -39,6 +39,7 @@ class ObjectCard(QFrame):
     edit_requested = pyqtSignal(dict)
     delete_requested = pyqtSignal(dict)
     cover_change_requested = pyqtSignal(dict)
+    open_in_explorer_requested = pyqtSignal(dict)
 
     CARD_W = 180
     CARD_H = 280
@@ -202,6 +203,7 @@ class ObjectCard(QFrame):
         """)
         act_edit = menu.addAction("✏️  编辑信息")
         act_cover = menu.addAction("🖼  设置封面")
+        act_open = menu.addAction("📂  在资源管理器中打开")
         menu.addSeparator()
         act_del = menu.addAction("🗑  删除对象")
         action = menu.exec(event.globalPos())
@@ -209,6 +211,8 @@ class ObjectCard(QFrame):
             self.edit_requested.emit(self.obj)
         elif action == act_cover:
             self.cover_change_requested.emit(self.obj)
+        elif action == act_open:
+            self.open_in_explorer_requested.emit(self.obj)
         elif action == act_del:
             self.delete_requested.emit(self.obj)
 
@@ -292,6 +296,7 @@ class BookshelfView(QWidget):
             card.edit_requested.connect(self._on_edit)
             card.delete_requested.connect(self._on_delete)
             card.cover_change_requested.connect(self._on_change_cover)
+            card.open_in_explorer_requested.connect(self._on_open_in_explorer)
             row, col = divmod(i, cols)
             self.grid_layout.addWidget(card, row, col)
             self._cards[obj["id"]] = card
@@ -299,6 +304,11 @@ class BookshelfView(QWidget):
     def refresh(self):
         objects = app_state.db.get_all_objects(include_r18=app_state.show_r18)
         self.load_objects(objects)
+
+    def update_storage_root(self, storage_root: str):
+        self.storage_root = storage_root
+        self.cache_dir = os.path.join(storage_root, ".thumbcache")
+        os.makedirs(self.cache_dir, exist_ok=True)
 
     def _calc_cols(self) -> int:
         effective_w = self.width() if self.width() > 200 else 900
@@ -456,3 +466,13 @@ class BookshelfView(QWidget):
         if path:
             app_state.db.update_object_cover(obj["id"], path)
             self.refresh()
+
+    def _on_open_in_explorer(self, obj: dict):
+        storage_path = (obj.get("storage_path") or "").strip()
+        if not storage_path or not os.path.isdir(storage_path):
+            QMessageBox.warning(self, "Open Failed", "The local folder for this object does not exist.")
+            return
+        try:
+            os.startfile(storage_path)
+        except Exception as e:
+            QMessageBox.warning(self, "Open Failed", f"Unable to open the local folder: {e}")

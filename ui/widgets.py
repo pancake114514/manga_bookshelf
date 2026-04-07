@@ -436,19 +436,60 @@ class _DialogTitleBar(TitleBar):
         super().__init__(parent, title, icon)
         self.setAutoFillBackground(False)
 
+    def _build(self, title: str, icon: str):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 0, 6, 0)
+        layout.setSpacing(0)
+
+        if icon:
+            ico = QLabel(icon)
+            ico.setStyleSheet(f"color: {C['accent']}; font-size: 14px; background: transparent;")
+            ico.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+            layout.addWidget(ico)
+            layout.addSpacing(6)
+
+        self.title_lbl = QLabel(title)
+        self.title_lbl.setStyleSheet(
+            f"color: {C['text2']}; font-family: 'Georgia', 'Times New Roman', serif;"
+            f"font-size: 13px; font-weight: 600; background: transparent; letter-spacing: 0.5px;"
+        )
+        self.title_lbl.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+        layout.addWidget(self.title_lbl)
+        layout.addStretch()
+
+        btn = QPushButton("x")
+        btn.setObjectName("tb_close")
+        btn.setToolTip("Close")
+        btn.setFixedSize(36, 36)
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                border: none;
+                color: {C['text3']};
+                font-size: 13px;
+                border-radius: 0;
+                padding: 0;
+            }}
+            QPushButton:hover {{
+                background: {C['close_hover']};
+                color: #ffffff;
+            }}
+        """)
+        btn.clicked.connect(self._close)
+        layout.addWidget(btn)
+
+    def mouseDoubleClickEvent(self, event):
+        event.accept()
+
     def paintEvent(self, event):
         p = QPainter(self)
         r = self.rect().adjusted(0, 0, -1, -1)
-        p.fillRect(r, QColor(C['titlebar']))  # 背景缩进
+        p.fillRect(r, QColor(C['titlebar']))  # inset background
         p.setPen(QPen(QColor(C['border']), 1))
         p.drawLine(r.topLeft(), r.topRight())
         p.drawLine(r.topLeft(), r.bottomLeft())
         p.drawLine(r.topRight(), r.bottomRight())
         p.end()
-    # def paintEvent(self, event):
-    #     p = QPainter(self)
-    #     p.fillRect(self.rect(), QColor(C['titlebar']))
-    #     p.end()
 
 class FramelessDialog(QDialog):
     """无边框对话框基类，自带自定义标题栏，三边有边框，标题栏底部无分割线"""

@@ -17,23 +17,8 @@ from PyQt6.QtGui import QFont
 
 from database import Database
 from config import app_state
+from library_manager import check_writable, get_database_path, get_storage_root, set_storage_root
 from ui.widgets import STYLE_MAIN, SectionLabel
-
-
-def check_writable(path: str) -> tuple[bool, str]:
-    """检查目录是否存在且有写权限"""
-    if not os.path.isdir(path):
-        return False, f"目录不存在：\n{path}"
-    test_file = os.path.join(path, ".manga_shelf_write_test")
-    try:
-        with open(test_file, "w") as f:
-            f.write("test")
-        os.remove(test_file)
-        return True, ""
-    except PermissionError:
-        return False, f"没有写入权限，请选择其他目录：\n{path}"
-    except Exception as e:
-        return False, f"目录不可用：{e}"
 
 
 class FirstRunDialog(QDialog):
@@ -136,28 +121,17 @@ class FirstRunDialog(QDialog):
         return self._path
 
 
-def get_config_path() -> str:
-    """获取配置数据库路径（存放在用户数据目录）"""
-    if sys.platform == "win32":
-        data_dir = os.environ.get("APPDATA", os.path.expanduser("~"))
-    else:
-        data_dir = os.path.expanduser("~/.local/share")
-    app_dir = os.path.join(data_dir, "MangaShelf")
-    os.makedirs(app_dir, exist_ok=True)
-    return os.path.join(app_dir, "library.db")
-
-
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("MangaShelf")
     app.setStyle("Fusion")
     app.setStyleSheet(STYLE_MAIN)
 
-    db_path = get_config_path()
+    db_path = get_database_path()
     db = Database(db_path)
 
     # 检查存储根目录是否有效（不存在或没有写权限则重新选择）
-    storage_root = db.get_config("storage_root")
+    storage_root = get_storage_root(db)
     need_setup = False
     if not storage_root:
         need_setup = True
@@ -174,7 +148,7 @@ def main():
         if dlg.exec() != QDialog.DialogCode.Accepted:
             sys.exit(0)
         storage_root = dlg.get_path()
-        db.set_config("storage_root", storage_root)
+        set_storage_root(db, storage_root)
 
     app_state.init(db)
 
