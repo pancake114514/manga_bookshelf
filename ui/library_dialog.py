@@ -1,4 +1,5 @@
 import os
+import time
 
 from PyQt6.QtWidgets import (
     QApplication, QFileDialog, QHBoxLayout, QLabel, QMessageBox,
@@ -131,44 +132,69 @@ class LibraryDialog(FramelessDialog):
     def _save(self):
         path = (self._selected_path or "").strip()
         if not path:
-            QMessageBox.warning(self, "提示", "请先选择目录")
+            QMessageBox.warning(self, "Notice", "Please choose a directory first.")
             return
         ok, err = check_writable(path)
         if not ok:
-            QMessageBox.warning(self, "目录不可用", err)
+            QMessageBox.warning(self, "Directory Unavailable", err)
             return
         if os.path.normcase(path) == os.path.normcase(self._current_path):
             self.accept()
             return
 
-        prog = QProgressDialog("正在准备迁移...", None, 0, 0, self)
-        prog.setWindowTitle("迁移图库")
+        confirm = QMessageBox(self)
+        confirm.setIcon(QMessageBox.Icon.Warning)
+        confirm.setWindowTitle("确认迁移？")
+        confirm.setText("当前库将被迁移到新目录下")
+        confirm.setInformativeText(
+            f"当前路径:\n{self._current_path}\n\n"
+            f"目标路径:\n{path}\n\n"
+            "所有对象将被迁移，在完成前请不要关闭窗口"
+        )
+        confirm.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel
+        )
+        confirm.button(QMessageBox.StandardButton.Yes).setText("开始迁移")
+        confirm.button(QMessageBox.StandardButton.Cancel).setText("取消")
+        if confirm.exec() != QMessageBox.StandardButton.Yes:
+            return
+
+        prog = QProgressDialog("准备开始迁移...", None, 0, 0, self)
+        prog.setWindowTitle("转移中...")
         prog.setModal(True)
         prog.setMinimumWidth(360)
         prog.setCancelButton(None)
-        prog.show()
-        QApplication.processEvents()
+
+        started_at = time.monotonic()
+        progress_visible = False
 
         try:
             moved_count = 0
-
             def on_progress(cur: int, total: int, message: str):
+                nonlocal progress_visible
                 prog.setMaximum(total)
                 prog.setValue(cur)
                 prog.setLabelText(message)
-                QApplication.processEvents()
+                if not progress_visible and time.monotonic() - started_at >= 0.25:
+                    prog.show()
+                    progress_visible = True
+                if progress_visible:
+                    QApplication.processEvents()
 
             moved_count = migrate_library(app_state.db, path, progress=on_progress)
         except LibraryMigrationError as exc:
-            prog.close()
-            QMessageBox.critical(self, "迁移失败", str(exc))
+            if progress_visible:
+                prog.close()
+            QMessageBox.critical(self, "Migration Failed", str(exc))
             return
         except Exception as exc:
-            prog.close()
-            QMessageBox.critical(self, "迁移失败", str(exc))
+            if progress_visible:
+                prog.close()
+            QMessageBox.critical(self, "Migration Failed", str(exc))
             return
 
-        prog.close()
+        if progress_visible:
+            prog.close()
         self.storage_root_changed.emit(path)
-        QMessageBox.information(self, "迁移完成", f"已迁移 {moved_count} 个对象到新的库目录。")
+        QMessageBox.information(self, "Migration Complete", f"Moved {moved_count} objects to the new library directory.")
         self.accept()
