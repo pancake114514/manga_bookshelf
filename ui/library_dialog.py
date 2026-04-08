@@ -132,11 +132,11 @@ class LibraryDialog(FramelessDialog):
     def _save(self):
         path = (self._selected_path or "").strip()
         if not path:
-            QMessageBox.warning(self, "Notice", "Please choose a directory first.")
+            QMessageBox.warning(self, "提醒", "请先选择目录")
             return
         ok, err = check_writable(path)
         if not ok:
-            QMessageBox.warning(self, "Directory Unavailable", err)
+            QMessageBox.warning(self, "目录不可用", err)
             return
         if os.path.normcase(path) == os.path.normcase(self._current_path):
             self.accept()
@@ -196,5 +196,5 @@ class LibraryDialog(FramelessDialog):
         if progress_visible:
             prog.close()
         self.storage_root_changed.emit(path)
-        QMessageBox.information(self, "Migration Complete", f"Moved {moved_count} objects to the new library directory.")
+        QMessageBox.information(self, "迁移成功", f"成功迁移{moved_count}个对象")
         self.accept()
