@@ -265,6 +265,16 @@ class TitleBar(QWidget):
             self._toggle_max()
 
 
+class _MainWindowFrame(QWidget):
+    def paintEvent(self, event):
+        p = QPainter(self)
+        r = self.rect().adjusted(0, 0, -1, -1)
+        p.fillRect(r, QColor(C['bg']))
+        p.setPen(QPen(QColor(C['border']), 1))
+        p.drawRect(r)
+        p.end()
+
+
 class FramelessMixin:
     """
     混入类：去掉系统边框，插入自定义标题栏，并实现边缘拖拽缩放。
@@ -302,11 +312,10 @@ class FramelessMixin:
         self._resize_start_geom = None
 
         if isinstance(self, QMainWindow):
-            container = QWidget()
-            container.setStyleSheet(f"background: {C['bg']};")
+            container = _MainWindowFrame()
             container.setMouseTracking(True)
             vbox = QVBoxLayout(container)
-            vbox.setContentsMargins(0, 0, 0, 0)
+            vbox.setContentsMargins(1, 1, 1, 1)
             vbox.setSpacing(0)
             self._titlebar = TitleBar(self, title, icon)
             vbox.addWidget(self._titlebar)
