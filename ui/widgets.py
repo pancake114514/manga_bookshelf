@@ -2,13 +2,10 @@
 通用 UI 控件 — 浅色纸色主题
 """
 from PyQt6.QtWidgets import (
-    QLabel, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QLineEdit, QFrame, QScrollArea, QSizePolicy, QCheckBox,
-    QComboBox, QDialog, QDialogButtonBox, QListWidget, QListWidgetItem,
-    QApplication, QToolButton, QMainWindow
+    QLabel, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFrame,QDialog,QApplication, QMainWindow
 )
-from PyQt6.QtCore import Qt, QSize, pyqtSignal, QThread, QTimer, QPoint
-from PyQt6.QtGui import QPixmap, QColor, QPainter, QFont, QIcon, QPalette, QPen
+from PyQt6.QtCore import Qt, pyqtSignal, QPoint
+from PyQt6.QtGui import QPixmap, QColor, QPainter, QPen
 
 # ─── 调色板 ────────────────────────────────────────────────────────────────────
 C = {

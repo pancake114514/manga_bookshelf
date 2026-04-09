@@ -1,13 +1,11 @@
 import os
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QFileDialog, QMessageBox, QProgressDialog, QApplication,
-    QFrame, QListWidget, QListWidgetItem, QDialogButtonBox, QWidget
+    QDialog, QVBoxLayout, QPushButton, QLabel,
+    QFileDialog, QMessageBox, QProgressDialog, QApplication, QListWidget, QListWidgetItem, QDialogButtonBox, QWidget
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QPainter, QColor
 from config import app_state, SUPPORTED_FORMATS
-from .widgets import SectionLabel, Divider, FramelessDialog, C, STYLE_MAIN
+from .widgets import FramelessDialog, C, STYLE_MAIN
 from .tag_editor import TagEditorDialog
 import uuid
 

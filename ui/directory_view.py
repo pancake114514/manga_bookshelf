@@ -4,13 +4,12 @@
 import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QFrame, QGridLayout, QSizePolicy, QToolButton,
-    QFileDialog, QMessageBox
+    QScrollArea, QFrame, QGridLayout, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QThread, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer
 from PyQt6.QtGui import QPixmap, QFont, QIcon, QPainter, QPainterPath
 from config import app_state, GRID_THUMB_SIZE
-from .widgets import SectionLabel, make_placeholder_pixmap, ClickableLabel, TagBadge, C
+from .widgets import make_placeholder_pixmap,TagBadge, C
 
 
 class GridThumbLoader(QThread):
