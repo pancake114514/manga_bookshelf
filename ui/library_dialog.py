@@ -185,12 +185,12 @@ class LibraryDialog(FramelessDialog):
         except LibraryMigrationError as exc:
             if progress_visible:
                 prog.close()
-            QMessageBox.critical(self, "Migration Failed", str(exc))
+            QMessageBox.critical(self, "迁移失败", str(exc))
             return
         except Exception as exc:
             if progress_visible:
                 prog.close()
-            QMessageBox.critical(self, "Migration Failed", str(exc))
+            QMessageBox.critical(self, "迁移失败", str(exc))
             return
 
         if progress_visible:
