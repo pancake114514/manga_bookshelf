@@ -4,3 +4,7 @@ __pycache__/
 
 # Reasonix 本地元数据
 .reasonix/
+reasonix.toml
+
+# 构建产物
+build/
