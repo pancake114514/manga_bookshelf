@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QThread, QTimer, QPoint
 from PyQt6.QtGui import QPixmap, QColor, QPainter, QPainterPath
-from config import app_state, THUMBNAIL_SIZE
+from config import THUMBNAIL_SIZE
 from .widgets import (
     make_placeholder_pixmap, C, FramelessDialog
 )
@@ -48,10 +48,11 @@ class ObjectCard(QFrame):
     # 卡片外边距（用于容纳圆角，防止被父容器裁剪）
     CARD_MARGIN = 2
 
-    def __init__(self, obj: dict, cache_dir: str, parent=None):
+    def __init__(self, obj: dict, cache_dir: str, svc, parent=None):
         super().__init__(parent)
         self.obj = obj
         self.cache_dir = cache_dir
+        self.svc = svc
 
         self.setFixedSize(self.CARD_W, self.CARD_H)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -124,7 +125,7 @@ class ObjectCard(QFrame):
         elided = name.fontMetrics().elidedText(name_text, Qt.TextElideMode.ElideRight, self.CARD_W - 24)
         name.setText(elided)
 
-        count = app_state.db.get_image_count(self.obj["id"])
+        count = self.svc.get_image_count(self.obj["id"])
         count_lbl = QLabel(f"{count} 张图片")
         count_lbl.setStyleSheet(f"color: {C['text3']}; font-size: 11px; border: none;")
 
@@ -217,10 +218,7 @@ class ObjectCard(QFrame):
             self.double_clicked.emit(self.obj)
 
     def _load_cover(self):
-        cover = self.obj.get("cover_image")
-        if not cover:
-            images = app_state.db.get_images(self.obj["id"])
-            if images: cover = images[0]["filepath"]
+        cover = self.svc.resolve_cover(self.obj)
         if cover and os.path.isfile(cover):
             self._set_cover_async(cover)
 
@@ -233,8 +231,9 @@ class BookshelfView(QWidget):
     object_opened = pyqtSignal(dict)
     tags_updated = pyqtSignal()
 
-    def __init__(self, storage_root: str, parent=None):
+    def __init__(self, svc, storage_root: str, parent=None):
         super().__init__(parent)
+        self.svc = svc
         self.storage_root = storage_root
         self.cache_dir = os.path.join(storage_root, ".thumbcache")
         os.makedirs(self.cache_dir, exist_ok=True)
@@ -287,7 +286,7 @@ class BookshelfView(QWidget):
 
         cols = self._calc_cols()
         for i, obj in enumerate(objects):
-            card = ObjectCard(obj, self.cache_dir)
+            card = ObjectCard(obj, self.cache_dir, self.svc)
             card.double_clicked.connect(self.object_opened)
             card.edit_requested.connect(self._on_edit)
             card.delete_requested.connect(self._on_delete)
@@ -295,10 +294,6 @@ class BookshelfView(QWidget):
             row, col = divmod(i, cols)
             self.grid_layout.addWidget(card, row, col)
             self._cards[obj["id"]] = card
-
-    def refresh(self):
-        objects = app_state.db.get_all_objects(include_r18=app_state.show_r18)
-        self.load_objects(objects)
 
     def _calc_cols(self) -> int:
         effective_w = self.width() if self.width() > 200 else 900
@@ -325,9 +320,8 @@ class BookshelfView(QWidget):
         if dlg.exec() == TagEditorDialog.DialogCode.Accepted:
             name = dlg.get_name()
             tags = dlg.get_tags()
-            app_state.db.update_object_name(obj["id"], name)
-            app_state.db.set_tags(obj["id"], tags)
-            self.refresh()
+            self.svc.update_object_name(obj["id"], name)
+            self.svc.set_object_tags(obj["id"], tags)
             self.tags_updated.emit()
 
     def _on_delete(self, obj: dict):
@@ -422,37 +416,27 @@ class BookshelfView(QWidget):
         # --- 后续执行逻辑 ---
         if dlg.exec() == QDialog.DialogCode.Accepted:
             delete_files = checkbox.isChecked()
-
-            # 先删除数据库记录
-            app_state.db.delete_object(obj["id"])
-
-            # 如果勾选了删除文件，则删除本地目录
-            if delete_files:
-                storage_path = obj.get("storage_path", "")
-                if storage_path and os.path.isdir(storage_path):
-                    import shutil
-                    try:
-                        shutil.rmtree(storage_path)
-                    except Exception as e:
-                        QMessageBox.warning(
-                            self, "删除失败",
-                            f"无法删除本地文件：{e}\n数据库记录已删除。"
-                        )
-
-            self.refresh()
+            try:
+                self.svc.delete_object(obj["id"], delete_files=delete_files,
+                                       storage_root=self.storage_root)
+            except Exception as e:
+                QMessageBox.warning(
+                    self, "删除失败",
+                    f"无法删除本地文件：{e}\n数据库记录已删除。"
+                )
             self.tags_updated.emit()
 
     def _on_change_cover(self, obj: dict):
         from PyQt6.QtWidgets import QFileDialog
-        images = app_state.db.get_images(obj["id"])
+        images = self.svc.get_images(obj["id"])
         if not images:
             QMessageBox.information(self, "提示", "该对象中没有图片")
             return
-        storage = app_state.db.get_object(obj["id"]).get("storage_path", "")
+        storage = self.svc.get_object(obj["id"]).get("storage_path", "")
         path, _ = QFileDialog.getOpenFileName(
             self, "选择封面图片", storage,
             "图片文件 (*.jpg *.jpeg *.png *.bmp *.webp *.gif)"
         )
         if path:
-            app_state.db.update_object_cover(obj["id"], path)
-            self.refresh()
+            self.svc.update_object_cover(obj["id"], path)
+            self.tags_updated.emit()

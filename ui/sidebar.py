@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QRect, QRectF, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QPainterPath
-from config import app_state, TAG_CATEGORIES, TAG_CATEGORY_ORDER
+from config import TAG_CATEGORIES, TAG_CATEGORY_ORDER
 from .widgets import C
 from .widgets import SectionLabel, Divider
 
@@ -200,11 +200,12 @@ class TagFilterGroup(QWidget):
 
 
 class SidebarWidget(QFrame):
-    filter_changed = pyqtSignal()
+    filter_changed = pyqtSignal(dict)   # 携带当前选中的标签筛选 {category: [values]}
     r18_changed = pyqtSignal(bool)
 
-    def __init__(self, parent=None):
+    def __init__(self, svc, parent=None):
         super().__init__(parent)
+        self.svc = svc
         self.setObjectName("sidebar")
         self.setFixedWidth(200)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
@@ -277,11 +278,10 @@ class SidebarWidget(QFrame):
 
     def refresh_tags(self):
         for cat, group in self._groups.items():
-            values = app_state.db.get_all_tag_values(cat)
+            values = self.svc.get_tag_values(cat)
             group.populate(values)
 
     def _on_r18_changed(self, checked: bool):
-        app_state.show_r18 = checked
         self.r18_changed.emit(checked)
 
     def _on_filter_changed(self):
@@ -290,14 +290,9 @@ class SidebarWidget(QFrame):
             selected = group.get_selected()
             if selected:
                 filters[cat] = selected
-        app_state.tag_filters = filters
-        self.filter_changed.emit()
+        self.filter_changed.emit(filters)
 
     def clear_filters(self):
         for group in self._groups.values():
             group.clear_all()
-        app_state.tag_filters = {}
-        self.filter_changed.emit()
-
-    def get_filters(self) -> dict:
-        return app_state.tag_filters
+        self.filter_changed.emit({})

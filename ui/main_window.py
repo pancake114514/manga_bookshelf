@@ -10,7 +10,6 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSize
 from PyQt6.QtGui import QFont, QIcon, QKeySequence, QShortcut
 
-from config import app_state
 from .widgets import STYLE_MAIN, Divider, FramelessMixin, C
 from .sidebar import SidebarWidget
 from .bookshelf import BookshelfView
@@ -82,14 +81,19 @@ class TopBar(QFrame):
 
 
 class MainWindow(FramelessMixin, QMainWindow):
-    def __init__(self, storage_root: str):
+    def __init__(self, svc, storage_root: str):
         super().__init__()
+        self.svc = svc
         self.storage_root = storage_root
         self.setWindowTitle("MangaShelf")
         self.setMinimumSize(1000, 680)
         self.resize(1280, 800)
         self._current_obj = None
         self._images_for_viewer: list = []
+        # 视图状态（原先在 AppState）
+        self.show_r18 = False
+        self.tag_filters: dict = {}
+        self.search_keyword: str = ""
         self._build()
         self.setup_frameless("MangaShelf", "📚")
         self._load_shelf()
@@ -114,7 +118,7 @@ class MainWindow(FramelessMixin, QMainWindow):
         content.setSpacing(0)
 
         # 侧边栏
-        self.sidebar = SidebarWidget()
+        self.sidebar = SidebarWidget(self.svc)
         self.sidebar.filter_changed.connect(self._on_filter_changed)
         self.sidebar.r18_changed.connect(self._on_r18_changed)
         content.addWidget(self.sidebar)
@@ -130,9 +134,10 @@ class MainWindow(FramelessMixin, QMainWindow):
         self.stack.setStyleSheet("background: #f5f0e8;")
 
         # 书架视图
-        self.bookshelf = BookshelfView(self.storage_root)
+        self.bookshelf = BookshelfView(self.svc, self.storage_root)
         self.bookshelf.object_opened.connect(self._open_directory)
-        self.bookshelf.tags_updated.connect(self.sidebar.refresh_tags)
+        # 编辑/删除/换封面后：重载书架 + 刷新侧边栏标签
+        self.bookshelf.tags_updated.connect(self._load_shelf)
         self.stack.addWidget(self.bookshelf)   # index 0
 
         # 目录视图（动态创建，占位）
@@ -153,16 +158,16 @@ class MainWindow(FramelessMixin, QMainWindow):
 
     def _load_shelf(self):
         self.sidebar.refresh_tags()
-        filters = app_state.tag_filters
-        keyword = app_state.search_keyword
-        db = app_state.db
+        filters = self.tag_filters
+        keyword = self.search_keyword
+        svc = self.svc
 
         if keyword:
-            objects = db.search_objects(keyword, include_r18=app_state.show_r18)
+            objects = svc.search_objects(keyword, include_r18=self.show_r18)
         elif filters:
-            objects = db.filter_by_tags(filters, include_r18=app_state.show_r18)
+            objects = svc.filter_by_tags(filters, include_r18=self.show_r18)
         else:
-            objects = db.get_all_objects(include_r18=app_state.show_r18)
+            objects = svc.get_all_objects(include_r18=self.show_r18)
 
         self.bookshelf.load_objects(objects)
 
@@ -174,25 +179,26 @@ class MainWindow(FramelessMixin, QMainWindow):
     # ── 导入 ──────────────────────────────────────────────────────────────────
 
     def _on_import(self):
-        dlg = ImportDialog(self.storage_root, self)
+        dlg = ImportDialog(self.svc, self.storage_root, self)
         dlg.import_done.connect(self._on_import_done)
         dlg.exec()
 
     def _on_import_done(self, obj_id: str):
-        self.sidebar.refresh_tags()
         self._load_shelf()
         QMessageBox.information(self, "导入完成", "图片导入成功！")
 
     # ── 搜索 / 筛选 ───────────────────────────────────────────────────────────
 
     def _on_search(self, text: str):
-        app_state.search_keyword = text.strip()
+        self.search_keyword = text.strip()
         QTimer.singleShot(300, self._load_shelf)
 
-    def _on_filter_changed(self):
+    def _on_filter_changed(self, filters: dict):
+        self.tag_filters = filters
         self._load_shelf()
 
     def _on_r18_changed(self, show: bool):
+        self.show_r18 = show
         self._load_shelf()
 
     # ── 导航 ──────────────────────────────────────────────────────────────────
@@ -205,21 +211,21 @@ class MainWindow(FramelessMixin, QMainWindow):
         self.stack.removeWidget(old)
         old.deleteLater()
 
-        dir_view = DirectoryView(obj, self.storage_root)
+        dir_view = DirectoryView(self.svc, obj, self.storage_root)
         dir_view.back_requested.connect(self._show_bookshelf)
         dir_view.image_open_requested.connect(self._open_image_at)
         self.stack.insertWidget(VIEW_DIRECTORY, dir_view)
         self.stack.setCurrentIndex(VIEW_DIRECTORY)
 
         # 刷新对象（获取最新 last_read_idx）
-        refreshed = app_state.db.get_object(obj["id"])
+        refreshed = self.svc.get_object(obj["id"])
         if refreshed:
             self._current_obj = refreshed
 
     def _open_image_at(self, idx: int):
         if not self._current_obj:
             return
-        images = app_state.db.get_images(self._current_obj["id"])
+        images = self.svc.get_images(self._current_obj["id"])
         if not images:
             return
         self._images_for_viewer = images
@@ -229,7 +235,7 @@ class MainWindow(FramelessMixin, QMainWindow):
         self.stack.removeWidget(old)
         old.deleteLater()
 
-        viewer = ImageViewer(self._current_obj, images, idx)
+        viewer = ImageViewer(self.svc, self._current_obj, images, idx)
         viewer.back_requested.connect(self._back_from_viewer)
         self.stack.insertWidget(VIEW_VIEWER, viewer)
         self.stack.setCurrentIndex(VIEW_VIEWER)
@@ -239,7 +245,7 @@ class MainWindow(FramelessMixin, QMainWindow):
     def _back_from_viewer(self):
         # 刷新阅读进度后直接切回目录视图，不重建 widget（避免 deleteLater 竞态）
         if self._current_obj:
-            refreshed = app_state.db.get_object(self._current_obj["id"])
+            refreshed = self.svc.get_object(self._current_obj["id"])
             if refreshed:
                 self._current_obj = refreshed
                 # 更新目录视图中「继续阅读」按钮指向的 obj

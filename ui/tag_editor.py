@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
-from config import TAG_CATEGORIES, TAG_CATEGORY_ORDER, app_state
+from config import TAG_CATEGORIES, TAG_CATEGORY_ORDER
 from .widgets import SectionLabel, Divider, TagBadge, FramelessDialog, C
 from .sidebar import CheckBox as R18CheckBox
 
@@ -20,8 +20,9 @@ class MultiTagInput(QWidget):
     """
     changed = pyqtSignal()
 
-    def __init__(self, category: str, label: str, initial: list = None, parent=None):
+    def __init__(self, svc, category: str, label: str, initial: list = None, parent=None):
         super().__init__(parent)
+        self.svc = svc
         self.category = category
         self._values: list[str] = list(initial or [])
         self._build(label)
@@ -57,7 +58,7 @@ class MultiTagInput(QWidget):
         self._refresh_tags()
 
         # 历史建议
-        existing = app_state.db.get_all_tag_values(self.category)
+        existing = self.svc.get_tag_values(self.category)
         if existing:
             completer = QCompleter(existing)
             completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
@@ -100,9 +101,10 @@ class TagEditorDialog(FramelessDialog):
     标签和名称编辑对话框
     """
 
-    def __init__(self, obj: dict = None, parent=None):
+    def __init__(self, obj: dict = None, parent=None, svc=None):
         super().__init__("编辑对象信息", parent)
         self.obj = obj or {}
+        self.svc = svc or (parent.svc if parent is not None and hasattr(parent, "svc") else None)
         tags = obj.get("tags", {}) if obj else {}
         self.setMinimumWidth(520)
         self.setModal(True)
@@ -157,7 +159,7 @@ class TagEditorDialog(FramelessDialog):
                 initial = tags.get(cat, [])
                 if not isinstance(initial, list):
                     initial = [initial] if initial else []
-                widget = MultiTagInput(cat, label, initial=initial)
+                widget = MultiTagInput(self.svc, cat, label, initial=initial)
                 self.tag_inputs[cat] = widget
                 inner_layout.addWidget(widget)
             if cat != TAG_CATEGORY_ORDER[-1]:

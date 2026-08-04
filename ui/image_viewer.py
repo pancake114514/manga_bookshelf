@@ -12,7 +12,7 @@ from PyQt6.QtGui import (
     QPixmap, QPainter, QColor, QFont, QKeySequence, QShortcut,
     QPen, QBrush, QLinearGradient, QRadialGradient
 )
-from config import app_state, SUPPORTED_FORMATS
+from config import SUPPORTED_FORMATS
 # from .widgets import C
 
 # ─── 看图界面深色主题颜色 ───────────────────────────────────────────────────
@@ -160,8 +160,9 @@ class ImageViewer(QWidget):
     """
     back_requested = pyqtSignal()
 
-    def __init__(self, obj: dict, images: list, start_index: int = 0, parent=None):
+    def __init__(self, svc, obj: dict, images: list, start_index: int = 0, parent=None):
         super().__init__(parent)
+        self.svc = svc
         self.obj = obj
         self.images = images   # list of image dicts from db
         self._current = max(0, min(start_index, len(images) - 1))
@@ -286,7 +287,7 @@ class ImageViewer(QWidget):
         self.filename_lbl.setText(img["filename"])
 
         # 保存阅读进度
-        app_state.db.update_last_read(self.obj["id"], idx)
+        self.svc.update_last_read(self.obj["id"], idx)
         self.obj["last_read_idx"] = idx
 
         # 预加载相邻图片

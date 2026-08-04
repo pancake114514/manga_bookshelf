@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QThread, QTimer
 from PyQt6.QtGui import QPixmap, QFont, QIcon, QPainter, QPainterPath
-from config import app_state, GRID_THUMB_SIZE
+from config import GRID_THUMB_SIZE
 from .widgets import SectionLabel, make_placeholder_pixmap, ClickableLabel, TagBadge, C
 
 
@@ -118,9 +118,10 @@ class DirectoryView(QWidget):
     back_requested = pyqtSignal()
     image_open_requested = pyqtSignal(int)   # 请求打开第 N 张图
 
-    def __init__(self, obj: dict, storage_root: str, parent=None):
+    def __init__(self, svc, obj: dict, storage_root: str, parent=None):
         super().__init__(parent)
         self.setStyleSheet("background-color: transparent;")
+        self.svc = svc
         self.obj = obj
         self.storage_root = storage_root
         self.cache_dir = os.path.join(storage_root, ".thumbcache")
@@ -256,11 +257,7 @@ class DirectoryView(QWidget):
         self._load_cover_thumb()
 
     def _load_cover_thumb(self):
-        cover = self.obj.get("cover_image")
-        if not cover:
-            images = app_state.db.get_images(self.obj["id"])
-            if images:
-                cover = images[0]["filepath"]
+        cover = self.svc.resolve_cover(self.obj)
         if cover and os.path.isfile(cover):
             from utils.thumbnail import generate_thumbnail
             path = generate_thumbnail(cover, self.cache_dir, (cover_w, cover_h))
@@ -271,7 +268,7 @@ class DirectoryView(QWidget):
                 self.cover_thumb.setPixmap(pm)
 
     def _load_images(self):
-        self.images = app_state.db.get_images(self.obj["id"])
+        self.images = self.svc.get_images(self.obj["id"])
         effective_w = self.width() if self.width() > 100 else 900
         cols = max(1, (effective_w - 40) // (ImageThumbCard.W + 12))
 

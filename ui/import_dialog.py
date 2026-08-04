@@ -6,21 +6,22 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor
-from config import app_state, SUPPORTED_FORMATS
+from config import SUPPORTED_FORMATS
 from .widgets import SectionLabel, Divider, FramelessDialog, C, STYLE_MAIN
 from .tag_editor import TagEditorDialog
 import uuid
 
 
 class ImportWorker(QThread):
-    """后台导入线程"""
+    """后台导入线程（使用独立 LibraryService，避免共享 sqlite 连接）"""
     progress = pyqtSignal(int, int)
     finished = pyqtSignal(str)
     error = pyqtSignal(str)
 
-    def __init__(self, obj_id: str, obj_name: str, tags: dict,
+    def __init__(self, db_path: str, obj_id: str, obj_name: str, tags: dict,
                  source_dir: str, storage_root: str, is_new: bool):
         super().__init__()
+        self.db_path = db_path
         self.obj_id = obj_id
         self.obj_name = obj_name
         self.tags = tags
@@ -29,49 +30,29 @@ class ImportWorker(QThread):
         self.is_new = is_new
 
     def run(self):
+        from services.library_service import LibraryService
+        svc = None
         try:
-            import sys
-            sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-            from utils.file_utils import (
-                collect_images, copy_image_with_seq_name, next_seq_number
+            svc = LibraryService(self.db_path)
+            svc.import_directory(
+                self.obj_id, self.obj_name, self.tags,
+                self.source_dir, self.storage_root, self.is_new,
+                progress_cb=lambda cur, total: self.progress.emit(cur, total),
             )
-            db = app_state.db
-
-            storage_obj_dir = os.path.join(self.storage_root, self.obj_name)
-            os.makedirs(storage_obj_dir, exist_ok=True)
-
-            if self.is_new:
-                db.create_object(self.obj_id, "directory", self.obj_name,
-                                 self.source_dir, storage_obj_dir)
-                db.set_tags(self.obj_id, self.tags)
-
-            images = collect_images(self.source_dir)
-            total = len(images)
-            seq = next_seq_number(storage_obj_dir)
-            sort_start = db.get_image_count(self.obj_id)
-            for i, src in enumerate(images):
-                filename, dest = copy_image_with_seq_name(src, storage_obj_dir, seq)
-                if dest:
-                    img_id = str(uuid.uuid4())
-                    db.add_image(img_id, self.obj_id, filename, dest, sort_start + i)
-                    seq += 1
-                self.progress.emit(i + 1, total)
-
-            if self.is_new:
-                first_img = db.get_images(self.obj_id)
-                if first_img and not db.get_object(self.obj_id).get("cover_image"):
-                    db.update_object_cover(self.obj_id, first_img[0]["filepath"])
-
             self.finished.emit(self.obj_id)
         except Exception as e:
             self.error.emit(str(e))
+        finally:
+            if svc is not None:
+                svc.close()
 
 
 class ImportDialog(FramelessDialog):
     import_done = pyqtSignal(str)
 
-    def __init__(self, storage_root: str, parent=None):
+    def __init__(self, svc, storage_root: str, parent=None):
         super().__init__("导入图片", parent)
+        self.svc = svc
         self.storage_root = storage_root
         self.setMinimumWidth(480)
         self.setModal(True)
@@ -194,8 +175,7 @@ class ImportDialog(FramelessDialog):
         self._run_import(obj_id, name, tags, folder, is_new=True)
 
     def _import_to_existing(self):
-        db = app_state.db
-        objects = db.get_all_objects(include_r18=True)
+        objects = self.svc.get_all_objects(include_r18=True)
         dir_objs = [o for o in objects if o["type"] == "directory"]
         if not dir_objs:
             QMessageBox.information(self, "提示", "还没有创建目录，请先新建")
@@ -225,8 +205,7 @@ class ImportDialog(FramelessDialog):
                          folder, is_new=False)
 
     def _import_single_files(self):
-        db = app_state.db
-        objects = db.get_all_objects(include_r18=True)
+        objects = self.svc.get_all_objects(include_r18=True)
         dir_objs = [o for o in objects if o["type"] == "directory"]
         if not dir_objs:
             QMessageBox.information(self, "提示", "还没有创建目录，请先新建")
@@ -247,28 +226,9 @@ class ImportDialog(FramelessDialog):
         if not paths:
             return
 
-        storage_obj_dir = (target_obj.get("storage_path") or "").strip()
-        if not storage_obj_dir or not os.path.isdir(storage_obj_dir):
-            storage_obj_dir = os.path.join(self.storage_root, target_obj["name"])
-        os.makedirs(storage_obj_dir, exist_ok=True)
-
-        from utils.file_utils import copy_image_with_seq_name, next_seq_number
-        ok, fail = 0, 0
-        cur_count = db.get_image_count(target_obj["id"])
-        seq = next_seq_number(storage_obj_dir)
-        for src in sorted(paths, key=lambda p: os.path.basename(p)):
-            if os.path.basename(src).startswith("."):
-                continue
-            filename, dest = copy_image_with_seq_name(src, storage_obj_dir, seq)
-            if dest:
-                img_id = str(uuid.uuid4())
-                db.add_image(img_id, target_obj["id"],
-                             filename, dest, cur_count + ok)
-                ok += 1
-                seq += 1
-            else:
-                fail += 1
-
+        ok, fail = self.svc.import_single_files(
+            target_obj["id"], paths, self.storage_root
+        )
         msg = f"成功导入 {ok} 张图片"
         if fail:
             msg += f"，{fail} 张失败"
@@ -283,8 +243,8 @@ class ImportDialog(FramelessDialog):
         prog.setMinimumWidth(320)
         prog.show()
 
-        self.worker = ImportWorker(obj_id, name, tags, source_dir,
-                                   self.storage_root, is_new)
+        self.worker = ImportWorker(self.svc.db_path, obj_id, name, tags,
+                                   source_dir, self.storage_root, is_new)
 
         def on_progress(cur, total):
             if total > 0:

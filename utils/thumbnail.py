@@ -69,6 +69,26 @@ def generate_grid_thumbnail(source_path: str, cache_dir: str) -> str | None:
     return generate_thumbnail(source_path, cache_dir, GRID_THUMB_SIZE)
 
 
+def clear_cached_thumbs(cache_dir: str, source_paths: list) -> int:
+    """
+    删除与 source_paths 对应的缩略图缓存文件（含两种尺寸），
+    返回实际删除的文件数。用于删除对象后清理缓存。
+    """
+    if not source_paths:
+        return 0
+    removed = 0
+    for src in source_paths:
+        for size in (THUMBNAIL_SIZE, GRID_THUMB_SIZE):
+            p = _thumb_path(cache_dir, src, size)
+            if os.path.isfile(p):
+                try:
+                    os.remove(p)
+                    removed += 1
+                except OSError:
+                    pass
+    return removed
+
+
 def get_first_image_in_dir(storage_path: str) -> str | None:
     """获取目录中的第一张图片"""
     if not os.path.isdir(storage_path):

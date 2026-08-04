@@ -15,8 +15,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
-from database import Database
-from config import app_state
+from services.library_service import LibraryService
 from ui.widgets import STYLE_MAIN, SectionLabel
 
 
@@ -154,10 +153,10 @@ def main():
     app.setStyleSheet(STYLE_MAIN)
 
     db_path = get_config_path()
-    db = Database(db_path)
+    svc = LibraryService(db_path)
 
     # 检查存储根目录是否有效（不存在或没有写权限则重新选择）
-    storage_root = db.get_config("storage_root")
+    storage_root = svc.get_config("storage_root")
     need_setup = False
     if not storage_root:
         need_setup = True
@@ -174,12 +173,10 @@ def main():
         if dlg.exec() != QDialog.DialogCode.Accepted:
             sys.exit(0)
         storage_root = dlg.get_path()
-        db.set_config("storage_root", storage_root)
-
-    app_state.init(db)
+        svc.set_config("storage_root", storage_root)
 
     from ui.main_window import MainWindow
-    window = MainWindow(storage_root)
+    window = MainWindow(svc, storage_root)
     window.show()
 
     sys.exit(app.exec())
