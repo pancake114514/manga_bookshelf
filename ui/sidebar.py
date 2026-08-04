@@ -222,6 +222,7 @@ class SidebarWidget(QFrame):
             f"color: {C['accent']}; font-size: 16px; font-weight: 700;"
             f"font-family: 'Georgia', 'Times New Roman', serif;"
             f"letter-spacing: 1px; padding-bottom: 4px;"
+            f"background-color: transparent;"
         )
         layout.addWidget(logo)
         layout.addWidget(Divider())
@@ -229,7 +230,7 @@ class SidebarWidget(QFrame):
         r18_row = QHBoxLayout()
         r18_row.setSpacing(8)
         r18_lbl = QLabel("显示 R-18")
-        r18_lbl.setStyleSheet(f"color: #8b2a2a; font-size: 14px; font-weight: 600;")
+        r18_lbl.setStyleSheet(f"color: #8b2a2a; font-size: 14px; font-weight: 600; background-color: transparent;")
         r18_row.addWidget(r18_lbl)
         r18_row.addStretch()
         self.r18_switch = ToggleSwitch()

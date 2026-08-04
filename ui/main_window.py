@@ -16,6 +16,7 @@ from .bookshelf import BookshelfView
 from .directory_view import DirectoryView
 from .image_viewer import ImageViewer
 from .import_dialog import ImportDialog
+from .library_dialog import LibraryDialog
 
 
 # 视图索引
@@ -27,6 +28,7 @@ VIEW_VIEWER = 2
 class TopBar(QFrame):
     search_changed = pyqtSignal(str)
     import_clicked = pyqtSignal()
+    library_clicked = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -58,6 +60,12 @@ class TopBar(QFrame):
         """)
         layout.addWidget(self.search)
         layout.addStretch()
+
+        library_btn = QPushButton("库管理")
+        library_btn.setFixedHeight(34)
+        library_btn.setFixedWidth(96)
+        library_btn.clicked.connect(self.library_clicked)
+        layout.addWidget(library_btn)
 
         # 导入按钮
         import_btn = QPushButton("＋  导入")
@@ -109,6 +117,7 @@ class MainWindow(FramelessMixin, QMainWindow):
         # 顶栏
         self.topbar = TopBar()
         self.topbar.search_changed.connect(self._on_search)
+        self.topbar.library_clicked.connect(self._on_library_manage)
         self.topbar.import_clicked.connect(self._on_import)
         root.addWidget(self.topbar)
 
@@ -182,6 +191,22 @@ class MainWindow(FramelessMixin, QMainWindow):
         dlg = ImportDialog(self.svc, self.storage_root, self)
         dlg.import_done.connect(self._on_import_done)
         dlg.exec()
+
+    def _on_library_manage(self):
+        dlg = LibraryDialog(self.storage_root, self)
+        dlg.storage_root_changed.connect(self._apply_storage_root)
+        dlg.exec()
+
+    def _apply_storage_root(self, storage_root: str):
+        self.storage_root = storage_root
+        self.bookshelf.update_storage_root(storage_root)
+        self.sidebar.refresh_tags()
+        self._load_shelf()
+
+        if self.stack.currentIndex() == VIEW_DIRECTORY and self._current_obj:
+            refreshed = app_state.db.get_object(self._current_obj["id"])
+            if refreshed:
+                self._open_directory(refreshed)
 
     def _on_import_done(self, obj_id: str):
         self._load_shelf()
