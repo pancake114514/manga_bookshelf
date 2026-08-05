@@ -100,14 +100,7 @@ class Database:
         rows = self.conn.execute(
             "SELECT * FROM objects ORDER BY created_at DESC"
         ).fetchall()
-        result = []
-        for row in rows:
-            obj = dict(row)
-            obj["tags"] = self._get_tags(obj["id"])
-            if not include_r18 and obj["tags"].get("r18", False):
-                continue
-            result.append(obj)
-        return result
+        return self._assemble_objects(rows, include_r18)
 
     def get_object(self, obj_id: str) -> Optional[Dict]:
         row = self.conn.execute(
@@ -171,6 +164,53 @@ class Database:
     def _cleanup_orphan_tags(self, tags: Dict):
         self.cleanup_all_orphan_tags()
 
+    def _assemble_objects(self, rows, include_r18: bool = False) -> List[Dict]:
+        """批量组装对象：一次查询取回 tags、图片数量与首图路径，避免 N+1。"""
+        if not rows:
+            return []
+        obj_ids = [r["id"] for r in rows]
+        placeholders = ",".join("?" * len(obj_ids))
+
+        tag_rows = self.conn.execute(
+            f"SELECT object_id, category, value FROM tags "
+            f"WHERE object_id IN ({placeholders})",
+            obj_ids,
+        ).fetchall()
+        count_rows = self.conn.execute(
+            f"SELECT object_id, COUNT(*) AS cnt FROM images "
+            f"WHERE object_id IN ({placeholders}) GROUP BY object_id",
+            obj_ids,
+        ).fetchall()
+        first_rows = self.conn.execute(
+            f"""SELECT object_id, filepath FROM (
+                    SELECT object_id, filepath,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY object_id
+                               ORDER BY sort_order, filename
+                           ) AS rn
+                    FROM images
+                    WHERE object_id IN ({placeholders})
+                ) WHERE rn = 1""",
+            obj_ids,
+        ).fetchall()
+
+        tags_by_obj: Dict[str, List] = {}
+        for t in tag_rows:
+            tags_by_obj.setdefault(t["object_id"], []).append(t)
+        counts_by_obj = {c["object_id"]: c["cnt"] for c in count_rows}
+        first_by_obj = {f["object_id"]: f["filepath"] for f in first_rows}
+
+        result = []
+        for row in rows:
+            obj = dict(row)
+            obj["tags"] = self._tags_from_rows(tags_by_obj.get(obj["id"], []))
+            obj["image_count"] = counts_by_obj.get(obj["id"], 0)
+            obj["first_image"] = first_by_obj.get(obj["id"])
+            if not include_r18 and obj["tags"].get("r18", False):
+                continue
+            result.append(obj)
+        return result
+
     def search_objects(self, keyword: str, include_r18: bool = False) -> List[Dict]:
         keyword = f"%{keyword}%"
         rows = self.conn.execute(
@@ -180,14 +220,7 @@ class Database:
                ORDER BY o.created_at DESC""",
             (keyword, keyword)
         ).fetchall()
-        result = []
-        for row in rows:
-            obj = dict(row)
-            obj["tags"] = self._get_tags(obj["id"])
-            if not include_r18 and obj["tags"].get("r18", False):
-                continue
-            result.append(obj)
-        return result
+        return self._assemble_objects(rows, include_r18)
 
     def filter_by_tags(self, tag_filters: Dict[str, List[str]],
                        include_r18: bool = False) -> List[Dict]:
@@ -215,6 +248,9 @@ class Database:
         rows = self.conn.execute(
             "SELECT category, value FROM tags WHERE object_id=?", (obj_id,)
         ).fetchall()
+        return self._tags_from_rows(rows)
+
+    def _tags_from_rows(self, rows) -> Dict:
         tags: Dict[str, Any] = {}
         for row in rows:
             cat, val = row["category"], row["value"]
@@ -267,11 +303,13 @@ class Database:
         )
         self._commit_if_needed()
 
-    def get_images(self, obj_id: str) -> List[Dict]:
-        rows = self.conn.execute(
-            "SELECT * FROM images WHERE object_id=? ORDER BY sort_order, filename",
-            (obj_id,)
-        ).fetchall()
+    def get_images(self, obj_id: str, limit: Optional[int] = None) -> List[Dict]:
+        sql = "SELECT * FROM images WHERE object_id=? ORDER BY sort_order, filename"
+        params: list = [obj_id]
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(limit)
+        rows = self.conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
     def get_image_count(self, obj_id: str) -> int:

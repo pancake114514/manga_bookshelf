@@ -3,14 +3,16 @@
 进度条从右向左增长（右侧=起始），点击左1/3翻到下一页，右1/3翻到上一页
 """
 import os
+import time
+from collections import deque
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QSlider, QSizePolicy, QApplication
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QRect, QPoint, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QRect, QPoint, QTimer, QThread
 from PyQt6.QtGui import (
     QPixmap, QPainter, QColor, QFont, QKeySequence, QShortcut,
-    QPen, QBrush, QLinearGradient, QRadialGradient
+    QPen, QBrush, QLinearGradient, QRadialGradient, QImage
 )
 from config import SUPPORTED_FORMATS
 # from .widgets import C
@@ -154,6 +156,40 @@ class MangaProgressBar(QWidget):
     def mouseReleaseEvent(self, event):
         self._dragging = False
 
+class ImageLoaderThread(QThread):
+    """后台图片解码线程。
+
+    QPixmap 只能在 GUI 线程使用，因此后台线程用 QImage 解码，
+    信号传回 GUI 线程后再转 QPixmap。快速翻页时丢弃最旧任务。
+    """
+    loaded = pyqtSignal(int, object)   # idx, QImage
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._tasks: deque = deque()
+        self._running = True
+
+    def load(self, idx: int, path: str):
+        self._tasks.append((idx, path))
+        while len(self._tasks) > 6:
+            self._tasks.popleft()
+
+    def stop(self):
+        self._running = False
+
+    def run(self):
+        while self._running:
+            if not self._tasks:
+                time.sleep(0.02)
+                continue
+            idx, path = self._tasks.popleft()
+            if not self._running:
+                break
+            img = QImage(path)
+            if not img.isNull():
+                self.loaded.emit(idx, img)
+
+
 class ImageViewer(QWidget):
     """
     图片阅览主界面
@@ -167,9 +203,17 @@ class ImageViewer(QWidget):
         self.images = images   # list of image dicts from db
         self._current = max(0, min(start_index, len(images) - 1))
         self._pixmap_cache: dict[int, QPixmap] = {}
+        self._loader = ImageLoaderThread()
+        self._loader.loaded.connect(self._on_image_loaded)
+        self._loader.start()
+        self.destroyed.connect(self._on_destroyed)
         self._build()
         self._go_to(self._current)
         self._setup_shortcuts()
+
+    def _on_destroyed(self):
+        self._loader.stop()
+        self._loader.wait(500)
 
     def _build(self):
         layout = QVBoxLayout(self)
@@ -278,9 +322,8 @@ class ImageViewer(QWidget):
         idx = max(0, min(idx, len(self.images) - 1))
         self._current = idx
 
-        # 加载图片
-        pm = self._load_pixmap(idx)
-        self.image_area.set_pixmap(pm)
+        # 异步加载图片（缓存命中则立即显示）
+        self._request_pixmap(idx)
         self.progress_bar.set_value(idx)
 
         img = self.images[idx]
@@ -293,26 +336,33 @@ class ImageViewer(QWidget):
         # 预加载相邻图片
         QTimer.singleShot(100, lambda: self._preload(idx))
 
-    def _load_pixmap(self, idx: int) -> QPixmap | None:
+    def _request_pixmap(self, idx: int):
+        """请求加载第 idx 张图：命中缓存立即显示，否则交给后台线程。"""
         if idx in self._pixmap_cache:
-            return self._pixmap_cache[idx]
+            self.image_area.set_pixmap(self._pixmap_cache[idx])
+            return
         img = self.images[idx]
         path = img["filepath"]
         if os.path.isfile(path):
-            pm = QPixmap(path)
-            self._pixmap_cache[idx] = pm
-            # 控制缓存大小
-            if len(self._pixmap_cache) > 10:
-                oldest = min(k for k in self._pixmap_cache if k != idx)
-                del self._pixmap_cache[oldest]
-            return pm
-        return None
+            self._loader.load(idx, path)
+        else:
+            self.image_area.set_pixmap(None)
+
+    def _on_image_loaded(self, idx: int, image):
+        pm = QPixmap.fromImage(image)
+        self._pixmap_cache[idx] = pm
+        # 控制缓存大小
+        if len(self._pixmap_cache) > 10:
+            oldest = min(k for k in self._pixmap_cache if k != self._current)
+            del self._pixmap_cache[oldest]
+        if idx == self._current:
+            self.image_area.set_pixmap(pm)
 
     def _preload(self, idx: int):
         for offset in [1, -1, 2, -2]:
             nidx = idx + offset
             if 0 <= nidx < len(self.images) and nidx not in self._pixmap_cache:
-                self._load_pixmap(nidx)
+                self._request_pixmap(nidx)
 
     def _next_page(self):
         """下一页（下一张图片）"""

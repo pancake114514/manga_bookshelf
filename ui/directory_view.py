@@ -18,14 +18,17 @@ class GridThumbLoader(QThread):
 
     def __init__(self, tasks: list, cache_dir: str):
         super().__init__()
-        self.tasks = tasks   # [(img_id, filepath), ...]
+        self.tasks = tasks   # [(img_id, filepath, size|None), ...]，size=None 用网格尺寸
         self.cache_dir = cache_dir
 
     def run(self):
-        from utils.thumbnail import generate_grid_thumbnail
-        for img_id, filepath in self.tasks:
+        from utils.thumbnail import generate_grid_thumbnail, generate_thumbnail
+        for img_id, filepath, size in self.tasks:
             if os.path.isfile(filepath):
-                path = generate_grid_thumbnail(filepath, self.cache_dir)
+                if size:
+                    path = generate_thumbnail(filepath, self.cache_dir, size)
+                else:
+                    path = generate_grid_thumbnail(filepath, self.cache_dir)
                 if path:
                     self.loaded.emit(img_id, path)
 
@@ -118,6 +121,9 @@ class DirectoryView(QWidget):
     back_requested = pyqtSignal()
     image_open_requested = pyqtSignal(int)   # 请求打开第 N 张图
 
+    COVER_W = 180
+    COVER_H = 240
+
     def __init__(self, svc, obj: dict, storage_root: str, parent=None):
         super().__init__(parent)
         self.setStyleSheet("background-color: transparent;")
@@ -129,6 +135,15 @@ class DirectoryView(QWidget):
         self._thumb_cards: dict[str, ImageThumbCard] = {}
         self._build()
         self._load_images()
+
+    # 兼容旧引用
+    @property
+    def cover_w(self):
+        return self.COVER_W
+
+    @property
+    def cover_h(self):
+        return self.COVER_H
 
     def _build(self):
         layout = QVBoxLayout(self)
@@ -172,10 +187,10 @@ class DirectoryView(QWidget):
 
         # 封面缩略图（固定尺寸）
         self.cover_thumb = QLabel()
-        self.cover_thumb.setFixedSize(cover_w, cover_h)
+        self.cover_thumb.setFixedSize(self.COVER_W, self.COVER_H)
         self.cover_thumb.setStyleSheet(f"border-radius: 6px; background: {C['bg3']};")
         self.cover_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        pm = make_placeholder_pixmap(cover_w, cover_h, "📖", "#e4ddd2")
+        pm = make_placeholder_pixmap(self.COVER_W, self.COVER_H, "📖", "#e4ddd2")
         self.cover_thumb.setPixmap(pm)
         content_row.addWidget(self.cover_thumb, alignment=Qt.AlignmentFlag.AlignTop)
 
@@ -254,32 +269,24 @@ class DirectoryView(QWidget):
         self.scroll.setWidget(self.grid_widget)
         layout.addWidget(self.scroll)
 
-        self._load_cover_thumb()
-
-    def _load_cover_thumb(self):
-        cover = self.svc.resolve_cover(self.obj)
-        if cover and os.path.isfile(cover):
-            from utils.thumbnail import generate_thumbnail
-            path = generate_thumbnail(cover, self.cache_dir, (cover_w, cover_h))
-            if path:
-                pm = QPixmap(path).scaled(cover_w, cover_h,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation)
-                self.cover_thumb.setPixmap(pm)
-
     def _load_images(self):
         self.images = self.svc.get_images(self.obj["id"])
         effective_w = self.width() if self.width() > 100 else 900
         cols = max(1, (effective_w - 40) // (ImageThumbCard.W + 12))
 
         tasks = []
+        # 封面缩略图也在后台线程生成（尺寸与网格不同）
+        cover = self.svc.resolve_cover(self.obj)
+        if cover and os.path.isfile(cover):
+            tasks.append(("cover", cover, (self.COVER_W, self.COVER_H)))
+
         for i, img in enumerate(self.images):
             card = ImageThumbCard(img, i)
             card.double_clicked.connect(self.image_open_requested)
             row, col = divmod(i, cols)
             self.grid_layout.addWidget(card, row, col)
             self._thumb_cards[img["id"]] = card
-            tasks.append((img["id"], img["filepath"]))
+            tasks.append((img["id"], img["filepath"], None))
 
         if tasks:
             self._loader = GridThumbLoader(tasks, self.cache_dir)
@@ -287,6 +294,14 @@ class DirectoryView(QWidget):
             self._loader.start()
 
     def _on_thumb_loaded(self, img_id: str, thumb_path: str):
+        if img_id == "cover":
+            if os.path.isfile(thumb_path):
+                pm = QPixmap(thumb_path).scaled(
+                    self.COVER_W, self.COVER_H,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation)
+                self.cover_thumb.setPixmap(pm)
+            return
         card = self._thumb_cards.get(img_id)
         if card and os.path.isfile(thumb_path):
             pm = QPixmap(thumb_path)

@@ -99,14 +99,17 @@ def main():
         # 7. 缩略图缓存生成 + 删除清理
         from utils.thumbnail import generate_thumbnail, clear_cached_thumbs
         cache_dir = os.path.join(root, ".thumbcache")
+        os.makedirs(cache_dir, exist_ok=True)
         thumb = generate_thumbnail(obj["cover_image"], cache_dir)
         check("thumbnail generated", bool(thumb) and os.path.isfile(thumb))
         before = set(os.listdir(cache_dir)) if os.path.isdir(cache_dir) else set()
         svc.delete_object(oid1, delete_files=True, storage_root=root)
         after = set(os.listdir(cache_dir)) if os.path.isdir(cache_dir) else set()
-        check("thumb cache cleared", not (before - after))
+        # 删除对象后其缩略图缓存应被清理（after 不应再包含 before 中的文件）
+        check("thumb cache cleared", not (before & after))
         check("object deleted from db", svc.get_object(oid1) is None)
-        check("storage dir removed", not os.path.isdir(os.path.join(root, "Alpha2")))
+        # 对象实际存储目录是 storage/Alpha（改名不改变 storage_path），删除后应被移除
+        check("storage dir removed", not os.path.isdir(os.path.join(root, "Alpha")))
 
         # 8. 多对象 / R18 混合
         oid2 = str(uuid.uuid4())
@@ -115,7 +118,8 @@ def main():
         make_images(src4, 1)
         svc.import_directory(oid2, "Beta", {"work": ["系列A"]}, src4, root, is_new=True)
         check("r18 hidden", len(svc.get_all_objects(include_r18=False)) == 1)
-        check("r18 shown", len(svc.get_all_objects(include_r18=True)) == 2)
+        # oid1（Alpha2，r18）已在第 7 步删除，因此此处只应剩 Beta 一个对象
+        check("r18 shown", len(svc.get_all_objects(include_r18=True)) == 1)
         check("tag values", set(svc.get_tag_values("work")) == {"系列A"})
 
         svc.close()

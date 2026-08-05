@@ -2,6 +2,8 @@
 书架界面 - 展示所有目录对象的封面卡片
 """
 import os
+import time
+from collections import deque
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
     QPushButton, QScrollArea, QFrame, QSizePolicy, QMenu,
@@ -9,28 +11,83 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QThread, QTimer, QPoint
 from PyQt6.QtGui import QPixmap, QColor, QPainter, QPainterPath
+import logging
 from config import THUMBNAIL_SIZE
 from .widgets import (
     make_placeholder_pixmap, C, FramelessDialog
 )
 
+logger = logging.getLogger(__name__)
+
 
 class ThumbnailLoader(QThread):
+    """常驻后台缩略图生成线程。
+
+    所有卡片共享一个实例，避免「每张卡片一个 QThread」造成的线程风暴；
+    刷新时旧任务会被丢弃（卡片已销毁），无需也无法取消。
+    """
     loaded = pyqtSignal(str, str)   # obj_id, thumb_path
 
-    def __init__(self, tasks: list):   # tasks: [(obj_id, img_path, cache_dir), ...]
-        super().__init__()
-        self.tasks = tasks
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._tasks: deque = deque()
+        self._running = True
+
+    def add_task(self, obj_id: str, img_path: str, cache_dir: str):
+        self._tasks.append((obj_id, img_path, cache_dir))
+        # 积压超过上限时丢弃最旧任务，避免快速刷新时队列堆积
+        while len(self._tasks) > 64:
+            self._tasks.popleft()
+
+    def stop(self):
+        self._running = False
 
     def run(self):
         from utils.thumbnail import generate_thumbnail
-        for obj_id, img_path, cache_dir in self.tasks:
+        while self._running:
+            if not self._tasks:
+                time.sleep(0.02)
+                continue
+            obj_id, img_path, cache_dir = self._tasks.popleft()
+            if not self._running:
+                break
             if img_path and os.path.isfile(img_path):
                 path = generate_thumbnail(img_path, cache_dir)
                 if path:
                     self.loaded.emit(obj_id, path)
 
 
+
+
+class _DeleteObjectWorker(QThread):
+    """后台删除对象：文件删除可能很慢（数 GB），不能在 UI 线程执行。
+
+    使用独立 LibraryService 实例，避免共享 sqlite 连接。
+    """
+    ok = pyqtSignal()
+    err = pyqtSignal(str)
+
+    def __init__(self, db_path: str, obj_id: str, delete_files: bool,
+                 storage_root: str):
+        super().__init__()
+        self.db_path = db_path
+        self.obj_id = obj_id
+        self.delete_files = delete_files
+        self.storage_root = storage_root
+
+    def run(self):
+        from services.library_service import LibraryService
+        svc = None
+        try:
+            svc = LibraryService(self.db_path)
+            svc.delete_object(self.obj_id, delete_files=self.delete_files,
+                              storage_root=self.storage_root)
+            self.ok.emit()
+        except Exception as e:
+            self.err.emit(str(e))
+        finally:
+            if svc is not None:
+                svc.close()
 
 
 class ObjectCard(QFrame):
@@ -48,11 +105,12 @@ class ObjectCard(QFrame):
     # 卡片外边距（用于容纳圆角，防止被父容器裁剪）
     CARD_MARGIN = 2
 
-    def __init__(self, obj: dict, cache_dir: str, svc, parent=None):
+    def __init__(self, obj: dict, cache_dir: str, svc, loader, parent=None):
         super().__init__(parent)
         self.obj = obj
         self.cache_dir = cache_dir
         self.svc = svc
+        self._loader = loader
 
         self.setFixedSize(self.CARD_W, self.CARD_H)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -125,7 +183,9 @@ class ObjectCard(QFrame):
         elided = name.fontMetrics().elidedText(name_text, Qt.TextElideMode.ElideRight, self.CARD_W - 24)
         name.setText(elided)
 
-        count = self.svc.get_image_count(self.obj["id"])
+        count = self.obj.get("image_count")
+        if count is None:
+            count = self.svc.get_image_count(self.obj["id"])
         count_lbl = QLabel(f"{count} 张图片")
         count_lbl.setStyleSheet(f"color: {C['text3']}; font-size: 11px; border: none;")
 
@@ -188,7 +248,7 @@ class ObjectCard(QFrame):
             )
             self.cover_label.setPixmap(final_pm)
         except Exception as e:
-            print(f"Error processing thumbnail: {e}")
+            logger.warning("缩略图处理失败: %s", e)
 
     # --- 剩余交互代码（contextMenuEvent等）与之前版本保持一致 ---
     def contextMenuEvent(self, event):
@@ -220,12 +280,7 @@ class ObjectCard(QFrame):
     def _load_cover(self):
         cover = self.svc.resolve_cover(self.obj)
         if cover and os.path.isfile(cover):
-            self._set_cover_async(cover)
-
-    def _set_cover_async(self, path: str):
-        self._loader = ThumbnailLoader([(self.obj["id"], path, self.cache_dir)])
-        self._loader.loaded.connect(self._on_thumb_loaded)
-        self._loader.start()
+            self._loader.add_task(self.obj["id"], cover, self.cache_dir)
 
 class BookshelfView(QWidget):
     object_opened = pyqtSignal(dict)
@@ -238,10 +293,25 @@ class BookshelfView(QWidget):
         self.cache_dir = os.path.join(storage_root, ".thumbcache")
         os.makedirs(self.cache_dir, exist_ok=True)
         self._cards: dict[str, ObjectCard] = {}
+        self._loader = ThumbnailLoader()
+        self._loader.loaded.connect(self._on_thumb_loaded)
+        self._loader.start()
+        self.destroyed.connect(self._on_loader_destroyed)
+        self._delete_workers: list = []
         self._resize_timer = QTimer()
         self._resize_timer.setSingleShot(True)
         self._resize_timer.timeout.connect(self._relayout)
         self._build()
+
+    def _on_loader_destroyed(self):
+        self._loader.stop()
+        self._loader.wait(500)
+
+    def update_storage_root(self, storage_root: str):
+        """库根目录变更后更新缓存目录（迁移成功时由 MainWindow 调用）。"""
+        self.storage_root = storage_root
+        self.cache_dir = os.path.join(storage_root, ".thumbcache")
+        os.makedirs(self.cache_dir, exist_ok=True)
 
     def _build(self):
         layout = QVBoxLayout(self)
@@ -286,7 +356,7 @@ class BookshelfView(QWidget):
 
         cols = self._calc_cols()
         for i, obj in enumerate(objects):
-            card = ObjectCard(obj, self.cache_dir, self.svc)
+            card = ObjectCard(obj, self.cache_dir, self.svc, self._loader)
             card.double_clicked.connect(self.object_opened)
             card.edit_requested.connect(self._on_edit)
             card.delete_requested.connect(self._on_delete)
@@ -294,6 +364,12 @@ class BookshelfView(QWidget):
             row, col = divmod(i, cols)
             self.grid_layout.addWidget(card, row, col)
             self._cards[obj["id"]] = card
+
+    def _on_thumb_loaded(self, obj_id: str, thumb_path: str):
+        """卡片可能已被重建/销毁，按当前卡片字典匹配。"""
+        card = self._cards.get(obj_id)
+        if card is not None:
+            card._on_thumb_loaded(obj_id, thumb_path)
 
     def _calc_cols(self) -> int:
         effective_w = self.width() if self.width() > 200 else 900
@@ -326,7 +402,7 @@ class BookshelfView(QWidget):
 
     def _on_delete(self, obj: dict):
         """删除对象，可选择是否同时删除本地文件"""
-        dlg = FramelessDialog("🗑️?", self)
+        dlg = FramelessDialog("🗑️", self)
         dlg.setMinimumWidth(400)
         dlg.setModal(True)
 
@@ -404,7 +480,6 @@ class BookshelfView(QWidget):
         dlg._install_titlebar()
         layout = dlg.layout()
         l, t, r, b = layout.getContentsMargins()
-        print(l,t,r,b)
         layout.setContentsMargins(
             l,
             t + 5,
@@ -416,15 +491,28 @@ class BookshelfView(QWidget):
         # --- 后续执行逻辑 ---
         if dlg.exec() == QDialog.DialogCode.Accepted:
             delete_files = checkbox.isChecked()
-            try:
-                self.svc.delete_object(obj["id"], delete_files=delete_files,
-                                       storage_root=self.storage_root)
-            except Exception as e:
-                QMessageBox.warning(
-                    self, "删除失败",
-                    f"无法删除本地文件：{e}\n数据库记录已删除。"
-                )
-            self.tags_updated.emit()
+            worker = _DeleteObjectWorker(
+                self.svc.db_path, obj["id"], delete_files, self.storage_root
+            )
+            worker.ok.connect(self._on_delete_done)
+            worker.err.connect(self._on_delete_error)
+            # 保存引用避免 GC 导致线程被析构；完成后移出列表
+            self._delete_workers.append(worker)
+            worker.finished.connect(
+                lambda w=worker: self._delete_workers.remove(w)
+                if w in self._delete_workers else None
+            )
+            worker.start()
+
+    def _on_delete_done(self):
+        self.tags_updated.emit()
+
+    def _on_delete_error(self, msg: str):
+        QMessageBox.warning(
+            self, "删除失败",
+            f"无法删除本地文件：{msg}\n数据库记录已删除。"
+        )
+        self.tags_updated.emit()
 
     def _on_change_cover(self, obj: dict):
         from PyQt6.QtWidgets import QFileDialog

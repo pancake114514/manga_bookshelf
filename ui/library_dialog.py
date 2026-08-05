@@ -1,13 +1,11 @@
 import os
-import time
 
 from PyQt6.QtWidgets import (
-    QApplication, QFileDialog, QHBoxLayout, QLabel, QMessageBox,
+    QFileDialog, QHBoxLayout, QLabel, QMessageBox,
     QProgressDialog, QPushButton, QVBoxLayout, QWidget
 )
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, QThread
 
-from config import app_state
 from library_manager import (
     LibraryMigrationError,
     check_writable,
@@ -16,11 +14,45 @@ from library_manager import (
 from .widgets import C, FramelessDialog, SectionLabel, STYLE_MAIN
 
 
+class MigrationWorker(QThread):
+    """后台执行库迁移，避免移动大量目录/文件时阻塞 UI。
+
+    使用独立的 LibraryService 实例（不共享 sqlite 连接）。
+    """
+    progress = pyqtSignal(int, int, str)
+    succeeded = pyqtSignal(int)
+    failed = pyqtSignal(str)
+
+    def __init__(self, db_path: str, new_root: str):
+        super().__init__()
+        self.db_path = db_path
+        self.new_root = new_root
+
+    def run(self):
+        from services.library_service import LibraryService
+        svc = None
+        try:
+            svc = LibraryService(self.db_path)
+            moved = migrate_library(
+                svc.db, self.new_root,
+                progress=lambda cur, total, msg: self.progress.emit(cur, total, msg),
+            )
+            self.succeeded.emit(moved)
+        except LibraryMigrationError as exc:
+            self.failed.emit(str(exc))
+        except Exception as exc:
+            self.failed.emit(str(exc))
+        finally:
+            if svc is not None:
+                svc.close()
+
+
 class LibraryDialog(FramelessDialog):
     storage_root_changed = pyqtSignal(str)
 
-    def __init__(self, current_path: str, parent=None):
+    def __init__(self, svc, current_path: str, parent=None):
         super().__init__("库管理", parent)
+        self.svc = svc
         self._current_path = current_path
         self._selected_path = current_path
         self.setMinimumWidth(560)
@@ -164,37 +196,31 @@ class LibraryDialog(FramelessDialog):
         prog.setModal(True)
         prog.setMinimumWidth(360)
         prog.setCancelButton(None)
+        prog.show()
 
-        started_at = time.monotonic()
-        progress_visible = False
+        self._progress = prog
+        self._migration_worker = MigrationWorker(self.svc.db_path, path)
+        self._migration_worker.progress.connect(self._on_migration_progress)
+        self._migration_worker.succeeded.connect(self._on_migration_done)
+        self._migration_worker.failed.connect(self._on_migration_failed)
+        self._migration_worker.start()
 
-        try:
-            moved_count = 0
-            def on_progress(cur: int, total: int, message: str):
-                nonlocal progress_visible
-                prog.setMaximum(total)
-                prog.setValue(cur)
-                prog.setLabelText(message)
-                if not progress_visible and time.monotonic() - started_at >= 0.25:
-                    prog.show()
-                    progress_visible = True
-                if progress_visible:
-                    QApplication.processEvents()
-
-            moved_count = migrate_library(app_state.db, path, progress=on_progress)
-        except LibraryMigrationError as exc:
-            if progress_visible:
-                prog.close()
-            QMessageBox.critical(self, "迁移失败", str(exc))
+    def _on_migration_progress(self, cur: int, total: int, message: str):
+        prog = getattr(self, "_progress", None)
+        if not prog:
             return
-        except Exception as exc:
-            if progress_visible:
-                prog.close()
-            QMessageBox.critical(self, "迁移失败", str(exc))
-            return
+        prog.setMaximum(total)
+        prog.setValue(cur)
+        prog.setLabelText(message)
 
-        if progress_visible:
-            prog.close()
-        self.storage_root_changed.emit(path)
+    def _on_migration_done(self, moved_count: int):
+        if getattr(self, "_progress", None):
+            self._progress.close()
+        self.storage_root_changed.emit(self._selected_path)
         QMessageBox.information(self, "迁移成功", f"成功迁移{moved_count}个对象")
         self.accept()
+
+    def _on_migration_failed(self, message: str):
+        if getattr(self, "_progress", None):
+            self._progress.close()
+        QMessageBox.critical(self, "迁移失败", message)

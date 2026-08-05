@@ -3,7 +3,10 @@
 """
 import os
 import shutil
+import logging
 from config import SUPPORTED_FORMATS
+
+logger = logging.getLogger(__name__)
 
 
 def collect_images(directory: str) -> list[str]:
@@ -55,7 +58,7 @@ def copy_image_with_seq_name(src_path: str, storage_obj_dir: str,
         shutil.copy2(src_path, dest)
         return filename, dest
     except Exception as e:
-        print(f"[FileUtils] Copy error: {e}")
+        logger.warning("图片复制失败: %s | %s", e, src_path)
         return None, None
 
 

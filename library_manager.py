@@ -155,11 +155,20 @@ def prepare_library_migration(db: Database, new_root: str) -> tuple[str, str, Li
     return old_root, new_root, plans
 
 
+def _remove_backup(path: str | None):
+    if path and os.path.exists(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
 def migrate_library(db: Database, new_root: str, progress: ProgressCallback | None = None) -> int:
     old_root, new_root, plans = prepare_library_migration(db, new_root)
     total_steps = max(1, len(plans) * 2 + 1)
     current_step = 0
     moved_dirs: list[tuple[str, str]] = []
+    backup_path: str | None = f"{db.db_path}.bak"
 
     def emit(message: str):
         nonlocal current_step
@@ -168,6 +177,12 @@ def migrate_library(db: Database, new_root: str, progress: ProgressCallback | No
             progress(current_step, total_steps, message)
 
     try:
+        # 迁移前备份数据库，便于异常/崩溃后手动恢复
+        try:
+            shutil.copy2(db.db_path, backup_path)
+        except OSError:
+            backup_path = None
+
         os.makedirs(new_root, exist_ok=True)
         for plan in plans:
             emit(f"正在迁移：{plan.name}")
@@ -188,16 +203,26 @@ def migrate_library(db: Database, new_root: str, progress: ProgressCallback | No
         except Exception:
             db.rollback()
             raise
-
-        emit("迁移完成")
-        return len(plans)
     except Exception as exc:
+        _remove_backup(backup_path)
+        # 回滚已移动的目录；回滚失败必须报告，不能静默吞掉
+        rollback_errors = []
         for old_dir, new_dir in reversed(moved_dirs):
             try:
                 if os.path.exists(new_dir) and not os.path.exists(old_dir):
                     shutil.move(new_dir, old_dir)
-            except Exception:
-                pass
+            except Exception as e:
+                rollback_errors.append(f"{new_dir} → {old_dir}: {e}")
+        if rollback_errors:
+            detail = "\n".join(rollback_errors)
+            raise LibraryMigrationError(
+                f"迁移失败：{exc}\n\n以下目录回滚失败，请手动恢复：\n{detail}"
+            ) from exc
         if isinstance(exc, LibraryMigrationError):
             raise
         raise LibraryMigrationError(str(exc)) from exc
+
+    # commit 成功后的收尾（放 try 外，进度回调异常不应触发回滚）
+    emit("迁移完成")
+    _remove_backup(backup_path)
+    return len(plans)

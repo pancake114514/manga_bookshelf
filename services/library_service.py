@@ -73,7 +73,10 @@ class LibraryService:
         cover = obj.get("cover_image")
         if cover and os.path.isfile(cover):
             return cover
-        images = self.db.get_images(obj["id"])
+        first = obj.get("first_image")
+        if first and os.path.isfile(first):
+            return first
+        images = self.db.get_images(obj["id"], limit=1)
         if images and os.path.isfile(images[0]["filepath"]):
             return images[0]["filepath"]
         return None
@@ -124,13 +127,20 @@ class LibraryService:
                          source_dir: str, storage_root: str,
                          is_new: bool, progress_cb: Optional[ProgressCB] = None):
         """导入整个目录到 storage_root 下，返回对象 id。"""
-        storage_obj_dir = os.path.join(storage_root, name)
-        os.makedirs(storage_obj_dir, exist_ok=True)
-
         if is_new:
+            storage_obj_dir = os.path.join(storage_root, name)
+            os.makedirs(storage_obj_dir, exist_ok=True)
             self.db.create_object(obj_id, "directory", name,
                                   source_dir, storage_obj_dir)
             self.db.set_tags(obj_id, tags)
+        else:
+            # 追加导入必须使用对象 DB 中记录的目录，而不是按当前名字拼接，
+            # 否则对象改名后会导致图片复制到新目录、与 DB 记录分裂。
+            obj = self.db.get_object(obj_id) or {}
+            storage_obj_dir = (obj.get("storage_path") or "").strip()
+            if not storage_obj_dir or not os.path.isdir(storage_obj_dir):
+                storage_obj_dir = os.path.join(storage_root, obj.get("name", name))
+            os.makedirs(storage_obj_dir, exist_ok=True)
 
         images = collect_images(source_dir)
         total = len(images)

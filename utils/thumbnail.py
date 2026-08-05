@@ -3,8 +3,11 @@
 """
 import os
 import hashlib
+import logging
 from PIL import Image
 from config import THUMBNAIL_SIZE, GRID_THUMB_SIZE, SUPPORTED_FORMATS
+
+logger = logging.getLogger(__name__)
 
 
 def get_thumb_cache_dir(base_dir: str) -> str:
@@ -61,7 +64,7 @@ def generate_thumbnail(source_path: str, cache_dir: str,
         img.save(thumb_path, "JPEG", quality=85)
         return thumb_path
     except Exception as e:
-        print(f"[Thumbnail] Error: {e} | {source_path}")
+        logger.warning("缩略图生成失败: %s | %s", e, source_path)
         return None
 
 

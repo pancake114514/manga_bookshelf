@@ -193,7 +193,7 @@ class MainWindow(FramelessMixin, QMainWindow):
         dlg.exec()
 
     def _on_library_manage(self):
-        dlg = LibraryDialog(self.storage_root, self)
+        dlg = LibraryDialog(self.svc, self.storage_root, self)
         dlg.storage_root_changed.connect(self._apply_storage_root)
         dlg.exec()
 
@@ -204,7 +204,7 @@ class MainWindow(FramelessMixin, QMainWindow):
         self._load_shelf()
 
         if self.stack.currentIndex() == VIEW_DIRECTORY and self._current_obj:
-            refreshed = app_state.db.get_object(self._current_obj["id"])
+            refreshed = self.svc.get_object(self._current_obj["id"])
             if refreshed:
                 self._open_directory(refreshed)
 

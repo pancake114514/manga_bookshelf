@@ -4,6 +4,8 @@ MangaShelf - 二次元图片管理器
 """
 import sys
 import os
+import logging
+import traceback
 
 # 将项目根目录加入 sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -17,6 +19,36 @@ from PyQt6.QtGui import QFont
 
 from services.library_service import LibraryService
 from ui.widgets import STYLE_MAIN, SectionLabel
+
+
+logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+
+
+def setup_logging():
+    """将日志写入用户数据目录（打包后 stderr 不可见，必须落盘）。"""
+    log_path = os.path.join(os.path.dirname(get_config_path()), "manga_shelf.log")
+    logging.basicConfig(
+        filename=log_path,
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        encoding="utf-8",
+        force=True,
+    )
+
+
+def _excepthook(exc_type, exc_value, exc_tb):
+    """全局兜底：未处理异常写入日志并提示，避免 windowed 模式静默闪退。"""
+    logging.critical("未处理的异常", exc_info=(exc_type, exc_value, exc_tb))
+    try:
+        QMessageBox.critical(
+            None, "程序错误",
+            f"发生未处理的异常，程序即将退出：\n\n{exc_value}"
+        )
+    except Exception:
+        pass
+
+
+sys.excepthook = _excepthook
 
 
 def check_writable(path: str) -> tuple[bool, str]:
@@ -147,39 +179,54 @@ def get_config_path() -> str:
 
 
 def main():
-    app = QApplication(sys.argv)
-    app.setApplicationName("MangaShelf")
-    app.setStyle("Fusion")
-    app.setStyleSheet(STYLE_MAIN)
+    setup_logging()
+    logging.info("MangaShelf 启动")
+    try:
+        app = QApplication(sys.argv)
+        app.setApplicationName("MangaShelf")
+        app.setStyle("Fusion")
+        app.setStyleSheet(STYLE_MAIN)
 
-    db_path = get_config_path()
-    svc = LibraryService(db_path)
+        db_path = get_config_path()
+        svc = LibraryService(db_path)
 
-    # 检查存储根目录是否有效（不存在或没有写权限则重新选择）
-    storage_root = svc.get_config("storage_root")
-    need_setup = False
-    if not storage_root:
-        need_setup = True
-    elif not os.path.isdir(storage_root):
-        need_setup = True
-    else:
-        ok, _ = check_writable(storage_root)
-        if not ok:
+        # 检查存储根目录是否有效（不存在或没有写权限则重新选择）
+        storage_root = svc.get_config("storage_root")
+        need_setup = False
+        if not storage_root:
             need_setup = True
+        elif not os.path.isdir(storage_root):
+            need_setup = True
+        else:
+            ok, _ = check_writable(storage_root)
+            if not ok:
+                need_setup = True
 
-    if need_setup:
-        dlg = FirstRunDialog()
-        dlg.setStyleSheet(STYLE_MAIN)
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            sys.exit(0)
-        storage_root = dlg.get_path()
-        svc.set_config("storage_root", storage_root)
+        if need_setup:
+            dlg = FirstRunDialog()
+            dlg.setStyleSheet(STYLE_MAIN)
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                sys.exit(0)
+            storage_root = dlg.get_path()
+            svc.set_config("storage_root", storage_root)
 
-    from ui.main_window import MainWindow
-    window = MainWindow(svc, storage_root)
-    window.show()
+        from ui.main_window import MainWindow
+        window = MainWindow(svc, storage_root)
+        window.show()
 
-    sys.exit(app.exec())
+        sys.exit(app.exec())
+    except SystemExit:
+        raise
+    except Exception:
+        logging.exception("启动/运行失败")
+        try:
+            QMessageBox.critical(
+                None, "启动失败",
+                f"程序启动失败：\n\n{traceback.format_exc()}"
+            )
+        except Exception:
+            pass
+        sys.exit(1)
 
 
 if __name__ == "__main__":
