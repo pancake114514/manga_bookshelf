@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
+from library_manager import check_writable, get_database_path
 from services.library_service import LibraryService
 from ui.widgets import STYLE_MAIN, SectionLabel
 
@@ -26,7 +27,7 @@ logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(mes
 
 def setup_logging():
     """将日志写入用户数据目录（打包后 stderr 不可见，必须落盘）。"""
-    log_path = os.path.join(os.path.dirname(get_config_path()), "manga_shelf.log")
+    log_path = os.path.join(os.path.dirname(get_database_path()), "manga_shelf.log")
     logging.basicConfig(
         filename=log_path,
         level=logging.INFO,
@@ -49,22 +50,6 @@ def _excepthook(exc_type, exc_value, exc_tb):
 
 
 sys.excepthook = _excepthook
-
-
-def check_writable(path: str) -> tuple[bool, str]:
-    """检查目录是否存在且有写权限"""
-    if not os.path.isdir(path):
-        return False, f"目录不存在：\n{path}"
-    test_file = os.path.join(path, ".manga_shelf_write_test")
-    try:
-        with open(test_file, "w") as f:
-            f.write("test")
-        os.remove(test_file)
-        return True, ""
-    except PermissionError:
-        return False, f"没有写入权限，请选择其他目录：\n{path}"
-    except Exception as e:
-        return False, f"目录不可用：{e}"
 
 
 class FirstRunDialog(QDialog):
@@ -167,17 +152,6 @@ class FirstRunDialog(QDialog):
         return self._path
 
 
-def get_config_path() -> str:
-    """获取配置数据库路径（存放在用户数据目录）"""
-    if sys.platform == "win32":
-        data_dir = os.environ.get("APPDATA", os.path.expanduser("~"))
-    else:
-        data_dir = os.path.expanduser("~/.local/share")
-    app_dir = os.path.join(data_dir, "MangaShelf")
-    os.makedirs(app_dir, exist_ok=True)
-    return os.path.join(app_dir, "library.db")
-
-
 def main():
     setup_logging()
     logging.info("MangaShelf 启动")
@@ -187,7 +161,7 @@ def main():
         app.setStyle("Fusion")
         app.setStyleSheet(STYLE_MAIN)
 
-        db_path = get_config_path()
+        db_path = get_database_path()
         svc = LibraryService(db_path)
 
         # 检查存储根目录是否有效（不存在或没有写权限则重新选择）

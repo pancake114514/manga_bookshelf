@@ -8,3 +8,18 @@ reasonix.toml
 
 # 构建产物
 build/
+dist/
+
+# 虚拟环境
+.venv/
+
+# IDE 本地配置
+settings.json
+.idea/
+
+# 临时/数据文件
+*.tar
+*.db
+*.bak
+.write_test
+.manga_shelf_write_test

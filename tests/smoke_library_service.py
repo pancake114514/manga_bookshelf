@@ -52,8 +52,9 @@ def main():
         os.makedirs(src1)
         make_images(src1, 3)
         oid1 = str(uuid.uuid4())
-        svc.import_directory(oid1, "Alpha", {"work": ["系列A"], "r18": False},
-                             src1, root, is_new=True)
+        ok, fail = svc.import_directory(oid1, "Alpha", {"work": ["系列A"], "r18": False},
+                                        src1, root, is_new=True)
+        check("import returns counts", ok == 3 and fail == 0)
         objs = svc.get_all_objects(include_r18=False)
         check("create + import object", len(objs) == 1)
         obj = svc.get_object(oid1)
@@ -76,7 +77,8 @@ def main():
         src2 = os.path.join(tmp, "src2")
         os.makedirs(src2)
         make_images(src2, 2)
-        svc.import_directory(oid1, "Alpha2", {}, src2, root, is_new=False)
+        ok, fail = svc.import_directory(oid1, "Alpha2", {}, src2, root, is_new=False)
+        check("append import counts", ok == 2 and fail == 0)
         check("append import", svc.get_image_count(oid1) == 5)
 
         # 4. 单文件导入

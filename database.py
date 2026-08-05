@@ -5,27 +5,21 @@ from typing import Any, Dict, List, Optional
 class Database:
     def __init__(self, db_path: str):
         self.db_path = db_path
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        # isolation_level=None：autocommit 模式，每条语句立即生效；
+        # 需要多语句原子操作时用 begin()/commit()/rollback() 显式开事务。
+        self.conn = sqlite3.connect(db_path, isolation_level=None, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
-        self._in_transaction = False
         self._init_tables()
 
     def begin(self):
-        if not self._in_transaction:
-            self.conn.execute("BEGIN")
-            self._in_transaction = True
+        """开启显式事务（autocommit 模式下 BEGIN 才有意义）。"""
+        self.conn.execute("BEGIN")
 
     def commit(self):
         self.conn.commit()
-        self._in_transaction = False
 
     def rollback(self):
         self.conn.rollback()
-        self._in_transaction = False
-
-    def _commit_if_needed(self):
-        if not self._in_transaction:
-            self.conn.commit()
 
     def _init_tables(self):
         cur = self.conn.cursor()
@@ -68,8 +62,19 @@ class Database:
 
             CREATE INDEX IF NOT EXISTS idx_tags_object ON tags(object_id);
             CREATE INDEX IF NOT EXISTS idx_images_object ON images(object_id);
+            CREATE INDEX IF NOT EXISTS idx_tags_category_value ON tags(category, value);
+
+            -- 先去除历史重复标签，再建唯一约束（重复数据会导致 CREATE UNIQUE INDEX 失败）
+            DELETE FROM tags WHERE id NOT IN (
+                SELECT MIN(id) FROM tags GROUP BY object_id, category, value
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_unique
+                ON tags(object_id, category, value);
+
+            -- 清理历史遗留孤儿（升级前外键未生效时可能残留）
+            DELETE FROM tags WHERE object_id NOT IN (SELECT id FROM objects);
+            DELETE FROM images WHERE object_id NOT IN (SELECT id FROM objects);
         """)
-        self._commit_if_needed()
 
     def get_config(self, key: str) -> Optional[str]:
         row = self.conn.execute(
@@ -80,8 +85,7 @@ class Database:
     def set_config(self, key: str, value: str):
         self.conn.execute(
             "INSERT OR REPLACE INTO config(key,value) VALUES(?,?)", (key, value)
-        )
-        self._commit_if_needed()
+        )
 
     def create_object(self, obj_id: str, obj_type: str, name: str,
                       source_path: str, storage_path: str) -> bool:
@@ -91,7 +95,6 @@ class Database:
                    VALUES(?,?,?,?,?)""",
                 (obj_id, obj_type, name, source_path, storage_path)
             )
-            self._commit_if_needed()
             return True
         except sqlite3.IntegrityError:
             return False
@@ -115,54 +118,26 @@ class Database:
     def update_object_name(self, obj_id: str, name: str):
         self.conn.execute(
             "UPDATE objects SET name=? WHERE id=?", (name, obj_id)
-        )
-        self._commit_if_needed()
+        )
 
     def update_object_cover(self, obj_id: str, cover_image: str):
         self.conn.execute(
             "UPDATE objects SET cover_image=? WHERE id=?", (cover_image, obj_id)
-        )
-        self._commit_if_needed()
+        )
 
     def update_object_storage_path(self, obj_id: str, storage_path: str):
         self.conn.execute(
             "UPDATE objects SET storage_path=? WHERE id=?", (storage_path, obj_id)
-        )
-        self._commit_if_needed()
+        )
 
     def update_last_read(self, obj_id: str, idx: int):
         self.conn.execute(
             "UPDATE objects SET last_read_idx=? WHERE id=?", (idx, obj_id)
-        )
-        self._commit_if_needed()
+        )
 
     def delete_object(self, obj_id: str):
+        # tags/images 通过外键 ON DELETE CASCADE 一并删除，无需手动清理孤儿标签
         self.conn.execute("DELETE FROM objects WHERE id=?", (obj_id,))
-        self._commit_if_needed()
-        self.cleanup_all_orphan_tags()
-
-    def cleanup_all_orphan_tags(self):
-        valid_objects = set(
-            row["id"] for row in self.conn.execute("SELECT id FROM objects").fetchall()
-        )
-        all_tags = self.conn.execute(
-            "SELECT id, object_id, category, value FROM tags"
-        ).fetchall()
-
-        orphan_tag_ids = []
-        for tag in all_tags:
-            if tag["object_id"] not in valid_objects:
-                orphan_tag_ids.append(tag["id"])
-
-        if orphan_tag_ids:
-            placeholders = ",".join("?" * len(orphan_tag_ids))
-            self.conn.execute(
-                f"DELETE FROM tags WHERE id IN ({placeholders})", orphan_tag_ids
-            )
-            self._commit_if_needed()
-
-    def _cleanup_orphan_tags(self, tags: Dict):
-        self.cleanup_all_orphan_tags()
 
     def _assemble_objects(self, rows, include_r18: bool = False) -> List[Dict]:
         """批量组装对象：一次查询取回 tags、图片数量与首图路径，避免 N+1。"""
@@ -278,8 +253,7 @@ class Database:
         if rows:
             self.conn.executemany(
                 "INSERT INTO tags(object_id,category,value) VALUES(?,?,?)", rows
-            )
-        self._commit_if_needed()
+            )
 
     def get_all_tag_values(self, category: str) -> List[str]:
         rows = self.conn.execute(
@@ -294,14 +268,12 @@ class Database:
             """INSERT OR IGNORE INTO images(id,object_id,filename,filepath,sort_order)
                VALUES(?,?,?,?,?)""",
             (img_id, obj_id, filename, filepath, sort_order)
-        )
-        self._commit_if_needed()
+        )
 
     def update_image_filepath(self, img_id: str, filepath: str):
         self.conn.execute(
             "UPDATE images SET filepath=? WHERE id=?", (filepath, img_id)
-        )
-        self._commit_if_needed()
+        )
 
     def get_images(self, obj_id: str, limit: Optional[int] = None) -> List[Dict]:
         sql = "SELECT * FROM images WHERE object_id=? ORDER BY sort_order, filename"

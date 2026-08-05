@@ -15,7 +15,7 @@ import uuid
 class ImportWorker(QThread):
     """后台导入线程（使用独立 LibraryService，避免共享 sqlite 连接）"""
     progress = pyqtSignal(int, int)
-    finished = pyqtSignal(str)
+    import_finished = pyqtSignal(str, int, int)   # obj_id, 成功数, 失败数
     error = pyqtSignal(str)
 
     def __init__(self, db_path: str, obj_id: str, obj_name: str, tags: dict,
@@ -34,12 +34,12 @@ class ImportWorker(QThread):
         svc = None
         try:
             svc = LibraryService(self.db_path)
-            svc.import_directory(
+            ok, fail = svc.import_directory(
                 self.obj_id, self.obj_name, self.tags,
                 self.source_dir, self.storage_root, self.is_new,
                 progress_cb=lambda cur, total: self.progress.emit(cur, total),
             )
-            self.finished.emit(self.obj_id)
+            self.import_finished.emit(self.obj_id, ok, fail)
         except Exception as e:
             self.error.emit(str(e))
         finally:
@@ -253,8 +253,12 @@ class ImportDialog(FramelessDialog):
                 prog.setLabelText(f"正在导入图片… ({cur}/{total})")
             QApplication.processEvents()
 
-        def on_finished(oid):
+        def on_finished(oid, ok, fail):
             prog.close()
+            msg = f"导入完成：成功 {ok} 张图片"
+            if fail:
+                msg += f"，{fail} 张失败"
+            QMessageBox.information(self, "导入完成", msg)
             self.accept()
             self.import_done.emit(oid)
 
@@ -263,7 +267,7 @@ class ImportDialog(FramelessDialog):
             QMessageBox.critical(self, "导入失败", msg)
 
         self.worker.progress.connect(on_progress)
-        self.worker.finished.connect(on_finished)
+        self.worker.import_finished.connect(on_finished)
         self.worker.error.connect(on_error)
         self.worker.start()
 

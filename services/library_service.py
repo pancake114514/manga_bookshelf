@@ -125,8 +125,9 @@ class LibraryService:
 
     def import_directory(self, obj_id: str, name: str, tags: dict,
                          source_dir: str, storage_root: str,
-                         is_new: bool, progress_cb: Optional[ProgressCB] = None):
-        """导入整个目录到 storage_root 下，返回对象 id。"""
+                         is_new: bool, progress_cb: Optional[ProgressCB] = None
+                         ) -> tuple[int, int]:
+        """导入整个目录到 storage_root 下。返回 (成功数, 失败数)。"""
         if is_new:
             storage_obj_dir = os.path.join(storage_root, name)
             os.makedirs(storage_obj_dir, exist_ok=True)
@@ -146,12 +147,16 @@ class LibraryService:
         total = len(images)
         seq = next_seq_number(storage_obj_dir)
         sort_start = self.db.get_image_count(obj_id)
+        ok, fail = 0, 0
         for i, src in enumerate(images):
             filename, dest = copy_image_with_seq_name(src, storage_obj_dir, seq)
             if dest:
                 img_id = str(uuid.uuid4())
                 self.db.add_image(img_id, obj_id, filename, dest, sort_start + i)
                 seq += 1
+                ok += 1
+            else:
+                fail += 1
             if progress_cb:
                 progress_cb(i + 1, total)
 
@@ -161,6 +166,8 @@ class LibraryService:
             first_img = self.db.get_images(obj_id)
             if first_img and not (obj or {}).get("cover_image"):
                 self.db.update_object_cover(obj_id, first_img[0]["filepath"])
+
+        return ok, fail
 
     def import_single_files(self, obj_id: str, paths: list,
                             storage_root: str) -> tuple[int, int]:

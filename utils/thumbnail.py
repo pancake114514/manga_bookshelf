@@ -16,9 +16,21 @@ def get_thumb_cache_dir(base_dir: str) -> str:
     return cache
 
 
-def _thumb_path(cache_dir: str, source_path: str, size: tuple) -> str:
+def _thumb_prefix(cache_dir: str, source_path: str, size: tuple) -> str:
+    """源路径的稳定缓存前缀（不含 mtime），用于按路径精确清理所有版本。"""
     h = hashlib.md5(f"{source_path}{size}".encode()).hexdigest()
-    return os.path.join(cache_dir, f"{h}.jpg")
+    return os.path.join(cache_dir, h)
+
+
+def _thumb_path(cache_dir: str, source_path: str, size: tuple) -> str:
+    """缓存文件名混入源文件的 mtime 与大小，源图被替换后旧缩略图自动失效。"""
+    base = _thumb_prefix(cache_dir, source_path, size)
+    try:
+        st = os.stat(source_path)
+        return f"{base}__{st.st_mtime_ns}_{st.st_size}.jpg"
+    except OSError:
+        # 源文件已不存在时退化为无版本前缀（清理逻辑按前缀扫描，仍可命中）
+        return f"{base}.jpg"
 
 
 def generate_thumbnail(source_path: str, cache_dir: str,
@@ -61,7 +73,10 @@ def generate_thumbnail(source_path: str, cache_dir: str,
         top  = (new_h - target_h) // 2
         img = img.crop((left, top, left + target_w, top + target_h))
 
-        img.save(thumb_path, "JPEG", quality=85)
+        # 先写临时文件再原子替换，避免多线程并发写同一路径留下半截 JPEG
+        tmp_path = f"{thumb_path}.tmp"
+        img.save(tmp_path, "JPEG", quality=85)
+        os.replace(tmp_path, thumb_path)
         return thumb_path
     except Exception as e:
         logger.warning("缩略图生成失败: %s | %s", e, source_path)
@@ -74,21 +89,26 @@ def generate_grid_thumbnail(source_path: str, cache_dir: str) -> str | None:
 
 def clear_cached_thumbs(cache_dir: str, source_paths: list) -> int:
     """
-    删除与 source_paths 对应的缩略图缓存文件（含两种尺寸），
-    返回实际删除的文件数。用于删除对象后清理缓存。
+    删除与 source_paths 对应的缩略图缓存文件（含两种尺寸、含该源文件的所有
+    mtime 版本），返回实际删除的文件数。按稳定前缀扫描，源文件是否仍存在
+    都不影响清理。
     """
-    if not source_paths:
+    if not source_paths or not os.path.isdir(cache_dir):
         return 0
-    removed = 0
+    prefixes = set()
     for src in source_paths:
         for size in (THUMBNAIL_SIZE, GRID_THUMB_SIZE):
-            p = _thumb_path(cache_dir, src, size)
-            if os.path.isfile(p):
-                try:
-                    os.remove(p)
-                    removed += 1
-                except OSError:
-                    pass
+            prefixes.add(hashlib.md5(f"{src}{size}".encode()).hexdigest())
+    removed = 0
+    for fname in os.listdir(cache_dir):
+        stem = fname.split("__", 1)[0]
+        stem = stem.rsplit(".", 1)[0]
+        if stem in prefixes:
+            try:
+                os.remove(os.path.join(cache_dir, fname))
+                removed += 1
+            except OSError:
+                pass
     return removed
 
 

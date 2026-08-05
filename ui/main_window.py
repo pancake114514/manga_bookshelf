@@ -209,8 +209,8 @@ class MainWindow(FramelessMixin, QMainWindow):
                 self._open_directory(refreshed)
 
     def _on_import_done(self, obj_id: str):
+        # 导入结果提示已由 ImportDialog 弹出，这里只刷新书架
         self._load_shelf()
-        QMessageBox.information(self, "导入完成", "图片导入成功！")
 
     # ── 搜索 / 筛选 ───────────────────────────────────────────────────────────
 

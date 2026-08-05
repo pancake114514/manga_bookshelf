@@ -203,6 +203,14 @@ class ImageViewer(QWidget):
         self.images = images   # list of image dicts from db
         self._current = max(0, min(start_index, len(images) - 1))
         self._pixmap_cache: dict[int, QPixmap] = {}
+        # 阅读进度落库节流：连续翻页时合并为一次写
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.timeout.connect(self._flush_last_read)
+        # 预加载定时器（成员持有，销毁时停止，避免 singleShot lambda 访问已销毁对象）
+        self._preload_timer = QTimer(self)
+        self._preload_timer.setSingleShot(True)
+        self._preload_timer.timeout.connect(self._on_preload_timeout)
         self._loader = ImageLoaderThread()
         self._loader.loaded.connect(self._on_image_loaded)
         self._loader.start()
@@ -211,7 +219,18 @@ class ImageViewer(QWidget):
         self._go_to(self._current)
         self._setup_shortcuts()
 
+    def _on_preload_timeout(self):
+        self._preload(self._current)
+
+    def _flush_last_read(self):
+        """把缓存的阅读进度写入 DB。"""
+        if self.obj.get("last_read_idx") is not None:
+            self.svc.update_last_read(self.obj["id"], self.obj["last_read_idx"])
+
     def _on_destroyed(self):
+        self._flush_last_read()
+        self._save_timer.stop()
+        self._preload_timer.stop()
         self._loader.stop()
         self._loader.wait(500)
 
@@ -277,9 +296,7 @@ class ImageViewer(QWidget):
         # ── 进度条区域 ────────────────────────────────────────────────────────
         bottom = QWidget()
         bottom.setFixedHeight(56)
-        bottom.setStyleSheet(F"""
-            background: color: {C['bg2']}
-        """)
+        bottom.setStyleSheet(f"background-color: {C['bg2']};")
         bottom_layout = QVBoxLayout(bottom)
         bottom_layout.setContentsMargins(24, 4, 24, 8)
 
@@ -329,12 +346,12 @@ class ImageViewer(QWidget):
         img = self.images[idx]
         self.filename_lbl.setText(img["filename"])
 
-        # 保存阅读进度
-        self.svc.update_last_read(self.obj["id"], idx)
+        # 保存阅读进度（节流合并，避免每翻一页同步写一次 DB）
         self.obj["last_read_idx"] = idx
+        self._save_timer.start(400)
 
-        # 预加载相邻图片
-        QTimer.singleShot(100, lambda: self._preload(idx))
+        # 预加载相邻图片（用成员 timer，销毁时停止）
+        self._preload_timer.start(100)
 
     def _request_pixmap(self, idx: int):
         """请求加载第 idx 张图：命中缓存立即显示，否则交给后台线程。"""
@@ -378,6 +395,8 @@ class ImageViewer(QWidget):
         self._go_to(value)
 
     def _on_back(self):
+        self._save_timer.stop()
+        self._flush_last_read()
         self.back_requested.emit()
 
 
