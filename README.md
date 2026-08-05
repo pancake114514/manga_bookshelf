@@ -65,7 +65,8 @@ manga_shelf/
 │   ├── thumbnail.py      # 缩略图生成（Pillow，带缓存）
 │   └── file_utils.py     # 文件操作（复制、校验）
 └── tests/
-    └── smoke_library_service.py  # 无 GUI 冒烟测试
+    ├── conftest.py                # pytest fixtures（临时库/根目录/图片生成）
+    └── test_library_service.py    # LibraryService 测试
 ```
 
 ## 支持格式
@@ -82,7 +83,8 @@ manga_shelf/
 ## 测试
 
 ```bash
-python tests/smoke_library_service.py
+pip install -r requirements-dev.txt
+pytest
 ```
 
 ## 打包为 exe（可选）

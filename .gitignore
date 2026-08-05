@@ -2,6 +2,9 @@
 __pycache__/
 *.py[cod]
 
+# pytest
+.pytest_cache/
+
 # Reasonix 本地元数据
 .reasonix/
 reasonix.toml
