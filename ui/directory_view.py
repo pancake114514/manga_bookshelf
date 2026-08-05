@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QThread, QTimer
 from PyQt6.QtGui import QPixmap, QFont, QIcon, QPainter, QPainterPath
 from config import GRID_THUMB_SIZE
+from utils.thumbnail import get_thumb_cache_dir
 from .widgets import SectionLabel, make_placeholder_pixmap, ClickableLabel, TagBadge, C
 
 
@@ -130,8 +131,7 @@ class DirectoryView(QWidget):
         self.svc = svc
         self.obj = obj
         self.storage_root = storage_root
-        self.cache_dir = os.path.join(storage_root, ".thumbcache")
-        os.makedirs(self.cache_dir, exist_ok=True)
+        self.cache_dir = get_thumb_cache_dir(storage_root)
         self._thumb_cards: dict[str, ImageThumbCard] = {}
         self._build()
         self._load_images()

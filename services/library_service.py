@@ -20,7 +20,7 @@ from utils.file_utils import (
     copy_image_with_seq_name,
     next_seq_number,
 )
-from utils.thumbnail import clear_cached_thumbs
+from utils.thumbnail import clear_cached_thumbs, THUMB_CACHE_DIR
 
 
 ProgressCB = Callable[[int, int], None]
@@ -34,6 +34,12 @@ class LibraryService:
     def close(self):
         """关闭数据库连接。工作线程用完务必调用。"""
         self.db.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
 
     # ── 配置 ────────────────────────────────────────────────────────────────
 
@@ -106,7 +112,7 @@ class LibraryService:
 
         # 清理该对象关联的缩略图缓存
         if obj and storage_root:
-            cache_dir = os.path.join(storage_root, ".thumbcache")
+            cache_dir = os.path.join(storage_root, THUMB_CACHE_DIR)
             paths = []
             if obj.get("cover_image"):
                 paths.append(obj["cover_image"])
@@ -131,8 +137,10 @@ class LibraryService:
         if is_new:
             storage_obj_dir = os.path.join(storage_root, name)
             os.makedirs(storage_obj_dir, exist_ok=True)
-            self.db.create_object(obj_id, "directory", name,
-                                  source_dir, storage_obj_dir)
+            if not self.db.create_object(obj_id, "directory", name,
+                                         source_dir, storage_obj_dir):
+                shutil.rmtree(storage_obj_dir, ignore_errors=True)
+                raise ValueError(f"对象 ID 冲突，创建失败：{obj_id}")
             self.db.set_tags(obj_id, tags)
         else:
             # 追加导入必须使用对象 DB 中记录的目录，而不是按当前名字拼接，
@@ -149,11 +157,11 @@ class LibraryService:
         sort_start = self.db.get_image_count(obj_id)
         ok, fail = 0, 0
         for i, src in enumerate(images):
-            filename, dest = copy_image_with_seq_name(src, storage_obj_dir, seq)
+            filename, dest, used_seq = copy_image_with_seq_name(src, storage_obj_dir, seq)
             if dest:
                 img_id = str(uuid.uuid4())
                 self.db.add_image(img_id, obj_id, filename, dest, sort_start + i)
-                seq += 1
+                seq = used_seq + 1
                 ok += 1
             else:
                 fail += 1
@@ -184,12 +192,12 @@ class LibraryService:
         for src in sorted(paths, key=lambda p: os.path.basename(p)):
             if os.path.basename(src).startswith("."):
                 continue
-            filename, dest = copy_image_with_seq_name(src, storage_obj_dir, seq)
+            filename, dest, used_seq = copy_image_with_seq_name(src, storage_obj_dir, seq)
             if dest:
                 img_id = str(uuid.uuid4())
                 self.db.add_image(img_id, obj_id, filename, dest, cur_count + ok)
                 ok += 1
-                seq += 1
+                seq = used_seq + 1
             else:
                 fail += 1
         return ok, fail

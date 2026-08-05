@@ -115,6 +115,30 @@ def test_search_and_filter(svc_and_root, make_images, new_object_id):
     assert svc.filter_by_tags({"work": ["不存在"]}, include_r18=True) == []
 
 
+def test_search_escapes_wildcards(svc_and_root, make_images, new_object_id):
+    """LIKE 通配符（_ / %）应被转义：搜 'a_b' 不应匹配 'aXb'。"""
+    svc, root = svc_and_root
+    src = os.path.abspath(os.path.join(root, "..", "src"))
+    os.makedirs(src)
+    make_images(src, 1)
+    svc.import_directory(new_object_id, "aXb", {"work": ["W"]}, src, root, is_new=True)
+
+    assert len(svc.search_objects("aXb", include_r18=True)) == 1
+    assert svc.search_objects("a_b", include_r18=True) == []
+    assert svc.search_objects("a%b", include_r18=True) == []
+
+
+def test_search_finds_literal_underscore(svc_and_root, make_images, new_object_id):
+    """含字面 _ 的名称应能被精确搜索到（转义后仍匹配自身）。"""
+    svc, root = svc_and_root
+    src = os.path.abspath(os.path.join(root, "..", "src"))
+    os.makedirs(src)
+    make_images(src, 1)
+    svc.import_directory(new_object_id, "a_b", {}, src, root, is_new=True)
+
+    assert len(svc.search_objects("a_b", include_r18=True)) == 1
+
+
 def test_last_read(svc_and_root, make_images, new_object_id):
     svc, root = svc_and_root
     src = os.path.abspath(os.path.join(root, "..", "src"))

@@ -7,7 +7,9 @@ class Database:
         self.db_path = db_path
         # isolation_level=None：autocommit 模式，每条语句立即生效；
         # 需要多语句原子操作时用 begin()/commit()/rollback() 显式开事务。
-        self.conn = sqlite3.connect(db_path, isolation_level=None, check_same_thread=False)
+        # 连接绑定创建线程（默认 check_same_thread=True）：后台工作线程必须
+        # 使用独立的 LibraryService 实例，避免共享连接导致 SQLite 锁竞争。
+        self.conn = sqlite3.connect(db_path, isolation_level=None)
         self.conn.row_factory = sqlite3.Row
         self._init_tables()
 
@@ -85,7 +87,28 @@ class Database:
     def set_config(self, key: str, value: str):
         self.conn.execute(
             "INSERT OR REPLACE INTO config(key,value) VALUES(?,?)", (key, value)
-        )
+        )
+
+    def set_config_int(self, key: str, value: int):
+        self.set_config(key, str(value))
+
+    def set_config_bool(self, key: str, value: bool):
+        self.set_config(key, "1" if value else "0")
+
+    def get_config_int(self, key: str, default: int = 0) -> int:
+        val = self.get_config(key)
+        if val is None:
+            return default
+        try:
+            return int(val)
+        except ValueError:
+            return default
+
+    def get_config_bool(self, key: str, default: bool = False) -> bool:
+        val = self.get_config(key)
+        if val is None:
+            return default
+        return val.strip().lower() in ("1", "true", "yes", "on")
 
     def create_object(self, obj_id: str, obj_type: str, name: str,
                       source_path: str, storage_path: str) -> bool:
@@ -187,13 +210,15 @@ class Database:
         return result
 
     def search_objects(self, keyword: str, include_r18: bool = False) -> List[Dict]:
-        keyword = f"%{keyword}%"
+        # 转义 LIKE 通配符，避免搜索含 %/_ 的关键词时意外匹配
+        escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
         rows = self.conn.execute(
             """SELECT DISTINCT o.* FROM objects o
                LEFT JOIN tags t ON t.object_id = o.id
-               WHERE o.name LIKE ? OR t.value LIKE ?
+               WHERE o.name LIKE ? ESCAPE '\\' OR t.value LIKE ? ESCAPE '\\'
                ORDER BY o.created_at DESC""",
-            (keyword, keyword)
+            (pattern, pattern)
         ).fetchall()
         return self._assemble_objects(rows, include_r18)
 
@@ -291,4 +316,13 @@ class Database:
         return row["cnt"]
 
     def close(self):
-        self.conn.close()
+        """关闭连接；幂等，可配合 with 使用。"""
+        if getattr(self, "conn", None) is not None:
+            self.conn.close()
+            self.conn = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()

@@ -40,10 +40,11 @@ def next_seq_number(storage_obj_dir: str) -> int:
 
 
 def copy_image_with_seq_name(src_path: str, storage_obj_dir: str,
-                              seq: int) -> tuple[str, str] | tuple[None, None]:
+                              seq: int) -> tuple[str, str, int] | tuple[None, None, None]:
     """
     将图片复制到存储目录，以 7 位序号重命名（如 000001.jpg）。
-    返回 (filename, dest_path)，失败返回 (None, None)。
+    返回 (filename, dest_path, used_seq)，失败返回 (None, None, None)。
+    used_seq 为实际使用的序号（可能因冲突而递增），调用方据此推进下一张。
     """
     os.makedirs(storage_obj_dir, exist_ok=True)
     ext = os.path.splitext(src_path)[1].lower()
@@ -56,23 +57,27 @@ def copy_image_with_seq_name(src_path: str, storage_obj_dir: str,
         dest = os.path.join(storage_obj_dir, filename)
     try:
         shutil.copy2(src_path, dest)
-        return filename, dest
+        return filename, dest, seq
     except Exception as e:
         logger.warning("图片复制失败: %s | %s", e, src_path)
-        return None, None
+        return None, None, None
 
 
 def validate_windows_path_name(name: str) -> tuple[bool, str]:
     """校验是否是合法 Windows 路径名，返回 (ok, error_msg)"""
     if not name or not name.strip():
         return False, "名称不能为空"
+    if len(name) > 200:
+        return False, "名称过长（最多 200 个字符）"
     illegal = set(r'\/:*?"<>|')
     bad = [c for c in name if c in illegal]
     if bad:
         return False, f"包含非法字符：{''.join(set(bad))}"
-    reserved = {"CON","PRN","AUX","NUL","COM1","COM2","COM3","COM4",
-                 "COM5","COM6","COM7","COM8","COM9","LPT1","LPT2",
-                 "LPT3","LPT4","LPT5","LPT6","LPT7","LPT8","LPT9"}
+    reserved = {"CON", "PRN", "AUX", "NUL",
+                "COM0", "COM1", "COM2", "COM3", "COM4", "COM5",
+                "COM6", "COM7", "COM8", "COM9",
+                "LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5",
+                "LPT6", "LPT7", "LPT8", "LPT9"}
     if name.upper().split('.')[0] in reserved:
         return False, f"'{name}' 是 Windows 保留名称"
     if name != name.strip('. '):

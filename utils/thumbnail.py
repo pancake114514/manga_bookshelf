@@ -9,9 +9,12 @@ from config import THUMBNAIL_SIZE, GRID_THUMB_SIZE, SUPPORTED_FORMATS
 
 logger = logging.getLogger(__name__)
 
+# 缩略图缓存目录名（全项目统一引用，避免硬编码漂移）
+THUMB_CACHE_DIR = ".thumbcache"
+
 
 def get_thumb_cache_dir(base_dir: str) -> str:
-    cache = os.path.join(base_dir, ".thumbcache")
+    cache = os.path.join(base_dir, THUMB_CACHE_DIR)
     os.makedirs(cache, exist_ok=True)
     return cache
 

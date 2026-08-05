@@ -12,7 +12,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QThread, QTimer, QPoint
 from PyQt6.QtGui import QPixmap, QColor, QPainter, QPainterPath
 import logging
-from config import THUMBNAIL_SIZE
+from config import THUMBNAIL_SIZE, SUPPORTED_FORMATS
+from utils.thumbnail import get_thumb_cache_dir
 from .widgets import (
     make_placeholder_pixmap, C, FramelessDialog
 )
@@ -290,8 +291,7 @@ class BookshelfView(QWidget):
         super().__init__(parent)
         self.svc = svc
         self.storage_root = storage_root
-        self.cache_dir = os.path.join(storage_root, ".thumbcache")
-        os.makedirs(self.cache_dir, exist_ok=True)
+        self.cache_dir = get_thumb_cache_dir(storage_root)
         self._cards: dict[str, ObjectCard] = {}
         self._loader = ThumbnailLoader()
         self._loader.loaded.connect(self._on_thumb_loaded)
@@ -310,8 +310,7 @@ class BookshelfView(QWidget):
     def update_storage_root(self, storage_root: str):
         """库根目录变更后更新缓存目录（迁移成功时由 MainWindow 调用）。"""
         self.storage_root = storage_root
-        self.cache_dir = os.path.join(storage_root, ".thumbcache")
-        os.makedirs(self.cache_dir, exist_ok=True)
+        self.cache_dir = get_thumb_cache_dir(storage_root)
 
     def _build(self):
         layout = QVBoxLayout(self)
@@ -521,9 +520,9 @@ class BookshelfView(QWidget):
             QMessageBox.information(self, "提示", "该对象中没有图片")
             return
         storage = self.svc.get_object(obj["id"]).get("storage_path", "")
+        ext_filter = "图片文件 (" + " ".join(f"*{e}" for e in SUPPORTED_FORMATS) + ")"
         path, _ = QFileDialog.getOpenFileName(
-            self, "选择封面图片", storage,
-            "图片文件 (*.jpg *.jpeg *.png *.bmp *.webp *.gif)"
+            self, "选择封面图片", storage, ext_filter
         )
         if path:
             self.svc.update_object_cover(obj["id"], path)

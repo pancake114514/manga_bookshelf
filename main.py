@@ -188,7 +188,10 @@ def main():
         window = MainWindow(svc, storage_root)
         window.show()
 
-        sys.exit(app.exec())
+        rc = app.exec()
+        window.close()          # 触发各视图销毁（停止后台线程、flush 阅读进度）
+        svc.close()             # 显式释放数据库连接
+        sys.exit(rc)
     except SystemExit:
         raise
     except Exception:
