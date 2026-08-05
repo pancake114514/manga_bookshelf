@@ -20,7 +20,7 @@ class MigrationWorker(QThread):
     使用独立的 LibraryService 实例（不共享 sqlite 连接）。
     """
     progress = pyqtSignal(int, int, str)
-    succeeded = pyqtSignal(int)
+    succeeded = pyqtSignal(int, list)   # 迁移对象数, 库外路径警告列表
     failed = pyqtSignal(str)
 
     def __init__(self, db_path: str, new_root: str):
@@ -33,11 +33,11 @@ class MigrationWorker(QThread):
         svc = None
         try:
             svc = LibraryService(self.db_path)
-            moved = migrate_library(
+            moved, warnings = migrate_library(
                 svc.db, self.new_root,
                 progress=lambda cur, total, msg: self.progress.emit(cur, total, msg),
             )
-            self.succeeded.emit(moved)
+            self.succeeded.emit(moved, warnings)
         except LibraryMigrationError as exc:
             self.failed.emit(str(exc))
         except Exception as exc:
@@ -130,7 +130,9 @@ class LibraryDialog(FramelessDialog):
         layout.addWidget(self.warn_label)
 
         hint = QLabel(
-            "迁移会同步更新对象目录、图片路径和封面路径。目标目录下若已存在同名对象目录，迁移会直接中止。"
+            "迁移会同步更新对象目录、图片路径和封面路径。\n"
+            "目标目录下若已存在同名目录，会自动添加序号后缀重命名；"
+            "图库外的封面/图片路径不会随迁移更新，完成后会有提示。"
         )
         hint.setWordWrap(True)
         hint.setStyleSheet(f"color: {C['text3']}; font-size: 12px;")
@@ -213,11 +215,20 @@ class LibraryDialog(FramelessDialog):
         prog.setValue(cur)
         prog.setLabelText(message)
 
-    def _on_migration_done(self, moved_count: int):
+    def _on_migration_done(self, moved_count: int, warnings: list):
         if getattr(self, "_progress", None):
             self._progress.close()
         self.storage_root_changed.emit(self._selected_path)
-        QMessageBox.information(self, "迁移成功", f"成功迁移{moved_count}个对象")
+        if warnings:
+            detail = "\n".join(warnings[:10])
+            extra = f"\n…共 {len(warnings)} 条" if len(warnings) > 10 else ""
+            QMessageBox.warning(
+                self, "迁移完成（有警告）",
+                f"成功迁移{moved_count}个对象。\n\n"
+                f"以下路径位于图库外，未随迁移更新，可能失效：\n{detail}{extra}"
+            )
+        else:
+            QMessageBox.information(self, "迁移成功", f"成功迁移{moved_count}个对象")
         self.accept()
 
     def _on_migration_failed(self, message: str):

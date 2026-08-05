@@ -119,14 +119,18 @@ def prepare_library_migration(db: Database, new_root: str) -> tuple[str, str, Li
         if not os.path.isdir(old_dir):
             raise LibraryMigrationError(f"对象“{obj['name']}”的目录不存在：\n{old_dir}")
 
-        new_dir = os.path.join(new_root, os.path.basename(old_dir))
-        new_dir_key = _normalize_path(new_dir)
-        if new_dir_key in seen_targets:
-            raise LibraryMigrationError(f"检测到重复目标目录：\n{new_dir}")
+        # 目标目录冲突（对象间同名或磁盘已存在）时自动加后缀重命名，而不是中止整个迁移
+        base_name = os.path.basename(old_dir)
+        candidate = base_name
+        counter = 0
+        while True:
+            new_dir = os.path.join(new_root, candidate)
+            new_dir_key = _normalize_path(new_dir)
+            if new_dir_key not in seen_targets and not os.path.exists(new_dir):
+                break
+            counter += 1
+            candidate = f"{base_name} ({counter})"
         seen_targets.add(new_dir_key)
-
-        if os.path.exists(new_dir):
-            raise LibraryMigrationError(f"目标目录已存在，无法安全迁移：\n{new_dir}")
 
         images = db.get_images(obj["id"])
         image_updates = [
@@ -163,12 +167,24 @@ def _remove_backup(path: str | None):
             pass
 
 
-def migrate_library(db: Database, new_root: str, progress: ProgressCallback | None = None) -> int:
+def migrate_library(db: Database, new_root: str, progress: ProgressCallback | None = None
+                     ) -> tuple[int, list[str]]:
+    """执行库迁移。返回 (迁移对象数, 未随迁移更新的库外路径警告列表)。"""
     old_root, new_root, plans = prepare_library_migration(db, new_root)
     total_steps = max(1, len(plans) * 2 + 1)
     current_step = 0
     moved_dirs: list[tuple[str, str]] = []
     backup_path: str | None = f"{db.db_path}.bak"
+
+    # 收集位于库外、无法随迁移更新的路径（迁移后可能失效），供调用方提示
+    warnings: list[str] = []
+    for plan in plans:
+        for update in plan.image_updates:
+            if update.old_path and update.old_path == update.new_path:
+                warnings.append(f"未迁移的图片（库外路径）：{update.old_path}")
+        if plan.cover_old and plan.cover_old == plan.cover_new:
+            warnings.append(f"未迁移的封面（库外路径）：{plan.cover_old}")
+    warnings = list(dict.fromkeys(warnings))  # 去重且保持顺序
 
     def emit(message: str):
         nonlocal current_step
@@ -225,4 +241,4 @@ def migrate_library(db: Database, new_root: str, progress: ProgressCallback | No
     # commit 成功后的收尾（放 try 外，进度回调异常不应触发回滚）
     emit("迁移完成")
     _remove_backup(backup_path)
-    return len(plans)
+    return len(plans), warnings
