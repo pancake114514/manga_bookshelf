@@ -9,6 +9,7 @@ UI 组件只依赖本服务，不直接访问 Database。
 - 后台工作线程（如导入）应使用独立的 LibraryService 实例（传入同一 db_path），
   避免共享同一个 sqlite 连接对象。
 """
+import logging
 import os
 import shutil
 import uuid
@@ -21,6 +22,8 @@ from utils.file_utils import (
     next_seq_number,
 )
 from utils.thumbnail import clear_cached_thumbs, THUMB_CACHE_DIR
+
+logger = logging.getLogger(__name__)
 
 
 ProgressCB = Callable[[int, int], None]
@@ -101,12 +104,33 @@ class LibraryService:
     def update_last_read(self, obj_id: str, idx: int):
         self.db.update_last_read(obj_id, idx)
 
+    def _storage_path_taken(self, path: str,
+                            exclude_id: Optional[str] = None) -> bool:
+        """检查存储路径是否已被（其他）对象占用。
+
+        防止两个对象共享同一存储目录：删除任一对象时会级联删掉
+        另一对象的全部图片。比较时做 normcase+abspath 归一化。
+        """
+        target = os.path.normcase(os.path.abspath(path))
+        rows = self.db.conn.execute(
+            "SELECT id, storage_path FROM objects"
+        ).fetchall()
+        for row in rows:
+            sp = (row["storage_path"] or "").strip()
+            if not sp:
+                continue
+            if os.path.normcase(os.path.abspath(sp)) == target:
+                if exclude_id is None or row["id"] != exclude_id:
+                    return True
+        return False
+
     def delete_object(self, obj_id: str, delete_files: bool = False,
                       storage_root: Optional[str] = None):
         """删除对象（DB + 可选本地文件 + 缩略图缓存）。
 
         文件删除失败会抛出异常，由调用方（UI）提示；此时 DB 记录已删除，
-        与原行为保持一致。
+        与原行为保持一致。若存储目录与其他对象共享（H1 修复前的历史数据），
+        跳过物理删除，避免级联删掉其他对象的图片。
         """
         obj = self.db.get_object(obj_id)
 
@@ -125,7 +149,16 @@ class LibraryService:
         if delete_files and obj:
             storage_path = obj.get("storage_path") or ""
             if storage_path and os.path.isdir(storage_path):
-                shutil.rmtree(storage_path)
+                # 防御：历史数据可能存在多对象共享同一存储目录的情况，
+                # 此时物理删除会级联删掉其他对象的全部图片，必须跳过。
+                # 对象记录已删除，此处查到的均为其他对象，无需 exclude_id。
+                if self._storage_path_taken(storage_path):
+                    logger.warning(
+                        "对象 %s 的存储目录与其他对象共享，跳过物理删除：%s",
+                        obj_id, storage_path,
+                    )
+                else:
+                    shutil.rmtree(storage_path)
 
     # ── 导入 ────────────────────────────────────────────────────────────────
 
@@ -136,10 +169,18 @@ class LibraryService:
         """导入整个目录到 storage_root 下。返回 (成功数, 失败数)。"""
         if is_new:
             storage_obj_dir = os.path.join(storage_root, name)
+            # 防止两个对象共享同一存储目录：删除任一对象会级联删掉
+            # 另一对象的全部图片（H1），因此先检查目录是否已被占用
+            if self._storage_path_taken(storage_obj_dir):
+                raise ValueError(f"存储目录已被其他对象占用：{name}")
+            dir_existed = os.path.isdir(storage_obj_dir)
             os.makedirs(storage_obj_dir, exist_ok=True)
             if not self.db.create_object(obj_id, "directory", name,
                                          source_dir, storage_obj_dir):
-                shutil.rmtree(storage_obj_dir, ignore_errors=True)
+                # create_object 失败（ID 冲突）时只清理本次新建的空目录，
+                # 绝不删除预先存在的目录（可能属于其他对象）
+                if not dir_existed:
+                    shutil.rmtree(storage_obj_dir, ignore_errors=True)
                 raise ValueError(f"对象 ID 冲突，创建失败：{obj_id}")
             self.db.set_tags(obj_id, tags)
         else:

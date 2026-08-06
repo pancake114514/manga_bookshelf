@@ -218,6 +218,53 @@ def test_r18_mixed_and_tag_values(svc_and_root, make_images):
     assert set(svc.get_tag_values("work")) == {"系列A"}
 
 
+def test_import_rejects_duplicate_storage_dir(svc_and_root, make_images):
+    """同名新建导入应被拒绝，防止两个对象共享目录导致级联删除。"""
+    svc, root = svc_and_root
+    src1 = os.path.abspath(os.path.join(root, "..", "src1"))
+    os.makedirs(src1)
+    make_images(src1, 2)
+    oid1 = str(uuid.uuid4())
+    svc.import_directory(oid1, "Alpha", {}, src1, root, is_new=True)
+
+    src2 = os.path.abspath(os.path.join(root, "..", "src2"))
+    os.makedirs(src2)
+    make_images(src2, 1)
+    oid2 = str(uuid.uuid4())
+    with pytest.raises(ValueError):
+        svc.import_directory(oid2, "Alpha", {}, src2, root, is_new=True)
+    # 第一个对象不受影响
+    assert svc.get_image_count(oid1) == 2
+    assert svc.get_object(oid2) is None
+
+
+def test_delete_shared_dir_skips_file_removal(svc_and_root, make_images):
+    """历史共享目录（手工构造两个对象指向同一目录）：
+    删除一个对象不物理删除共享目录，最后一个共享者删除时才删。"""
+    svc, root = svc_and_root
+    src = os.path.abspath(os.path.join(root, "..", "src"))
+    os.makedirs(src)
+    make_images(src, 1)
+    oid1 = str(uuid.uuid4())
+    svc.import_directory(oid1, "Alpha", {}, src, root, is_new=True)
+    shared_dir = svc.get_object(oid1)["storage_path"]
+
+    # 手工构造第二个对象指向同一目录（模拟 H1 修复前的历史数据）
+    oid2 = str(uuid.uuid4())
+    svc.db.create_object(oid2, "directory", "Legacy", "", shared_dir)
+    svc.db.add_image(str(uuid.uuid4()), oid2, "0000001.png",
+                     os.path.join(shared_dir, "0000001.png"), 0)
+
+    svc.delete_object(oid1, delete_files=True, storage_root=root)
+    assert os.path.isdir(shared_dir)          # 物理删除被跳过
+    assert svc.get_object(oid1) is None
+    assert svc.get_object(oid2) is not None
+
+    svc.delete_object(oid2, delete_files=True, storage_root=root)
+    assert not os.path.isdir(shared_dir)      # 最后一个共享者删除时才删
+    assert svc.get_object(oid2) is None
+
+
 def test_unique_tag_index(svc_and_root, make_images, new_object_id):
     """tags 唯一索引：直接插入重复标签应被拒绝。"""
     svc, root = svc_and_root
