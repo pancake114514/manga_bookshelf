@@ -5,7 +5,7 @@ import os
 import hashlib
 import logging
 from PIL import Image
-from config import THUMBNAIL_SIZE, GRID_THUMB_SIZE, SUPPORTED_FORMATS
+from config import THUMBNAIL_SIZE, GRID_THUMB_SIZE, COVER_THUMB_SIZE, SUPPORTED_FORMATS
 
 logger = logging.getLogger(__name__)
 
@@ -92,15 +92,15 @@ def generate_grid_thumbnail(source_path: str, cache_dir: str) -> str | None:
 
 def clear_cached_thumbs(cache_dir: str, source_paths: list) -> int:
     """
-    删除与 source_paths 对应的缩略图缓存文件（含两种尺寸、含该源文件的所有
-    mtime 版本），返回实际删除的文件数。按稳定前缀扫描，源文件是否仍存在
-    都不影响清理。
+    删除与 source_paths 对应的缩略图缓存文件（含全部尺寸常量、含该源文件的
+    所有 mtime 版本），返回实际删除的文件数。按稳定前缀扫描，源文件是否仍
+    存在都不影响清理。
     """
     if not source_paths or not os.path.isdir(cache_dir):
         return 0
     prefixes = set()
     for src in source_paths:
-        for size in (THUMBNAIL_SIZE, GRID_THUMB_SIZE):
+        for size in (THUMBNAIL_SIZE, GRID_THUMB_SIZE, COVER_THUMB_SIZE):
             prefixes.add(hashlib.md5(f"{src}{size}".encode()).hexdigest())
     removed = 0
     for fname in os.listdir(cache_dir):

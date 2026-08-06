@@ -7,6 +7,8 @@ APP_NAME = "MangaShelf"
 SUPPORTED_FORMATS = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".tiff", ".tif")
 THUMBNAIL_SIZE = (220, 300)
 GRID_THUMB_SIZE = (160, 160)
+# 目录视图封面缩略图尺寸（clear_cached_thumbs 清理时须包含此尺寸）
+COVER_THUMB_SIZE = (180, 240)
 
 TAG_CATEGORIES = {
     "work":      "作品",

@@ -189,7 +189,8 @@ def main():
         window.show()
 
         rc = app.exec()
-        window.close()          # 触发各视图销毁（停止后台线程、flush 阅读进度）
+        window.shutdown()       # 落库阅读进度（svc 关闭前）
+        window.close()          # 触发各视图销毁（停止后台线程）
         svc.close()             # 显式释放数据库连接
         sys.exit(rc)
     except SystemExit:

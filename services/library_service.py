@@ -134,9 +134,13 @@ class LibraryService:
         """
         obj = self.db.get_object(obj_id)
 
-        # 清理该对象关联的缩略图缓存
-        if obj and storage_root:
-            cache_dir = os.path.join(storage_root, THUMB_CACHE_DIR)
+        # 清理该对象关联的缩略图缓存；未显式传入 storage_root 时从对象的
+        # storage_path 反推根目录（storage_path = <root>/<name>）
+        root = storage_root
+        if not root and obj and obj.get("storage_path"):
+            root = os.path.dirname(obj["storage_path"])
+        if obj and root:
+            cache_dir = os.path.join(root, THUMB_CACHE_DIR)
             paths = []
             if obj.get("cover_image"):
                 paths.append(obj["cover_image"])

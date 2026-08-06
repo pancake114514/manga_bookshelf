@@ -228,11 +228,17 @@ class ImageViewer(QWidget):
             self.svc.update_last_read(self.obj["id"], self.obj["last_read_idx"])
 
     def _on_destroyed(self):
-        self._flush_last_read()
+        # 先停定时器/线程再落库；落库失败（连接已关闭）不影响已保存的进度
         self._save_timer.stop()
         self._preload_timer.stop()
         self._loader.stop()
-        self._loader.wait(500)
+        # 无限等待：run() 的 _running 检查保证当前任务完成后退出，
+        # 避免超时后线程仍在运行即随对象析构
+        self._loader.wait()
+        try:
+            self._flush_last_read()
+        except Exception:
+            pass
 
     def _build(self):
         layout = QVBoxLayout(self)

@@ -298,14 +298,15 @@ class BookshelfView(QWidget):
         self._loader.start()
         self.destroyed.connect(self._on_loader_destroyed)
         self._delete_workers: list = []
-        self._resize_timer = QTimer()
+        self._resize_timer = QTimer(self)
         self._resize_timer.setSingleShot(True)
         self._resize_timer.timeout.connect(self._relayout)
         self._build()
 
     def _on_loader_destroyed(self):
         self._loader.stop()
-        self._loader.wait(500)
+        # run() 的 _running 检查保证当前任务完成后退出，无限等待无超时风险
+        self._loader.wait()
 
     def update_storage_root(self, storage_root: str):
         """库根目录变更后更新缓存目录（迁移成功时由 MainWindow 调用）。"""

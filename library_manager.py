@@ -1,4 +1,5 @@
 """Library configuration and migration helpers."""
+import logging
 import os
 import shutil
 import sys
@@ -6,6 +7,9 @@ from dataclasses import dataclass
 from typing import Callable, List
 
 from database import Database
+from utils.thumbnail import THUMB_CACHE_DIR
+
+logger = logging.getLogger(__name__)
 
 
 class LibraryMigrationError(Exception):
@@ -240,5 +244,13 @@ def migrate_library(db: Database, new_root: str, progress: ProgressCallback | No
 
     # commit 成功后的收尾（放 try 外，进度回调异常不应触发回滚）
     emit("迁移完成")
+    # 清理旧根的缩略图缓存：缓存键基于源文件绝对路径，迁移后路径已变，
+    # 旧缓存不可复用，删掉避免残留占用
+    old_cache = os.path.join(old_root, THUMB_CACHE_DIR)
+    if os.path.isdir(old_cache):
+        try:
+            shutil.rmtree(old_cache)
+        except OSError as e:
+            logger.warning("旧缩略图缓存清理失败：%s", e)
     _remove_backup(backup_path)
     return len(plans), warnings

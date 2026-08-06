@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QThread, QTimer
 from PyQt6.QtGui import QPixmap, QFont, QIcon, QPainter, QPainterPath
-from config import GRID_THUMB_SIZE
+from config import GRID_THUMB_SIZE, COVER_THUMB_SIZE
 from utils.thumbnail import get_thumb_cache_dir
 from .widgets import SectionLabel, make_placeholder_pixmap, ClickableLabel, TagBadge, C
 
@@ -21,10 +21,16 @@ class GridThumbLoader(QThread):
         super().__init__()
         self.tasks = tasks   # [(img_id, filepath, size|None), ...]，size=None 用网格尺寸
         self.cache_dir = cache_dir
+        self._running = True
+
+    def stop(self):
+        self._running = False
 
     def run(self):
         from utils.thumbnail import generate_grid_thumbnail, generate_thumbnail
         for img_id, filepath, size in self.tasks:
+            if not self._running:
+                break
             if os.path.isfile(filepath):
                 if size:
                     path = generate_thumbnail(filepath, self.cache_dir, size)
@@ -133,8 +139,24 @@ class DirectoryView(QWidget):
         self.storage_root = storage_root
         self.cache_dir = get_thumb_cache_dir(storage_root)
         self._thumb_cards: dict[str, ImageThumbCard] = {}
+        self._loader: GridThumbLoader | None = None
+        # 缩略图加载线程与重排定时器都是成员，视图销毁时停止，避免
+        # QThread 仍在运行即被析构 / singleShot 访问已销毁对象
+        self.destroyed.connect(self._on_destroyed)
+        self._resize_timer = QTimer(self)
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.timeout.connect(self._relayout)
         self._build()
         self._load_images()
+
+    def _on_destroyed(self):
+        if self._resize_timer.isActive():
+            self._resize_timer.stop()
+        loader = getattr(self, "_loader", None)
+        if loader is not None:
+            loader.stop()
+            # run() 的 _running 检查保证当前任务完成后退出，无限等待无超时风险
+            loader.wait()
 
     # 兼容旧引用
     @property
@@ -289,9 +311,10 @@ class DirectoryView(QWidget):
             tasks.append((img["id"], img["filepath"], None))
 
         if tasks:
-            self._loader = GridThumbLoader(tasks, self.cache_dir)
-            self._loader.loaded.connect(self._on_thumb_loaded)
-            self._loader.start()
+            loader = GridThumbLoader(tasks, self.cache_dir)
+            self._loader = loader
+            loader.loaded.connect(self._on_thumb_loaded)
+            loader.start()
 
     def _on_thumb_loaded(self, img_id: str, thumb_path: str):
         if img_id == "cover":
@@ -313,7 +336,7 @@ class DirectoryView(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        QTimer.singleShot(150, self._relayout)
+        self._resize_timer.start(150)
 
     def _relayout(self):
         """只重新排列已有卡片，不销毁重建，避免异步缩略图信号打到已销毁对象"""

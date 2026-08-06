@@ -102,9 +102,25 @@ class MainWindow(FramelessMixin, QMainWindow):
         self.show_r18 = False
         self.tag_filters: dict = {}
         self.search_keyword: str = ""
+        # 当前阅读器（退出时用于落库最后进度）
+        self.viewer = None
+        # 搜索防抖：只保留最后一次输入触发的刷新
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.timeout.connect(self._load_shelf)
         self._build()
         self.setup_frameless("MangaShelf", "📚")
         self._load_shelf()
+
+    def shutdown(self):
+        """应用退出前收尾：落库阅读进度并停止阅读器线程（svc 关闭之前调用）。"""
+        if self.viewer is not None:
+            # 主动停线程/定时器并落库，随后断开引用；
+            # 之后 svc.close() 即使触发 viewer 析构也不再有未处理逻辑
+            self.viewer._on_destroyed()
+            self.viewer = None
+        if self._search_timer.isActive():
+            self._search_timer.stop()
 
     def _build(self):
         self.setStyleSheet(STYLE_MAIN)
@@ -216,7 +232,8 @@ class MainWindow(FramelessMixin, QMainWindow):
 
     def _on_search(self, text: str):
         self.search_keyword = text.strip()
-        QTimer.singleShot(300, self._load_shelf)
+        # 防抖：取消前一个未触发的刷新定时器
+        self._search_timer.start(300)
 
     def _on_filter_changed(self, filters: dict):
         self.tag_filters = filters
@@ -262,6 +279,7 @@ class MainWindow(FramelessMixin, QMainWindow):
 
         viewer = ImageViewer(self.svc, self._current_obj, images, idx)
         viewer.back_requested.connect(self._back_from_viewer)
+        self.viewer = viewer   # 持久引用：退出时用于落库进度
         self.stack.insertWidget(VIEW_VIEWER, viewer)
         self.stack.setCurrentIndex(VIEW_VIEWER)
         self.sidebar.hide()

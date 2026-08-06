@@ -78,6 +78,28 @@ def test_migrate_same_name_auto_rename(tmp_path, make_images):
         svc.close()
 
 
+def test_migrate_cleans_old_thumbcache(tmp_path, make_images):
+    """迁移成功后旧根的 .thumbcache 应被清理（缓存键随路径失效，不可复用）。"""
+    svc, old_root, new_root = _setup_svc(tmp_path)
+    try:
+        src = str(tmp_path / "src")
+        os.makedirs(src)
+        make_images(src, 1)
+        oid = str(uuid.uuid4())
+        svc.import_directory(oid, "Alpha", {}, src, old_root, is_new=True)
+
+        old_cache = os.path.join(old_root, ".thumbcache")
+        os.makedirs(old_cache)
+        with open(os.path.join(old_cache, "dummy.jpg"), "wb") as f:
+            f.write(b"x")
+
+        moved, _ = migrate_library(svc.db, new_root)
+        assert moved == 1
+        assert not os.path.isdir(old_cache)
+    finally:
+        svc.close()
+
+
 def test_migrate_warns_unmapped_cover(tmp_path, make_images):
     """库外封面路径不随迁移，应出现在警告列表中。"""
     svc, old_root, new_root = _setup_svc(tmp_path)

@@ -265,6 +265,31 @@ def test_delete_shared_dir_skips_file_removal(svc_and_root, make_images):
     assert svc.get_object(oid2) is None
 
 
+def test_clear_cached_thumbs_covers_all_sizes(svc_and_root, make_images, new_object_id):
+    """目录视图封面尺寸(COVER_THUMB_SIZE)的缓存也应被 clear_cached_thumbs 清理。"""
+    from config import COVER_THUMB_SIZE
+    from utils.thumbnail import (
+        clear_cached_thumbs,
+        generate_thumbnail,
+        get_thumb_cache_dir,
+    )
+
+    svc, root = svc_and_root
+    src = os.path.abspath(os.path.join(root, "..", "src"))
+    os.makedirs(src)
+    make_images(src, 1)
+    svc.import_directory(new_object_id, "Alpha", {}, src, root, is_new=True)
+    first = svc.get_images(new_object_id)[0]["filepath"]
+
+    cache_dir = get_thumb_cache_dir(root)
+    t = generate_thumbnail(first, cache_dir, COVER_THUMB_SIZE)
+    assert os.path.isfile(t)
+    before = set(os.listdir(cache_dir))
+    clear_cached_thumbs(cache_dir, [first])
+    after = set(os.listdir(cache_dir)) if os.path.isdir(cache_dir) else set()
+    assert not (before & after)
+
+
 def test_unique_tag_index(svc_and_root, make_images, new_object_id):
     """tags 唯一索引：直接插入重复标签应被拒绝。"""
     svc, root = svc_and_root

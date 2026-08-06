@@ -205,7 +205,16 @@ class LibraryDialog(FramelessDialog):
         self._migration_worker.progress.connect(self._on_migration_progress)
         self._migration_worker.succeeded.connect(self._on_migration_done)
         self._migration_worker.failed.connect(self._on_migration_failed)
+        self._migration_worker.finished.connect(self._migration_worker.deleteLater)
         self._migration_worker.start()
+
+    def closeEvent(self, event):
+        worker = getattr(self, "_migration_worker", None)
+        if worker is not None and worker.isRunning():
+            # 迁移进行中不允许关闭窗口，避免运行中的 QThread 被析构崩溃
+            event.ignore()
+            return
+        super().closeEvent(event)
 
     def _on_migration_progress(self, cur: int, total: int, message: str):
         prog = getattr(self, "_progress", None)
