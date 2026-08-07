@@ -2,6 +2,8 @@
 书架界面 - 展示所有目录对象的封面卡片
 """
 import os
+import subprocess
+import sys
 import time
 from collections import deque
 from PyQt6.QtWidgets import (
@@ -265,14 +267,35 @@ class ObjectCard(QFrame):
         act_edit = menu.addAction("✏️  编辑信息")
         act_cover = menu.addAction("🖼  设置封面")
         menu.addSeparator()
+        act_open = menu.addAction("📂  在资源管理器中打开文件夹")
+        menu.addSeparator()
         act_del = menu.addAction("🗑  删除对象")
         action = menu.exec(event.globalPos())
         if action == act_edit:
             self.edit_requested.emit(self.obj)
         elif action == act_cover:
             self.cover_change_requested.emit(self.obj)
+        elif action == act_open:
+            self._open_in_explorer()
         elif action == act_del:
             self.delete_requested.emit(self.obj)
+
+    def _open_in_explorer(self):
+        """在系统文件管理器中打开对象存储目录。"""
+        path = (self.obj.get("storage_path") or "").strip()
+        if not path or not os.path.isdir(path):
+            QMessageBox.warning(self, "无法打开", f"存储目录不存在：\n{path}")
+            return
+        try:
+            if sys.platform == "win32":
+                os.startfile(path)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", path])
+            else:
+                subprocess.Popen(["xdg-open", path])
+        except Exception as e:
+            logger.warning("打开资源管理器失败: %s", e)
+            QMessageBox.warning(self, "无法打开", f"打开目录失败：\n{e}")
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
