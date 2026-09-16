@@ -352,4 +352,12 @@ async function doDelete(obj, deleteFiles) {
 
 .batch-hint { font-size: 12px; opacity: .6; margin-bottom: 4px; }
 .footer { display: flex; justify-content: flex-end; gap: 10px; }
+
+/* 两阶段过渡：整批右出（card-out）→ 左入（card-in），交错延迟由 anim-delay 内联提供 */
+.shelf-grid.leaving :deep(.obj-card) {
+  animation: card-out .2s ease-in forwards; pointer-events: none;
+}
+.shelf-grid.entering :deep(.obj-card) {
+  animation: card-in .34s cubic-bezier(.22, .9, .36, 1) backwards;
+}
 </style>
