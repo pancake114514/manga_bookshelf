@@ -63,6 +63,45 @@ class Bridge:
         webview.windows[0].destroy()
 
 
+def enable_native_resize(window):
+    """为无边框窗口恢复原生边缘缩放（Win32）。
+
+    pywebview 的 frameless 在 Windows 上等价 FormBorderStyle.None，没有缩放边框。
+    给 HWND 加回 WS_THICKFRAME（同时保留最大化/最小化盒子以支持 Win+方向 贴靠），
+    边缘命中测试即由系统接管：拖动边缘/四角可缩放，且不绘制标题栏。
+    """
+    import ctypes
+
+    GWL_STYLE = -16
+    WS_CAPTION = 0x00C00000
+    WS_THICKFRAME = 0x00040000
+    WS_MINIMIZEBOX = 0x00020000
+    WS_MAXIMIZEBOX = 0x00010000
+    SWP_NOSIZE = 0x0001
+    SWP_NOMOVE = 0x0002
+    SWP_NOZORDER = 0x0004
+    SWP_FRAMECHANGED = 0x0020
+
+    user32 = ctypes.windll.user32
+    get_style = getattr(user32, "GetWindowLongPtrW", user32.GetWindowLongW)
+    set_style = getattr(user32, "SetWindowLongPtrW", user32.SetWindowLongW)
+
+    def apply():
+        try:
+            hwnd = int(window.native.Handle.ToInt64())
+            style = get_style(hwnd, GWL_STYLE)
+            style = (style | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX) & ~WS_CAPTION
+            set_style(hwnd, GWL_STYLE, style)
+            # 通知系统重新计算非客户区（帧生效）
+            user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0,
+                                SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED)
+        except Exception as e:
+            # 缩放是增强能力，失败不影响主流程
+            print(f"原生边缘缩放启用失败：{e}", flush=True)
+
+    window.events.shown += apply
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--serve", action="store_true", help="仅启动本地服务（浏览器调试）")
@@ -91,13 +130,14 @@ def main():
         return
 
     import webview
-    webview.create_window(
+    window = webview.create_window(
         "MangaShelf", url,
         width=1280, height=820, min_size=(1000, 680),
         js_api=Bridge(),
         frameless=True,      # 去掉系统标题栏，由前端 TitleBar 组件接管
         easy_drag=False,     # 仅标题栏拖拽区可拖动，避免干扰正文交互
     )
+    enable_native_resize(window)   # 无边框下恢复拖边缘缩放
     webview.start()
 
 
