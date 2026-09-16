@@ -1,9 +1,0 @@
-﻿git : fatal: your current branch 'feature/web-ui' does not have any commits yet
-所在位置 行:451 字符: 614
-+ ... -Null; "commit-exit=$LASTEXITCODE"; git log --oneline -1 2>&1 | Out-S ...
-+                                         ~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (fatal: your cur...any commits yet 
-   :String) [], RemoteException
-    + FullyQualifiedErrorId : NativeCommandError
- 
-

@@ -30,6 +30,7 @@ settings.json
 .idea/
 
 # 临时/数据文件
+git_commit_result.txt
 *.tar
 *.db
 *.bak

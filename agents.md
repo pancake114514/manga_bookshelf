@@ -34,7 +34,6 @@ frontend/     Vue3 + Vite + Naive UI（构建产物 dist/ 由 FastAPI 静态托�
   src/theme.js    深浅双主题设计令牌
   src/components/ Bookshelf(等尺寸网格+两阶段过渡动画)、Reader(右起进度条)、
                   TagSidebar、ImportDialog、EditDialog、LibraryDialog、SetupGate
-ui/           旧 PyQt6 界面（已被新 UI 取代，仅作参考，不再维护）
 ```
 
 ## 常用命令
