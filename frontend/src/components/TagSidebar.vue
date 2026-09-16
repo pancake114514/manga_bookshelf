@@ -72,7 +72,7 @@ function clearAll() { store.filters = {} }
 
 <style scoped>
 .sidebar {
-  width: 228px; flex: none;
+  width: var(--sidebar-w); flex: none;
   padding: 18px 16px;
   border-right: 1px solid var(--border);
   overflow-y: auto;

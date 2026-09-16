@@ -9,6 +9,9 @@ body {
 
 .app-shell {
   height: 100vh; display: flex; flex-direction: column;
+  /* 布局令牌：侧栏宽度 / 内容区水平留白，顶栏虚拟框分割与侧栏分隔线、首列卡片左缘对齐 */
+  --sidebar-w: 228px;
+  --content-pad: 26px;
   background: var(--bg); color: var(--text);
   transition: background .25s, color .25s;
 }
