@@ -331,6 +331,21 @@ class BookshelfView(QWidget):
         # run() 的 _running 检查保证当前任务完成后退出，无限等待无超时风险
         self._loader.wait()
 
+    def wait_for_delete_workers(self, timeout_ms: int = 30000):
+        """等待所有后台删除 worker 结束（应用退出前调用）。
+
+        运行中的 QThread 被 GC 析构会导致 Qt qFatal 崩溃；
+        删除大目录耗时较长，退出前必须等待。返回是否全部结束。
+        """
+        all_done = True
+        for w in list(self._delete_workers):
+            if w.isRunning():
+                if not w.wait(timeout_ms):
+                    all_done = False
+                    logger.warning("删除任务超时未结束，放弃等待：%s",
+                                   getattr(w, "obj_id", "?"))
+        return all_done
+
     def update_storage_root(self, storage_root: str):
         """库根目录变更后更新缓存目录（迁移成功时由 MainWindow 调用）。"""
         self.storage_root = storage_root

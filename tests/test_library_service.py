@@ -290,6 +290,81 @@ def test_clear_cached_thumbs_covers_all_sizes(svc_and_root, make_images, new_obj
     assert not (before & after)
 
 
+def test_set_tags_deduplicates_and_is_atomic(svc_and_root, make_images, new_object_id):
+    """M1：重复标签值应被去重（不撞唯一索引），且替换是原子的。"""
+    svc, root = svc_and_root
+    src = os.path.abspath(os.path.join(root, "..", "src"))
+    os.makedirs(src)
+    make_images(src, 1)
+    svc.import_directory(new_object_id, "Alpha", {}, src, root, is_new=True)
+
+    # 同类别重复值：不应抛 IntegrityError，且只存一份
+    svc.set_object_tags(new_object_id, {"work": ["A", "A", "B"]})
+    obj = svc.get_object(new_object_id)
+    assert obj["tags"]["work"] == ["A", "B"]
+
+    # 替换语义：旧值清除
+    svc.set_object_tags(new_object_id, {"work": ["C"]})
+    assert svc.get_object(new_object_id)["tags"]["work"] == ["C"]
+
+
+def test_append_fallback_checks_occupancy_and_writes_back(
+        svc_and_root, make_images):
+    """M3：storage_path 失效时按名重建目录，须占用检查并回写 DB。"""
+    svc, root = svc_and_root
+    # 对象 X：storage_path 指向已不存在的目录
+    ox = str(uuid.uuid4())
+    gone_dir = os.path.join(root, "GoneDir")
+    svc.db.create_object(ox, "directory", "X", "", gone_dir)
+
+    # 另一对象恰好占用 root/X（X 按名字重建的目标）
+    oy = str(uuid.uuid4())
+    y_dir = os.path.join(root, "X")
+    os.makedirs(y_dir)
+    svc.db.create_object(oy, "directory", "Y", "", y_dir)
+
+    src = os.path.abspath(os.path.join(root, "..", "src"))
+    os.makedirs(src)
+    make_images(src, 1)
+
+    # fallback 重建 root/X 被占用 → 必须报错，不得复制进 Y 的目录
+    with pytest.raises(ValueError):
+        svc.import_directory(ox, "X", {}, src, root, is_new=False)
+    assert os.listdir(y_dir) == []          # Y 目录未被写入
+
+    # 无占用场景：重建成功且回写 storage_path
+    svc.db.delete_object(oy)                # 释放 root/X
+    ok, fail = svc.import_directory(ox, "X", {}, src, root, is_new=False)
+    assert (ok, fail) == (1, 0)
+    assert svc.get_object(ox)["storage_path"] == os.path.abspath(y_dir)
+
+
+def test_import_rejects_nonempty_unowned_dir(svc_and_root, make_images):
+    """M4：库根下已存在的同名非空目录（无主）应拒绝导入。"""
+    svc, root = svc_and_root
+    src = os.path.abspath(os.path.join(root, "..", "src"))
+    os.makedirs(src)
+    make_images(src, 1)
+
+    # 用户手工放置的同名目录，内含自己的文件
+    orphan = os.path.join(root, "Alpha")
+    os.makedirs(orphan)
+    with open(os.path.join(orphan, "user_file.txt"), "w") as f:
+        f.write("user data")
+
+    oid = str(uuid.uuid4())
+    with pytest.raises(ValueError):
+        svc.import_directory(oid, "Alpha", {}, src, root, is_new=True)
+    # 用户文件完好，DB 无记录
+    assert os.path.isfile(os.path.join(orphan, "user_file.txt"))
+    assert svc.get_object(oid) is None
+
+    # 空目录不拦截（正常场景：残留的空目录）
+    os.remove(os.path.join(orphan, "user_file.txt"))
+    svc.import_directory(oid, "Alpha", {}, src, root, is_new=True)
+    assert svc.get_image_count(oid) == 1
+
+
 def test_unique_tag_index(svc_and_root, make_images, new_object_id):
     """tags 唯一索引：直接插入重复标签应被拒绝。"""
     svc, root = svc_and_root

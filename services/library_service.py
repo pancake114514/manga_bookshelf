@@ -166,6 +166,30 @@ class LibraryService:
 
     # ── 导入 ────────────────────────────────────────────────────────────────
 
+    def _resolve_append_target_dir(self, obj: dict, storage_root: str,
+                                    name_hint: str) -> str:
+        """追加导入时解析目标目录：优先 DB 记录的 storage_path，
+        无效时按名字重建，但必须先做占用检查并回写 DB（M3 防御）。
+
+        重建场景：storage_path 无效（目录被移走/删除）。
+        此时按对象名拼新目录，若该目录已被其他对象占用则报错，
+        避免两对象共享目录→删除时级联删图；成功后回写 storage_path，
+        否则后续 delete_object 拿不到路径→磁盘孤儿文件。
+        """
+        storage_path = (obj.get("storage_path") or "").strip()
+        if storage_path and os.path.isdir(storage_path):
+            return storage_path
+
+        rebuilt = os.path.join(storage_root, obj.get("name") or name_hint)
+        if self._storage_path_taken(rebuilt, exclude_id=obj.get("id")):
+            raise ValueError(
+                f"存储目录已被其他对象占用，无法重建：{rebuilt}"
+            )
+        os.makedirs(rebuilt, exist_ok=True)
+        if obj.get("id"):
+            self.db.update_object_storage_path(obj["id"], rebuilt)
+        return rebuilt
+
     def import_directory(self, obj_id: str, name: str, tags: dict,
                          source_dir: str, storage_root: str,
                          is_new: bool, progress_cb: Optional[ProgressCB] = None
@@ -177,6 +201,14 @@ class LibraryService:
             # 另一对象的全部图片（H1），因此先检查目录是否已被占用
             if self._storage_path_taken(storage_obj_dir):
                 raise ValueError(f"存储目录已被其他对象占用：{name}")
+            # M4 防御：库根下已存在的同名目录（用户手工放置/上次失败残留）
+            # 不属于任何对象；静默复用后删除对象会把其中的用户文件一并
+            # rmtree。非空即拒绝，让用户换名或先处理该目录。
+            if os.path.isdir(storage_obj_dir) and os.listdir(storage_obj_dir):
+                raise ValueError(
+                    f"目录已存在且非空（不属于任何对象），为避免误删其中文件"
+                    f"已拒绝导入：{storage_obj_dir}"
+                )
             dir_existed = os.path.isdir(storage_obj_dir)
             os.makedirs(storage_obj_dir, exist_ok=True)
             if not self.db.create_object(obj_id, "directory", name,
@@ -190,11 +222,11 @@ class LibraryService:
         else:
             # 追加导入必须使用对象 DB 中记录的目录，而不是按当前名字拼接，
             # 否则对象改名后会导致图片复制到新目录、与 DB 记录分裂。
+            # storage_path 无效时重建（含占用检查 + 回写，见 M3 防御）。
             obj = self.db.get_object(obj_id) or {}
-            storage_obj_dir = (obj.get("storage_path") or "").strip()
-            if not storage_obj_dir or not os.path.isdir(storage_obj_dir):
-                storage_obj_dir = os.path.join(storage_root, obj.get("name", name))
-            os.makedirs(storage_obj_dir, exist_ok=True)
+            storage_obj_dir = self._resolve_append_target_dir(
+                obj, storage_root, name
+            )
 
         images = collect_images(source_dir)
         total = len(images)
@@ -226,10 +258,10 @@ class LibraryService:
                             storage_root: str) -> tuple[int, int]:
         """导入单张/多张图片到已有对象。返回 (成功数, 失败数)。"""
         obj = self.db.get_object(obj_id) or {}
-        storage_obj_dir = (obj.get("storage_path") or "").strip()
-        if not storage_obj_dir or not os.path.isdir(storage_obj_dir):
-            storage_obj_dir = os.path.join(storage_root, obj.get("name", "unnamed"))
-        os.makedirs(storage_obj_dir, exist_ok=True)
+        # storage_path 无效时重建（含占用检查 + 回写，见 M3 防御）
+        storage_obj_dir = self._resolve_append_target_dir(
+            obj, storage_root, "unnamed"
+        )
 
         ok, fail = 0, 0
         cur_count = self.db.get_image_count(obj_id)

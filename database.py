@@ -263,7 +263,12 @@ class Database:
         return tags
 
     def set_tags(self, obj_id: str, tags: Dict):
-        self.conn.execute("DELETE FROM tags WHERE object_id=?", (obj_id,))
+        """整体替换对象标签（原子）。
+
+        - 保序去重：同类别重复值撞 idx_tags_unique 会 IntegrityError，
+          且 DELETE 已提交 → 标签整组丢失，必须先去重。
+        - 事务包裹：DELETE+INSERT 任一失败时回滚，避免"已删未插"。
+        """
         rows = []
         for cat, val in tags.items():
             if cat == "r18":
@@ -271,14 +276,24 @@ class Database:
             elif isinstance(val, list):
                 for v in val:
                     if v:
-                        rows.append((obj_id, cat, v))
+                        rows.append((obj_id, cat, str(v)))
             else:
                 if val:
                     rows.append((obj_id, cat, str(val)))
-        if rows:
-            self.conn.executemany(
-                "INSERT INTO tags(object_id,category,value) VALUES(?,?,?)", rows
-            )
+        # 保序去重（同 (object_id, category, value) 只留首条）
+        rows = list(dict.fromkeys(rows))
+
+        self.begin()
+        try:
+            self.conn.execute("DELETE FROM tags WHERE object_id=?", (obj_id,))
+            if rows:
+                self.conn.executemany(
+                    "INSERT INTO tags(object_id,category,value) VALUES(?,?,?)", rows
+                )
+            self.commit()
+        except Exception:
+            self.rollback()
+            raise
 
     def get_all_tag_values(self, category: str) -> List[str]:
         rows = self.conn.execute(

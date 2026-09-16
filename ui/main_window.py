@@ -113,7 +113,7 @@ class MainWindow(FramelessMixin, QMainWindow):
         self._load_shelf()
 
     def shutdown(self):
-        """应用退出前收尾：落库阅读进度并停止阅读器线程（svc 关闭之前调用）。"""
+        """应用退出前收尾：落库阅读进度并停止后台线程（svc 关闭之前调用）。"""
         if self.viewer is not None:
             # 主动停线程/定时器并落库，随后断开引用；
             # 之后 svc.close() 即使触发 viewer 析构也不再有未处理逻辑
@@ -121,6 +121,10 @@ class MainWindow(FramelessMixin, QMainWindow):
             self.viewer = None
         if self._search_timer.isActive():
             self._search_timer.stop()
+        # 等待后台删除 worker 结束，避免运行中的 QThread 被析构导致 qFatal
+        bookshelf = getattr(self, "bookshelf", None)
+        if bookshelf is not None:
+            bookshelf.wait_for_delete_workers()
 
     def _build(self):
         self.setStyleSheet(STYLE_MAIN)
