@@ -20,7 +20,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from library_manager import check_writable, migrate_library          # noqa: E402
-from services.library_service import LibraryService                  # noqa: E402
+from services.library_service import LibraryService, ImportCancelled   # noqa: E402
 from utils.thumbnail import (                                        # noqa: E402
     generate_thumbnail, get_thumb_cache_dir,
     THUMBNAIL_SIZE, GRID_THUMB_SIZE, COVER_THUMB_SIZE,
