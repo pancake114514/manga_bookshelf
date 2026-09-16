@@ -1,13 +1,13 @@
 <template>
   <main class="dir-view" v-if="detail">
     <div class="info-bar">
-      <n-button size="small" @click="back">◀ 书架</n-button>
+      <n-button size="small" @click="back"><IconBack :size="14" /> 书架</n-button>
       <div class="info-row">
         <img class="cover" :src="`/api/objects/${detail.id}/cover?kind=cover&_=${Date.now()}`" alt="">
         <div class="meta">
           <div class="title-row">
             <h2 class="title">{{ detail.name }}</h2>
-            <n-button type="primary" @click="continueRead">▶ 继续阅读</n-button>
+            <n-button type="primary" @click="continueRead"><IconPlay :size="13" /> 继续阅读</n-button>
           </div>
           <div v-for="(vals, cat) in tagRows" :key="cat" class="tag-row">
             <span class="cat">{{ catLabel(cat) }}：</span>
@@ -34,12 +34,11 @@
 import { computed } from 'vue'
 import { NButton } from 'naive-ui'
 import { store } from '../store'
+import { catLabel } from '../constants'
+import { IconBack, IconPlay } from './icons'
 
 const props = defineProps({ obj: { type: Object, required: true } })
 const detail = computed(() => props.obj)
-
-const CAT_LABELS = { work: '作品', author: '作者', character: '角色', cm: 'CM', censored: '修正', r18: 'R-18' }
-const catLabel = c => CAT_LABELS[c] || c
 
 const tagRows = computed(() => {
   const tags = props.obj.tags || {}

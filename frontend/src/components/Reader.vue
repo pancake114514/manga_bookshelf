@@ -1,11 +1,11 @@
 <template>
   <main class="reader" @wheel="onWheel">
     <div class="top">
-      <n-button size="small" @click="back">◀ 返回</n-button>
+      <n-button size="small" @click="back"><IconBack :size="14" /> 返回</n-button>
       <span class="obj-title">{{ reader.obj.name }}</span>
       <span class="spacer" />
       <span class="filename">{{ current?.filename }}</span>
-      <n-button size="small" @click="toggleFullscreen">⛶ 全屏</n-button>
+      <n-button size="small" @click="toggleFullscreen"><IconMaximize :size="13" /> 全屏</n-button>
     </div>
 
     <div class="reader-stage" @click="onStageClick">
@@ -29,6 +29,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { NButton, NSpin } from 'naive-ui'
 import { api } from '../api'
 import { store } from '../store'
+import { IconBack, IconMaximize } from './icons'
 
 const reader = store.reader
 const index = ref(Math.max(0, Math.min(reader.index, reader.images.length - 1)))

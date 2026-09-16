@@ -1,4 +1,7 @@
 // Naive UI 主题配置：对应设计稿的深/浅两套调色板
+// 同时是 CSS 设计令牌的单一真源：cssVars() 把同一批值映射为 --xx 变量，
+// 由 App.vue 绑定到 .app-shell，自绘 DOM（书架网格/阅读器等）一律引用变量，
+// 避免与 Naive UI 令牌两处手工同步。
 import { darkTheme } from 'naive-ui'
 
 export const darkCommon = {
@@ -6,11 +9,15 @@ export const darkCommon = {
   primaryHover: '#7fe7c4',
   primaryPressed: '#5acea7',
   bodyColor: '#101014',
+  surfaceColor: '#17171c',
   cardColor: '#1e1e26',
   modalColor: '#1e1e26',
   popoverColor: '#24242e',
   borderColor: 'rgba(255,255,255,.09)',
-  dividerColor: 'rgba(255,255,255,.09)',
+  borderStrongColor: 'rgba(255,255,255,.16)',
+  chipBgColor: 'rgba(255,255,255,.06)',
+  overlayColor: 'rgba(16,16,20,.72)',
+  r18Color: '#d03050',
   textColorBase: '#ececf1',
   textColor1: '#ececf1',
   textColor2: '#a0a0ac',
@@ -24,11 +31,15 @@ export const lightCommon = {
   primaryHover: '#36ad6a',
   primaryPressed: '#0c7a43',
   bodyColor: '#f5f6f8',
+  surfaceColor: '#ffffff',
   cardColor: '#ffffff',
   modalColor: '#ffffff',
   popoverColor: '#ffffff',
   borderColor: 'rgba(0,0,0,.09)',
-  dividerColor: 'rgba(0,0,0,.09)',
+  borderStrongColor: 'rgba(0,0,0,.16)',
+  chipBgColor: 'rgba(0,0,0,.045)',
+  overlayColor: 'rgba(255,255,255,.78)',
+  r18Color: '#d03050',
   textColorBase: '#1f1f25',
   textColor1: '#1f1f25',
   textColor2: '#55555e',
@@ -37,10 +48,34 @@ export const lightCommon = {
   fontFamily: '"Segoe UI", "Microsoft YaHei UI", sans-serif',
 }
 
+// CSS 变量名 → 令牌键名（--text 用 textColorBase，与 Naive 的 textColor1 同值）
+const CSS_VARS = {
+  '--bg': 'bodyColor',
+  '--surface': 'surfaceColor',
+  '--card': 'cardColor',
+  '--text': 'textColorBase',
+  '--text2': 'textColor2',
+  '--text3': 'textColor3',
+  '--border': 'borderColor',
+  '--border-strong': 'borderStrongColor',
+  '--chip-bg': 'chipBgColor',
+  '--ms-primary': 'primary',
+  '--ms-overlay': 'overlayColor',
+  '--ms-danger': 'r18Color',
+}
+
 export function naiveTheme(theme) {
   return theme === 'dark' ? darkTheme : null
 }
 
 export function themeOverrides(theme) {
   return { common: theme === 'dark' ? darkCommon : lightCommon }
+}
+
+// 返回可直接绑定到 :style 的 CSS 自定义属性对象
+export function cssVars(theme) {
+  const c = theme === 'dark' ? darkCommon : lightCommon
+  const vars = {}
+  for (const [name, key] of Object.entries(CSS_VARS)) vars[name] = c[key]
+  return vars
 }

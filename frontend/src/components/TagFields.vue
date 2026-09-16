@@ -11,12 +11,10 @@
 <script setup>
 import { reactive, watch } from 'vue'
 import { NDynamicTags, NSwitch } from 'naive-ui'
+import { CATS, catLabel } from '../constants'
 
 const props = defineProps({ tags: { type: Object, default: () => ({}) } })
 const emit = defineEmits(['update:tags'])
-
-const CATS = ['work', 'author', 'character', 'cm', 'censored']
-const catLabel = c => ({ work: '作品', author: '作者', character: '角色', cm: 'CM', censored: '修正' }[c])
 
 const draft = reactive({ work: [], author: [], character: [], cm: [], censored: [] })
 
@@ -34,5 +32,5 @@ for (const cat of CATS) {
 
 <style scoped>
 .field-label { font-size: 12px; font-weight: 700; opacity: .6; margin: 12px 0 6px; letter-spacing: 1px; }
-.r18-label { color: #d03050; }
+.r18-label { color: var(--ms-danger); }
 </style>

@@ -36,6 +36,7 @@ import { ref, watch, computed } from 'vue'
 import { NModal, NInput, NButton, NSwitch, NDynamicTags, NAutoComplete, useMessage } from 'naive-ui'
 import { api } from '../api'
 import { store } from '../store'
+import { CATS, catLabel } from '../constants'
 
 const props = defineProps({
   show: Boolean,
@@ -49,8 +50,6 @@ const show = computed({
 })
 
 const message = useMessage()
-const CATS = ['work', 'author', 'character', 'cm', 'censored']
-const catLabel = c => ({ work: '作品', author: '作者', character: '角色', cm: 'CM', censored: '修正' }[c])
 const cats = CATS
 
 const name = ref('')
@@ -96,6 +95,6 @@ async function save() {
 <style scoped>
 .form { display: flex; flex-direction: column; gap: 8px; }
 .field-label { font-size: 12px; font-weight: 700; opacity: .6; margin-top: 8px; letter-spacing: 1px; }
-.r18-label { color: #d03050; }
+.r18-label { color: var(--ms-danger); }
 .footer { display: flex; justify-content: flex-end; gap: 10px; }
 </style>

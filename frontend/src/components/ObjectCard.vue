@@ -6,7 +6,7 @@
       <template v-if="isR18 && !revealed">
         <span class="r18-badge">R-18</span>
         <div class="r18-lock">
-          <span style="font-size:20px">🔒</span>
+          <IconLock :size="20" />
           <span>内容已隐藏</span>
         </div>
       </template>
@@ -16,10 +16,10 @@
           <span v-for="t in tagList" :key="t" class="mini-tag">{{ t }}</span>
         </div>
         <div class="actions">
-          <n-button size="tiny" quaternary title="阅读" @click.stop="$emit('open', obj)">▶</n-button>
-          <n-button size="tiny" quaternary title="编辑" @click.stop="$emit('edit', obj)">✎</n-button>
-          <n-button size="tiny" quaternary title="设置封面" @click.stop="$emit('cover', obj)">🖼</n-button>
-          <n-button size="tiny" quaternary title="删除" @click.stop="$emit('del', obj)">🗑</n-button>
+          <n-button size="tiny" quaternary title="阅读" @click.stop="$emit('open', obj)"><IconPlay :size="13" /></n-button>
+          <n-button size="tiny" quaternary title="编辑" @click.stop="$emit('edit', obj)"><IconEdit :size="13" /></n-button>
+          <n-button size="tiny" quaternary title="设置封面" @click.stop="$emit('cover', obj)"><IconImage :size="13" /></n-button>
+          <n-button size="tiny" quaternary title="删除" @click.stop="$emit('del', obj)"><IconTrash :size="13" /></n-button>
         </div>
       </div>
     </div>
@@ -36,11 +36,10 @@
 <script setup>
 import { computed } from 'vue'
 import { NButton } from 'naive-ui'
-import { store } from '../store'
+import { IconLock, IconPlay, IconEdit, IconImage, IconTrash } from './icons'
 
 const props = defineProps({
   obj: { type: Object, required: true },
-  anim: { type: String, default: '' },      // '' | 'card-enter' | 'card-leave'
   animDelay: { type: Number, default: 0 },
   revealed: { type: Boolean, default: false },
 })
@@ -48,9 +47,7 @@ defineEmits(['open', 'edit', 'cover', 'del'])
 
 const isR18 = computed(() => !!props.obj.tags?.r18)
 const coverUrl = computed(() => `/api/objects/${props.obj.id}/cover?kind=card&_=${props.obj.cover_url ?? ''}`)
-const animStyle = computed(() => props.anim
-  ? { animationName: undefined, animationDelay: `${props.animDelay}ms` }
-  : {})
+const animStyle = computed(() => props.animDelay ? { animationDelay: `${props.animDelay}ms` } : {})
 const tagList = computed(() => {
   const tags = props.obj.tags || {}
   const out = []

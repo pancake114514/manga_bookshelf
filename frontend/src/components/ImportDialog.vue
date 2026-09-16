@@ -2,10 +2,10 @@
   <n-modal v-model:show="show" preset="card" title="导入图片" style="width: 520px;">
     <div class="mode-list">
       <n-button block size="large" class="mode-btn" @click="mode = 'new'">
-        📁  新建目录（导入整个文件夹）
+        <IconFolder /> 新建目录（导入整个文件夹）
       </n-button>
       <n-button block size="large" class="mode-btn" @click="mode = 'append'">
-        🗂  导入文件夹到已有目录
+        <IconLibrary /> 导入文件夹到已有目录
       </n-button>
     </div>
 
@@ -52,6 +52,7 @@ import {
 import { api, bridge } from '../api'
 import { store, refreshTagValues } from '../store'
 import TagFields from './TagFields.vue'
+import { IconFolder, IconLibrary } from './icons'
 
 const props = defineProps({ show: Boolean })
 const emit = defineEmits(['update:show', 'done'])

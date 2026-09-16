@@ -19,7 +19,6 @@ const post = (url, body) => jfetch(url, {
 export const api = {
   state: () => jfetch('/api/state'),
   setup: (path) => post('/api/setup', { path }),
-  checkWritable: (path) => post('/api/check-writable', { path }),
   validateName: (name) => post('/api/validate-name', { name }),
 
   objects: (q, includeR18, filters) =>
@@ -37,7 +36,6 @@ export const api = {
   lastRead: (id, idx) => post(`/api/objects/${id}/last-read`, { idx }),
 
   importDirectory: (body) => post('/api/import/directory', body),
-  importFiles: (body) => post('/api/import/files', body),
   migrate: (newRoot) => post('/api/migrate', { new_root: newRoot }),
 
   getConfig: (key) => jfetch(`/api/config/${key}`),

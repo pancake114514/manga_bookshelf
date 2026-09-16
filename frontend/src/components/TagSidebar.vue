@@ -24,9 +24,8 @@
 import { computed } from 'vue'
 import { NSwitch, NButton } from 'naive-ui'
 import { store } from '../store'
+import { catLabel } from '../constants'
 
-const CAT_LABELS = { work: '作品', author: '作者', character: '角色', cm: 'CM', censored: '修正' }
-const catLabel = c => CAT_LABELS[c] || c
 const selectedCount = computed(() =>
   Object.values(store.filters).reduce((n, v) => n + v.length, 0))
 
@@ -46,11 +45,11 @@ function clearAll() { store.filters = {} }
 .sidebar {
   width: 228px; flex: none;
   padding: 18px 16px;
-  border-right: 1px solid var(--border, rgba(128,128,128,.2));
+  border-right: 1px solid var(--border);
   overflow-y: auto;
 }
 .r18-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
-.r18-label { color: #d03050; font-size: 13px; font-weight: 600; }
+.r18-label { color: var(--ms-danger); font-size: 13px; font-weight: 600; }
 .group { margin-bottom: 16px; }
 .group-title {
   font-size: 11px; font-weight: 700; letter-spacing: 1.5px;
@@ -61,14 +60,14 @@ function clearAll() { store.filters = {} }
   padding: 3px 10px; border-radius: 6px;
   border: 1px solid transparent;
   font-size: 12px; cursor: pointer; user-select: none;
-  background: var(--chip-bg, rgba(128,128,128,.12));
+  background: var(--chip-bg);
   transition: all .15s;
 }
-.chip:hover { border-color: var(--border-strong, rgba(128,128,128,.4)); }
+.chip:hover { border-color: var(--border-strong); }
 .chip.active {
-  background: var(--chip-bg, rgba(24,160,88,.18));
-  border-color: var(--ms-primary, #18a058);
-  color: var(--ms-primary, #18a058);
+  background: var(--chip-bg);
+  border-color: var(--ms-primary);
+  color: var(--ms-primary);
 }
 .clear { margin-top: 8px; width: 100%; }
 </style>
