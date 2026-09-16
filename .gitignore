@@ -15,6 +15,15 @@ dist/
 
 # 虚拟环境
 .venv/
+venv/
+
+# Node / 前端
+node_modules/
+frontend/dist/
+*.log
+
+# 本地 AI 协作数据
+.workbuddy/
 
 # IDE 本地配置
 settings.json

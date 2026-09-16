@@ -1,0 +1,137 @@
+/* 全局样式：设计令牌与书架网格动画（与设计稿一致） */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body, #app { height: 100%; }
+body {
+  font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  overflow: hidden;
+}
+
+.app-shell { height: 100vh; display: flex; flex-direction: column; transition: background .25s, color .25s; }
+.app-main { flex: 1; display: flex; min-height: 0; }
+
+/* ── 深浅双主题设计令牌（挂载在 .app-shell 上，子组件统一引用） ── */
+.app-shell.theme-dark {
+  --bg: #101014;
+  --surface: #17171c;
+  --card: #1e1e26;
+  --text: #ececf1;
+  --text2: #a0a0ac;
+  --text3: #6b6b78;
+  --border: rgba(255,255,255,.09);
+  --border-strong: rgba(255,255,255,.16);
+  --chip-bg: rgba(255,255,255,.06);
+  --ms-primary: #63e2b7;
+  --ms-overlay: rgba(16,16,20,.72);
+  background: var(--bg);
+  color: var(--text);
+}
+.app-shell.theme-light {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --text: #1f1f25;
+  --text2: #55555e;
+  --text3: #9a9aa2;
+  --border: rgba(0,0,0,.09);
+  --border-strong: rgba(0,0,0,.16);
+  --chip-bg: rgba(0,0,0,.045);
+  --ms-primary: #18a058;
+  --ms-overlay: rgba(255,255,255,.78);
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* ── 卡片增删过渡（与设计稿一致：整批右出 → 左入） ── */
+@keyframes card-in {
+  from { opacity: 0; transform: translateX(-64px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes card-out {
+  to { opacity: 0; transform: translateX(64px); }
+}
+.card-enter { animation: card-in .34s cubic-bezier(.22, .9, .36, 1) backwards; }
+.card-leave { animation: card-out .2s ease-in forwards; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) {
+  .card-enter, .card-leave { animation: none; }
+}
+
+/* ── 对象卡片 ── */
+.shelf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.obj-card {
+  border: 1px solid var(--border, rgba(128,128,128,.25));
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--surface, transparent);
+  display: flex;
+  flex-direction: column;
+  transition: transform .18s, border-color .18s, box-shadow .18s, background .25s;
+}
+.obj-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--ms-primary);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .18);
+}
+.cover-box { position: relative; width: 100%; aspect-ratio: 5 / 7; overflow: hidden; background: var(--chip-bg, rgba(128,128,128,.12)); }
+.cover-box img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+  transition: filter .2s;
+}
+.obj-card.is-r18 .cover-box img { filter: blur(14px) saturate(.7); transform: scale(1.06); }
+.r18-badge {
+  position: absolute; top: 10px; right: 10px; z-index: 2;
+  padding: 2px 8px; border-radius: 5px;
+  background: #d03050; color: #fff;
+  font-size: 10px; font-weight: 800; letter-spacing: 1px;
+}
+.r18-lock {
+  position: absolute; inset: 0; z-index: 2;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  color: rgba(255,255,255,.92); font-size: 12px;
+  background: rgba(0,0,0,.25);
+}
+.hover-overlay {
+  position: absolute; inset: 0; z-index: 3;
+  display: flex; flex-direction: column; justify-content: flex-end;
+  padding: 12px; gap: 5px;
+  background: var(--ms-overlay, rgba(16,16,20,.72));
+  opacity: 0; transition: opacity .2s;
+}
+.obj-card:hover .hover-overlay { opacity: 1; }
+.hover-overlay .ov-title {
+  font-size: 13px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.hover-overlay .ov-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.card-info { padding: 10px 12px 12px; }
+.card-title {
+  font-size: 13px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.card-meta {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 4px; font-size: 11px;
+}
+
+/* 阅读器 */
+.reader-stage {
+  flex: 1; min-height: 0;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; position: relative;
+}
+.reader-stage img {
+  max-width: 100%; max-height: 100%;
+  object-fit: contain;
+  user-select: none; -webkit-user-drag: none;
+}
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(128,128,128,.35); border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }

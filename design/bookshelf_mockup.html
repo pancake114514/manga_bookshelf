@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MangaShelf — 书架 UI 设计稿</title>
+<style>
+  :root {
+    --primary: #18a058;
+    --primary-hover: #36ad6a;
+    --danger: #d03050;
+    --radius: 10px;
+  }
+  /* ── 深色主题（默认） ── */
+  .theme-dark {
+    --bg: #101014;
+    --surface: #17171c;
+    --card: #1e1e26;
+    --card-hover: #24242e;
+    --text: #ececf1;
+    --text-2: #a0a0ac;
+    --text-3: #6b6b78;
+    --border: rgba(255,255,255,.09);
+    --border-strong: rgba(255,255,255,.16);
+    --chip-bg: rgba(255,255,255,.06);
+    --chip-active-bg: rgba(24,160,88,.18);
+    --chip-active-text: #63e2b7;
+    --overlay: rgba(16,16,20,.72);
+    --primary: #63e2b7;
+    --primary-text: #0b2e1f;
+  }
+  /* ── 浅色主题 ── */
+  .theme-light {
+    --bg: #f5f6f8;
+    --surface: #ffffff;
+    --card: #ffffff;
+    --card-hover: #fafafa;
+    --text: #1f1f25;
+    --text-2: #55555e;
+    --text-3: #9a9aa2;
+    --border: rgba(0,0,0,.09);
+    --border-strong: rgba(0,0,0,.16);
+    --chip-bg: rgba(0,0,0,.045);
+    --chip-active-bg: rgba(24,160,88,.12);
+    --chip-active-text: #0f7a43;
+    --overlay: rgba(255,255,255,.78);
+    --primary: #18a058;
+    --primary-text: #ffffff;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    transition: background .25s, color .25s;
+    overflow: hidden;
+  }
+
+  .app { display: flex; flex-direction: column; height: 100vh; }
+
+  /* ── 顶栏 ── */
+  .topbar {
+    height: 58px; flex: none;
+    display: flex; align-items: center; gap: 14px;
+    padding: 0 18px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .logo { font-family: Georgia, serif; font-size: 17px; font-weight: 700; letter-spacing: .5px; color: var(--primary); }
+  .search {
+    flex: 0 1 380px; height: 36px;
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 14px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    color: var(--text-3);
+    transition: border-color .2s;
+  }
+  .search:focus-within { border-color: var(--primary); }
+  .search input {
+    flex: 1; border: none; outline: none; background: transparent;
+    color: var(--text); font-size: 13px;
+  }
+  .search input::placeholder { color: var(--text-3); }
+  .spacer { flex: 1; }
+  .btn {
+    height: 34px; padding: 0 16px;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    background: transparent; color: var(--text-2);
+    font-size: 13px; cursor: pointer;
+    transition: all .2s;
+  }
+  .btn:hover { color: var(--text); border-color: var(--primary); }
+  .btn.primary {
+    background: var(--primary); border-color: var(--primary);
+    color: var(--primary-text); font-weight: 600;
+  }
+  .btn.primary:hover { filter: brightness(1.08); }
+
+  /* 主题切换开关 */
+  .theme-switch {
+    width: 46px; height: 24px; border-radius: 12px;
+    background: var(--chip-bg); border: 1px solid var(--border-strong);
+    position: relative; cursor: pointer; transition: background .2s;
+  }
+  .theme-switch::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--text-3); transition: transform .25s, background .25s;
+  }
+  .theme-switch.on::after { transform: translateX(22px); background: var(--primary); }
+  .theme-label { font-size: 12px; color: var(--text-3); }
+
+  /* ── 主体 ── */
+  .main { flex: 1; display: flex; min-height: 0; }
+
+  /* 侧栏 */
+  .sidebar {
+    width: 228px; flex: none;
+    padding: 18px 16px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+  }
+  .side-section { margin-bottom: 20px; }
+  .side-title {
+    font-size: 11px; font-weight: 700; letter-spacing: 1.5px;
+    color: var(--text-3); margin-bottom: 10px;
+  }
+  .switch-row { display: flex; align-items: center; justify-content: space-between; }
+  .switch-row .label { color: var(--danger); font-size: 13px; font-weight: 600; }
+  .switch {
+    width: 40px; height: 22px; border-radius: 11px;
+    background: var(--chip-bg); border: 1px solid var(--border-strong);
+    position: relative; cursor: pointer; transition: background .2s;
+  }
+  .switch::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: var(--text-3); transition: transform .2s, background .2s;
+  }
+  .switch.on { background: var(--chip-active-bg); }
+  .switch.on::after { transform: translateX(18px); background: var(--primary); }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    padding: 4px 10px; border-radius: 6px;
+    background: var(--chip-bg);
+    border: 1px solid transparent;
+    color: var(--text-2); font-size: 12px;
+    cursor: pointer; user-select: none;
+    transition: all .15s;
+  }
+  .chip:hover { border-color: var(--border-strong); }
+  .chip.active {
+    background: var(--chip-active-bg);
+    color: var(--chip-active-text);
+    border-color: var(--chip-active-text);
+  }
+  .clear-btn {
+    width: 100%; height: 32px; margin-top: 4px;
+    border: 1px dashed var(--border-strong); border-radius: 8px;
+    background: transparent; color: var(--text-3);
+    font-size: 12px; cursor: pointer; transition: all .2s;
+  }
+  .clear-btn:hover { color: var(--text-2); border-color: var(--text-3); }
+
+  /* ── 书架网格（等尺寸对齐网格） ── */
+  .shelf { flex: 1; overflow-y: auto; padding: 22px 26px 40px; }
+  .masonry {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+    gap: 16px;
+    align-items: start;
+  }
+
+  .card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden; cursor: pointer;
+    background: var(--card);
+    transition: transform .18s, border-color .18s, box-shadow .18s, background .18s;
+    display: flex; flex-direction: column;
+  }
+  .card:hover {
+    transform: translateY(-3px);
+    border-color: var(--border-strong);
+    background: var(--card-hover);
+  }
+  .cover { position: relative; width: 100%; aspect-ratio: 5 / 7; display: block; overflow: hidden; }
+  .cover .ph {
+    width: 100%; height: 100%; display: block;
+    color: rgba(255,255,255,.92);
+    font-family: Georgia, serif;
+    display: flex; align-items: flex-end;
+    padding: 14px;
+    line-height: 1.3;
+    text-shadow: 0 1px 6px rgba(0,0,0,.35);
+  }
+  .cover.r18 .ph { filter: blur(14px) saturate(.7); transform: scale(1.06); }
+  .r18-badge {
+    position: absolute; top: 10px; right: 10px;
+    padding: 3px 8px; border-radius: 5px;
+    background: rgba(208,48,80,.9); color: #fff;
+    font-size: 10px; font-weight: 800; letter-spacing: 1px;
+    z-index: 2;
+  }
+  .r18-lock {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+    color: rgba(255,255,255,.9); font-size: 12px;
+    background: rgba(0,0,0,.25);
+  }
+  .r18-lock .lock-icon {
+    width: 26px; height: 26px; border: 2px solid rgba(255,255,255,.85);
+    border-radius: 6px; position: relative;
+  }
+  .r18-lock .lock-icon::before {
+    content: ""; position: absolute; top: -10px; left: 4px;
+    width: 14px; height: 10px; border: 2px solid rgba(255,255,255,.85);
+    border-bottom: none; border-radius: 8px 8px 0 0;
+  }
+
+  .card-info { padding: 10px 12px 12px; }
+  .card-title {
+    font-size: 13px; font-weight: 600; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .card-meta {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 4px; font-size: 11px; color: var(--text-3);
+  }
+  .card-tags {
+    display: flex; gap: 4px; margin-top: 7px;
+    white-space: nowrap; overflow: hidden;
+  }
+  .mini-tag {
+    font-size: 10px; padding: 1px 6px; border-radius: 4px;
+    background: var(--chip-bg); color: var(--text-2);
+  }
+
+  /* 悬停浮层 */
+  .hover-overlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; justify-content: flex-end;
+    padding: 12px; gap: 5px;
+    background: var(--overlay);
+    opacity: 0; transition: opacity .2s;
+    z-index: 3;
+  }
+  .card:hover .hover-overlay { opacity: 1; }
+  .hover-overlay .ov-title { font-size: 13px; font-weight: 600; color: var(--text); }
+  .hover-overlay .ov-row { display: flex; flex-wrap: wrap; gap: 4px; }
+  .hover-overlay .actions { display: flex; gap: 6px; margin-top: 6px; }
+  .icon-btn {
+    width: 28px; height: 28px; border-radius: 6px;
+    border: 1px solid var(--border-strong);
+    background: var(--card); color: var(--text-2);
+    font-size: 12px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all .15s;
+  }
+  .icon-btn:hover { color: var(--text); border-color: var(--primary); }
+  .icon-btn.del:hover { color: var(--danger); border-color: var(--danger); }
+
+  .result-hint { font-size: 12px; color: var(--text-3); margin-bottom: 14px; }
+  .empty { display: none; color: var(--text-3); text-align: center; padding: 80px 0; }
+  .empty.show { display: block; }
+
+  /* ── 筛选切换动效：整批卡片向右滑出，新集合从左侧滑入 ── */
+  @keyframes card-in {
+    from { opacity: 0; transform: translateX(-64px); }
+    to   { opacity: 1; transform: none; }
+  }
+  @keyframes card-out {
+    to { opacity: 0; transform: translateX(64px); }
+  }
+  .card.entering { animation: card-in .34s cubic-bezier(.22,.9,.36,1) backwards; }
+  .card.leaving  { animation: card-out .2s ease-in forwards; pointer-events: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .card.entering, .card.leaving { animation: none; }
+  }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body class="theme-dark">
+<div class="app">
+
+  <!-- 顶栏 -->
+  <div class="topbar">
+    <span class="logo">MangaShelf</span>
+    <div class="search">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input id="searchInput" placeholder="搜索对象名或标签…  (Ctrl+F)">
+    </div>
+    <div class="spacer"></div>
+    <span class="theme-label">深色</span>
+    <div class="theme-switch" id="themeSwitch" title="切换深浅主题"></div>
+    <button class="btn">库管理</button>
+    <button class="btn primary">＋ 导入</button>
+  </div>
+
+  <div class="main">
+    <!-- 侧栏 -->
+    <aside class="sidebar">
+      <div class="side-section">
+        <div class="switch-row">
+          <span class="label">显示 R-18</span>
+          <div class="switch" id="r18Switch"></div>
+        </div>
+      </div>
+
+      <div class="side-section" id="tagGroups"></div>
+
+      <button class="clear-btn" id="clearBtn">清除全部筛选</button>
+    </aside>
+
+    <!-- 书架 -->
+    <main class="shelf">
+      <div class="result-hint" id="hint"></div>
+      <div class="masonry" id="grid"></div>
+    </main>
+  </div>
+</div>
+
+<script>
+// ── 示例数据（模拟 DB 对象） ──
+const OBJECTS = [
+  { title: "星海航路 01-03", pages: 128, tags: { "作品": ["星海航路"], "作者": ["水濑叶月"], "角色": ["铃", "凛"] }, ratio: 1.41, g: ["#3d5a80", "#98c1d9"] },
+  { title: "深夜食堂画集", pages: 86, tags: { "作品": ["深夜食堂"], "作者": ["安倍夜郎"], "CM": ["C102"] }, ratio: 1.5, g: ["#5c4033", "#c49a6c"] },
+  { title: "东方紅楼夢 On Stage", pages: 44, tags: { "作品": ["东方Project"], "CM": ["紅楼夢15"] }, ratio: 1.35, g: ["#7b2d43", "#e0709a"] },
+  { title: "R-18: 秘密の部屋", r18: true, pages: 36, tags: { "作品": ["秘密の部屋"], "作者": ["unknown"], "修正": ["無修正"] }, ratio: 1.44, g: ["#4a1c2e", "#a34a6b"] },
+  { title: "夏日祭典回忆录", pages: 72, tags: { "作品": ["夏日祭"], "角色": ["千夏"], "CM": ["C101"] }, ratio: 1.47, g: ["#2d6a4f", "#95d5b2"] },
+  { title: "机甲设计资料集 VOL.2", pages: 156, tags: { "作品": ["机甲設計"], "作者": ["大河原邦男"] }, ratio: 1.41, g: ["#37474f", "#90a4ae"] },
+  { title: "猫与书店的日常", pages: 58, tags: { "作品": ["猫与书店"], "作者": ["樋口柚"] }, ratio: 1.5, g: ["#8d5524", "#e0b088"] },
+  { title: "R-18: 夜の帳", r18: true, pages: 28, tags: { "作品": ["夜の帳"], "修正": ["薄消し"] }, ratio: 1.38, g: ["#2b1b3d", "#6b4a9a"] },
+  { title: "雪国列车画集", pages: 94, tags: { "作品": ["雪国列车"], "CM": ["C100"] }, ratio: 1.44, g: ["#456990", "#c0d6df"] },
+  { title: "小林家的龙女仆同人", pages: 40, tags: { "作品": ["小林家"], "角色": ["托尔", "康娜"] }, ratio: 1.5, g: ["#1d7a74", "#7fd8ce"] },
+  { title: "虚構都市夜行録", pages: 66, tags: { "作品": ["虚構都市"], "作者": ["黒田ぐん"] }, ratio: 1.41, g: ["#232526", "#6d6a75"] },
+  { title: "R-18: 蜜月旅行記", r18: true, pages: 32, tags: { "作品": ["蜜月旅行"], "角色": ["沙耶"], "修正": ["白トーン"] }, ratio: 1.47, g: ["#5e2233", "#c86b85"] },
+  { title: "百花繚乱 武術演義", pages: 110, tags: { "作品": ["百花繚乱"], "CM": ["軍令 fest 3"] }, ratio: 1.38, g: ["#6b2d0c", "#e07b39"] },
+  { title: "海边的卡夫卡 插画集", pages: 78, tags: { "作品": ["海边的卡夫卡"], "作者": ["上田風子"] }, ratio: 1.5, g: ["#1a4360", "#5fa8d3"] },
+  { title: " electricity magic works", pages: 52, tags: { "作品": ["electric magic"], "角色": ["雷", "光"] }, ratio: 1.44, g: ["#4a3f00", "#c9b03b"] },
+];
+
+const CATS = ["作品", "作者", "角色", "CM", "修正"];
+const $ = s => document.querySelector(s);
+
+// ── 状态 ──
+const state = { r18: false, filters: {}, keyword: "" };
+
+// ── 封面占位图（渐变 + 标题，模拟真实封面；统一 5:7 比例） ──
+function coverHTML(obj) {
+  return `<div class="ph" style="background:linear-gradient(160deg,${obj.g[0]},${obj.g[1]})">
+            <span style="font-size:${Math.max(13, obj.title.length > 10 ? 14 : 17)}px">${obj.title}</span>
+          </div>`;
+}
+
+// ── 渲染侧栏标签组 ──
+function renderSidebar() {
+  const root = $("#tagGroups");
+  root.innerHTML = CATS.map(cat => {
+    const values = [...new Set(OBJECTS.flatMap(o => o.tags[cat] || []))];
+    return `<div class="side-section">
+      <div class="side-title">${cat.toUpperCase()}</div>
+      <div class="chips">${values.map(v =>
+        `<span class="chip ${state.filters[cat]?.includes(v) ? "active" : ""}"
+               data-cat="${cat}" data-val="${v}">${v}</span>`).join("")}
+      </div>
+    </div>`;
+  }).join("");
+  root.querySelectorAll(".chip").forEach(c => c.onclick = () => {
+    const { cat, val } = c.dataset;
+    const arr = state.filters[cat] || [];
+    state.filters[cat] = arr.includes(val) ? arr.filter(x => x !== val) : [...arr, val];
+    renderSidebar(); renderGrid();
+  });
+}
+
+// ── 渲染书架（筛选变化：整批卡片向右滑出 → 新结果集从左侧滑入） ──
+const grid = $("#grid");
+const emptyEl = document.createElement("div");
+emptyEl.className = "empty";
+emptyEl.textContent = "没有匹配的对象";
+grid.parentElement.appendChild(emptyEl);
+
+let renderSeq = 0;                       // 序号防竞态：连续触发时只执行最后一次
+const OUT_MS = 200, OUT_STAGGER = 12, IN_STAGGER = 26;
+
+function filteredObjects() {
+  const kw = state.keyword.trim().toLowerCase();
+  return OBJECTS.filter(o => {
+    if (o.r18 && !state.r18) return false;
+    if (kw && !(o.title.toLowerCase().includes(kw) ||
+        Object.values(o.tags).flat().some(t => t.toLowerCase().includes(kw)))) return false;
+    return Object.entries(state.filters).every(([cat, vals]) =>
+      !vals.length || vals.some(v => (o.tags[cat] || []).includes(v)));
+  });
+}
+
+function buildCard(o, delay) {
+  const el = document.createElement("div");
+  el.className = "card entering";
+  el.style.animationDelay = `${delay}ms`;
+  el.innerHTML = `
+    <div class="cover ${o.r18 ? "r18" : ""}">
+      ${coverHTML(o)}
+      ${o.r18 ? `<span class="r18-badge">R-18</span>
+        <div class="r18-lock"><div class="lock-icon"></div><span>内容已隐藏</span></div>` : ""}
+      <div class="hover-overlay">
+        <div class="ov-title">${o.title}</div>
+        <div class="ov-row">${Object.entries(o.tags).map(([c, vs]) =>
+          vs.map(v => `<span class="mini-tag">${v}</span>`).join("")).join("")}</div>
+        <div class="actions">
+          <button class="icon-btn" title="阅读">▶</button>
+          <button class="icon-btn" title="编辑">✎</button>
+          <button class="icon-btn" title="换封面">🖼</button>
+          <button class="icon-btn del" title="删除">🗑</button>
+        </div>
+      </div>
+    </div>
+    <div class="card-info">
+      <div class="card-title">${o.title}</div>
+      <div class="card-meta"><span>${o.pages} 张</span><span>3 天前</span></div>
+    </div>`;
+  el.addEventListener("animationend", () => {
+    el.classList.remove("entering");
+    el.style.animationDelay = "";
+  }, { once: true });
+  return el;
+}
+
+function rebuild(list) {
+  grid.innerHTML = "";
+  list.forEach((o, i) => grid.appendChild(buildCard(o, Math.min(i * IN_STAGGER, 400))));
+  emptyEl.classList.toggle("show", !list.length);
+}
+
+function renderGrid() {
+  const list = filteredObjects();
+  $("#hint").textContent = `共 ${list.length} 个对象` +
+    (state.r18 ? "" : "（R-18 已隐藏）") + (state.keyword ? ` · 搜索「${state.keyword}」` : "");
+
+  const seq = ++renderSeq;
+  const cards = [...grid.querySelectorAll(".card")];
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // 无现存卡片（首次/空态恢复）或系统关闭动效：直接重建
+  if (!cards.length || reduced) { rebuild(list); return; }
+
+  // 出场：所有现存卡片（含保留的）一起向右滑出，轻错峰
+  cards.forEach((el, i) => {
+    el.classList.add("leaving");
+    el.style.animationDelay = `${i * OUT_STAGGER}ms`;
+  });
+  const wait = OUT_MS + cards.length * OUT_STAGGER;
+  setTimeout(() => { if (seq === renderSeq) rebuild(list); }, wait);
+}
+
+// ── 交互 ──
+$("#r18Switch").onclick = function () {
+  state.r18 = !state.r18;
+  this.classList.toggle("on", state.r18);
+  renderGrid();
+};
+$("#clearBtn").onclick = () => { state.filters = {}; renderSidebar(); renderGrid(); };
+let searchTimer;
+$("#searchInput").oninput = e => {
+  state.keyword = e.target.value;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(renderGrid, 180);   // 输入防抖，避免打字时连续触发出场动画
+};
+$("#themeSwitch").onclick = function () {
+  const dark = document.body.classList.toggle("theme-dark");
+  document.body.classList.toggle("theme-light", !dark);
+  this.classList.toggle("on", !dark);
+  $(".theme-label").textContent = dark ? "深色" : "浅色";
+};
+
+renderSidebar();
+renderGrid();
+</script>
+</body>
+</html>
