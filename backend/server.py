@@ -24,7 +24,10 @@ def _free_port() -> int:
 
 
 class Bridge:
-    """暴露给前端 window.pywebview.api 的本地能力（目录/文件选择）。"""
+    """暴露给前端 window.pywebview.api 的本地能力（目录/文件选择、窗口控制）。"""
+
+    def __init__(self):
+        self._maximized = False   # 无边框窗口无原生状态可查，由按钮路径自行跟踪
 
     def pick_dir(self, title: str = "选择目录"):
         import webview
@@ -37,6 +40,27 @@ class Bridge:
         result = webview.windows[0].create_file_dialog(
             webview.OPEN_DIALOG, allow_multiple=True, file_types=file_types)
         return list(result) if result else []
+
+    # ── 自定义标题栏的窗口控制 ──
+    def minimize(self):
+        import webview
+        webview.windows[0].minimize()
+
+    def toggle_maximize(self):
+        """最大化/还原切换，返回切换后的状态供前端更新按钮图标。"""
+        import webview
+        w = webview.windows[0]
+        if self._maximized:
+            w.restore()
+            self._maximized = False
+        else:
+            w.maximize()
+            self._maximized = True
+        return self._maximized
+
+    def close_window(self):
+        import webview
+        webview.windows[0].destroy()
 
 
 def main():
@@ -71,6 +95,8 @@ def main():
         "MangaShelf", url,
         width=1280, height=820, min_size=(1000, 680),
         js_api=Bridge(),
+        frameless=True,      # 去掉系统标题栏，由前端 TitleBar 组件接管
+        easy_drag=False,     # 仅标题栏拖拽区可拖动，避免干扰正文交互
     )
     webview.start()
 

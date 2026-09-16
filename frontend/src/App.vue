@@ -3,6 +3,8 @@
     <n-message-provider>
       <n-dialog-provider>
         <div class="app-shell" :class="`theme-${store.theme}`" :style="cssVars(store.theme)">
+          <!-- 无边框窗口的自定义标题栏（仅桌面模式渲染），阅读器/首启向导下也保留 -->
+          <TitleBar />
           <template v-if="store.ready">
             <SetupGate v-if="!store.storageRoot" />
             <template v-else>
@@ -38,6 +40,7 @@ import { NConfigProvider, NMessageProvider, NDialogProvider, NSpin, NResult, NBu
 import { store, boot } from './store'
 import { naiveTheme, themeOverrides, cssVars } from './theme'
 import SetupGate from './components/SetupGate.vue'
+import TitleBar from './components/TitleBar.vue'
 import TopBar from './components/TopBar.vue'
 import TagSidebar from './components/TagSidebar.vue'
 import Bookshelf from './components/Bookshelf.vue'

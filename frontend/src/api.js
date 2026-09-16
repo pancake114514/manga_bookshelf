@@ -57,4 +57,15 @@ export const bridge = {
     if (this.available()) return await window.pywebview.api.pick_files(title)
     return null
   },
+  // 自定义标题栏的窗口控制（仅桌面模式有意义）
+  winMinimize() {
+    if (this.available()) window.pywebview.api.minimize()
+  },
+  async winToggleMaximize() {
+    if (!this.available()) return false
+    return await window.pywebview.api.toggle_maximize()
+  },
+  winClose() {
+    if (this.available()) window.pywebview.api.close_window()
+  },
 }
