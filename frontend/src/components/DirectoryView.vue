@@ -3,15 +3,21 @@
     <div class="info-bar">
       <n-button size="small" @click="back"><IconBack :size="14" /> 书架</n-button>
       <div class="info-row">
-        <img class="cover" :src="`/api/objects/${detail.id}/cover?kind=cover&_=${Date.now()}`" alt="">
+        <img class="cover" :src="`/api/objects/${detail.id}/cover?kind=cover&_=${detail.cover_url ?? ''}`" alt="">
         <div class="meta">
           <div class="title-row">
             <h2 class="title">{{ detail.name }}</h2>
             <n-button type="primary" @click="continueRead"><IconPlay :size="13" /> 继续阅读</n-button>
           </div>
+          <div class="rate-row">
+            <n-rate size="small" :value="rating" @update:value="rate" />
+          </div>
           <div v-for="(vals, cat) in tagRows" :key="cat" class="tag-row">
             <span class="cat">{{ catLabel(cat) }}：</span>
-            <span v-for="v in vals" :key="v" class="tag">{{ v }}</span>
+            <span v-for="v in vals" :key="v" class="tag"
+                  :class="{ clickable: cat !== 'r18' }"
+                  :title="cat !== 'r18' ? '点击筛选含此标签的对象' : ''"
+                  @click="cat !== 'r18' && filterTag(cat, v)">{{ v }}</span>
           </div>
           <span v-if="!hasTags" class="no-tag">暂无标签</span>
         </div>
@@ -32,7 +38,8 @@
 
 <script setup>
 import { computed } from 'vue'
-import { NButton } from 'naive-ui'
+import { NButton, NRate } from 'naive-ui'
+import { api } from '../api'
 import { store } from '../store'
 import { catLabel } from '../constants'
 import { IconBack, IconPlay } from './icons'
@@ -40,12 +47,16 @@ import { IconBack, IconPlay } from './icons'
 const props = defineProps({ obj: { type: Object, required: true } })
 const detail = computed(() => props.obj)
 
+const rating = computed(() => Number(props.obj.tags?.rating?.[0] || 0))
+
 const tagRows = computed(() => {
   const tags = props.obj.tags || {}
   const rows = {}
   for (const [cat, vals] of Object.entries(tags)) {
     if (cat === 'r18') {
       if (vals) rows.r18 = ['R-18']
+    } else if (cat === 'rating') {
+      continue                   // 评分用星星组件展示
     } else if (Array.isArray(vals) && vals.length) {
       rows[cat] = vals
     } else if (vals) {
@@ -55,6 +66,22 @@ const tagRows = computed(() => {
   return rows
 })
 const hasTags = computed(() => Object.keys(tagRows.value).length > 0)
+
+async function rate(v) {
+  const tags = { ...props.obj.tags }
+  if (v) tags.rating = [String(v)]
+  else delete tags.rating
+  try {
+    await api.updateObject(props.obj.id, { tags })
+    props.obj.tags = tags        // 就地更新，界面即时生效
+  } catch (e) { console.error(e) }
+}
+
+// 点击标签 → 作为筛选条件回到书架
+function filterTag(cat, val) {
+  store.filters = { ...store.filters, [cat]: [val] }
+  store.view = { name: 'shelf' }
+}
 
 function back() { store.view = { name: 'shelf' } }
 function openAt(idx) {
@@ -72,14 +99,17 @@ function continueRead() {
 .info-row { display: flex; gap: 16px; margin-top: 12px; }
 .cover { width: 120px; height: 168px; object-fit: cover; border-radius: 6px; background: var(--chip-bg, rgba(128,128,128,.12)); }
 .meta { flex: 1; min-width: 0; }
+.rate-row { margin-top: 8px; line-height: 1; }
 .title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .title { font-size: 20px; font-weight: 700; word-break: break-all; }
 .tag-row { display: flex; gap: 6px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
 .cat { font-size: 12px; opacity: .55; }
 .tag {
   font-size: 11px; padding: 2px 8px; border-radius: 10px;
-  background: var(--chip-bg, rgba(128,128,128,.14));
+  background: var(--chip-bg);
 }
+.tag.clickable { cursor: pointer; transition: background .15s, color .15s; }
+.tag.clickable:hover { background: var(--ms-primary); color: #fff; }
 .no-tag { font-size: 12px; opacity: .5; }
 .grid-wrap { flex: 1; overflow-y: auto; padding: 20px; }
 .thumb-grid {
