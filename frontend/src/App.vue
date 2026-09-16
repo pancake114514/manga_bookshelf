@@ -14,7 +14,7 @@
                 <Reader v-else-if="store.view.name === 'reader'" />
               </div>
               <!-- 全局对话框：统一挂载在应用层，开关状态在 store.ui -->
-              <ImportDialog v-model:show="store.ui.import" />
+              <ImportDialog v-model:show="store.ui.import" @done="store.reloadTick++" />
               <LibraryDialog v-model:show="store.ui.library" />
             </template>
           </template>

@@ -25,6 +25,7 @@
 import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { NInput, NButton, NSwitch } from 'naive-ui'
 import { store, toggleTheme } from '../store'
+import { debounce } from '../utils'
 import {
   IconSearch, IconMoon, IconSun, IconLibrary, IconFolderPlus,
 } from './icons'
@@ -32,11 +33,8 @@ import {
 const kw = ref(store.keyword)
 const searchEl = ref(null)
 
-let timer = null
-watch(kw, v => {
-  clearTimeout(timer)
-  timer = setTimeout(() => { store.keyword = v }, 200)
-})
+const applyKeyword = debounce(v => { store.keyword = v }, 200)
+watch(kw, applyKeyword)
 
 function onKey(e) {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {

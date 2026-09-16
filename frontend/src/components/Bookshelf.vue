@@ -39,7 +39,9 @@ const OUT_MS = 200
 let seq = 0
 
 async function fetchObjects() {
-  return await api.objects(store.keyword, store.r18, store.filters)
+  const list = await api.objects(store.keyword, store.r18, store.filters)
+  store.objects = list          // 回写全局，供「追加导入」下拉等处消费
+  return list
 }
 
 // 筛选/搜索/R18 变化：整批卡片向右滑出 → 新结果从左滑入
@@ -72,6 +74,9 @@ async function silentReload() {
   shown.value = await fetchObjects().catch(() => [])
   refreshTagValues()
 }
+
+// 导入完成等外部数据变更（App 层转发 reloadTick）
+watch(() => store.reloadTick, () => { silentReload() })
 
 onMounted(async () => {
   shown.value = await fetchObjects().catch(() => [])

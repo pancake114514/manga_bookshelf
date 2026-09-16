@@ -2,7 +2,7 @@
   <aside class="sidebar">
     <div class="r18-row">
       <span class="r18-label">显示 R-18</span>
-      <n-switch size="small" :value="store.r18" @update:value="v => store.r18 = v" />
+      <n-switch size="small" :value="store.r18" @update:value="setR18" />
     </div>
 
     <div v-for="(values, cat) in store.tagValues" :key="cat" class="group">
@@ -23,7 +23,7 @@
 <script setup>
 import { computed } from 'vue'
 import { NSwitch, NButton } from 'naive-ui'
-import { store } from '../store'
+import { store, setR18 } from '../store'
 import { catLabel } from '../constants'
 
 const selectedCount = computed(() =>
