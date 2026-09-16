@@ -313,7 +313,11 @@ class Database:
     def update_image_filepath(self, img_id: str, filepath: str):
         self.conn.execute(
             "UPDATE images SET filepath=? WHERE id=?", (filepath, img_id)
-        )
+        )
+
+    def delete_image(self, img_id: str):
+        """删除单条图片记录（用于取消导入时逐张回滚）。"""
+        self.conn.execute("DELETE FROM images WHERE id=?", (img_id,))
 
     def get_images(self, obj_id: str, limit: Optional[int] = None) -> List[Dict]:
         sql = "SELECT * FROM images WHERE object_id=? ORDER BY sort_order, filename"

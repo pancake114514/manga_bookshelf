@@ -365,6 +365,64 @@ def test_import_rejects_nonempty_unowned_dir(svc_and_root, make_images):
     assert svc.get_image_count(oid) == 1
 
 
+def test_import_cancelled_rolls_back_new_object(svc_and_root, make_images):
+    """M2：新建导入中途取消 → 对象/图片/目录全部回滚，无残留。"""
+    from services.library_service import ImportCancelled
+
+    svc, root = svc_and_root
+    src = os.path.abspath(os.path.join(root, "..", "src"))
+    os.makedirs(src)
+    make_images(src, 3)
+
+    oid = str(uuid.uuid4())
+    calls = {"n": 0}
+
+    def cancel_check():
+        calls["n"] += 1
+        return calls["n"] > 1        # 复制第 1 张后、第 2 张前取消
+
+    with pytest.raises(ImportCancelled):
+        svc.import_directory(oid, "Alpha", {"work": ["W"]}, src, root,
+                             is_new=True, cancel_check=cancel_check)
+
+    assert svc.get_object(oid) is None                     # 对象已回滚
+    assert svc.get_all_objects(include_r18=True) == []
+    assert svc.get_image_count(oid) == 0
+    assert not os.path.isdir(os.path.join(root, "Alpha"))  # 目录已移除
+
+
+def test_append_import_cancelled_keeps_existing(svc_and_root, make_images):
+    """M2：追加导入中途取消 → 已有对象与图片保留，本次新增回滚。"""
+    from services.library_service import ImportCancelled
+
+    svc, root = svc_and_root
+    src1 = os.path.abspath(os.path.join(root, "..", "src1"))
+    os.makedirs(src1)
+    make_images(src1, 1)
+    oid = str(uuid.uuid4())
+    svc.import_directory(oid, "Alpha", {}, src1, root, is_new=True)
+    assert svc.get_image_count(oid) == 1
+
+    src2 = os.path.abspath(os.path.join(root, "..", "src2"))
+    os.makedirs(src2)
+    make_images(src2, 3)
+    calls = {"n": 0}
+
+    def cancel_check():
+        calls["n"] += 1
+        return calls["n"] > 1
+
+    with pytest.raises(ImportCancelled):
+        svc.import_directory(oid, "Alpha", {}, src2, root,
+                             is_new=False, cancel_check=cancel_check)
+
+    # 原有 1 张保留，本次新增的那张已从 DB 与磁盘回滚
+    assert svc.get_image_count(oid) == 1
+    storage = svc.get_object(oid)["storage_path"]
+    files = [f for f in os.listdir(storage) if not f.startswith(".")]
+    assert len(files) == 1
+
+
 def test_unique_tag_index(svc_and_root, make_images, new_object_id):
     """tags 唯一索引：直接插入重复标签应被拒绝。"""
     svc, root = svc_and_root

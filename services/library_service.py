@@ -27,6 +27,11 @@ logger = logging.getLogger(__name__)
 
 
 ProgressCB = Callable[[int, int], None]
+CancelCheck = Callable[[], bool]
+
+
+class ImportCancelled(Exception):
+    """导入被调用方取消；抛出前本次导入已写入的对象/图片/文件已回滚。"""
 
 
 class LibraryService:
@@ -192,9 +197,19 @@ class LibraryService:
 
     def import_directory(self, obj_id: str, name: str, tags: dict,
                          source_dir: str, storage_root: str,
-                         is_new: bool, progress_cb: Optional[ProgressCB] = None
+                         is_new: bool, progress_cb: Optional[ProgressCB] = None,
+                         cancel_check: Optional[CancelCheck] = None
                          ) -> tuple[int, int]:
-        """导入整个目录到 storage_root 下。返回 (成功数, 失败数)。"""
+        """导入整个目录到 storage_root 下。返回 (成功数, 失败数)。
+
+        cancel_check 返回 True 时立即中止，并回滚本次已写入的对象/图片
+        （含已复制到磁盘的文件），随后抛出 ImportCancelled——避免留下
+        残缺对象、孤立图片等半成品状态。
+        """
+        created_object = False
+        created_dir = False
+        created_images: list = []   # [(img_id, dest_path)]
+
         if is_new:
             storage_obj_dir = os.path.join(storage_root, name)
             # 防止两个对象共享同一存储目录：删除任一对象会级联删掉
@@ -210,14 +225,16 @@ class LibraryService:
                     f"已拒绝导入：{storage_obj_dir}"
                 )
             dir_existed = os.path.isdir(storage_obj_dir)
+            created_dir = not dir_existed
             os.makedirs(storage_obj_dir, exist_ok=True)
             if not self.db.create_object(obj_id, "directory", name,
                                          source_dir, storage_obj_dir):
                 # create_object 失败（ID 冲突）时只清理本次新建的空目录，
                 # 绝不删除预先存在的目录（可能属于其他对象）
-                if not dir_existed:
+                if created_dir:
                     shutil.rmtree(storage_obj_dir, ignore_errors=True)
                 raise ValueError(f"对象 ID 冲突，创建失败：{obj_id}")
+            created_object = True
             self.db.set_tags(obj_id, tags)
         else:
             # 追加导入必须使用对象 DB 中记录的目录，而不是按当前名字拼接，
@@ -228,31 +245,61 @@ class LibraryService:
                 obj, storage_root, name
             )
 
-        images = collect_images(source_dir)
-        total = len(images)
-        seq = next_seq_number(storage_obj_dir)
-        sort_start = self.db.get_image_count(obj_id)
-        ok, fail = 0, 0
-        for i, src in enumerate(images):
-            filename, dest, used_seq = copy_image_with_seq_name(src, storage_obj_dir, seq)
-            if dest:
-                img_id = str(uuid.uuid4())
-                self.db.add_image(img_id, obj_id, filename, dest, sort_start + i)
-                seq = used_seq + 1
-                ok += 1
-            else:
-                fail += 1
-            if progress_cb:
-                progress_cb(i + 1, total)
+        try:
+            images = collect_images(source_dir)
+            total = len(images)
+            seq = next_seq_number(storage_obj_dir)
+            sort_start = self.db.get_image_count(obj_id)
+            ok, fail = 0, 0
+            for i, src in enumerate(images):
+                if cancel_check and cancel_check():
+                    raise ImportCancelled()
+                filename, dest, used_seq = copy_image_with_seq_name(
+                    src, storage_obj_dir, seq
+                )
+                if dest:
+                    img_id = str(uuid.uuid4())
+                    self.db.add_image(img_id, obj_id, filename, dest, sort_start + i)
+                    created_images.append((img_id, dest))
+                    seq = used_seq + 1
+                    ok += 1
+                else:
+                    fail += 1
+                if progress_cb:
+                    progress_cb(i + 1, total)
 
-        # 新建对象默认用第一张图作为封面
-        if is_new:
-            obj = self.db.get_object(obj_id)
-            first_img = self.db.get_images(obj_id)
-            if first_img and not (obj or {}).get("cover_image"):
-                self.db.update_object_cover(obj_id, first_img[0]["filepath"])
+            # 新建对象默认用第一张图作为封面
+            if is_new:
+                obj = self.db.get_object(obj_id)
+                first_img = self.db.get_images(obj_id)
+                if first_img and not (obj or {}).get("cover_image"):
+                    self.db.update_object_cover(obj_id, first_img[0]["filepath"])
 
-        return ok, fail
+            return ok, fail
+        except ImportCancelled:
+            self._rollback_import(obj_id, created_object, created_dir,
+                                  storage_obj_dir, created_images)
+            raise
+
+    def _rollback_import(self, obj_id: str, created_object: bool,
+                         created_dir: bool, storage_obj_dir: str,
+                         created_images: list):
+        """回滚一次被取消的导入，避免留下残缺对象与孤立文件。"""
+        if created_object:
+            # 对象为本次创建：删除对象（CASCADE 清 tags/images），
+            # 目录若也是本次新建则一并移除
+            self.db.delete_object(obj_id)
+            if created_dir and os.path.isdir(storage_obj_dir):
+                shutil.rmtree(storage_obj_dir, ignore_errors=True)
+        else:
+            # 追加导入：仅移除本次新增的图片记录与对应文件
+            for img_id, dest in created_images:
+                self.db.delete_image(img_id)
+                try:
+                    if os.path.isfile(dest):
+                        os.remove(dest)
+                except OSError as e:
+                    logger.warning("回滚导入文件失败：%s", e)
 
     def import_single_files(self, obj_id: str, paths: list,
                             storage_root: str) -> tuple[int, int]:

@@ -12,14 +12,11 @@ from .tag_editor import TagEditorDialog
 import uuid
 
 
-class _ImportCanceled(Exception):
-    """用户取消导入时抛出，走正常结束路径而非错误路径。"""
-
-
 class ImportWorker(QThread):
     """后台导入线程（使用独立 LibraryService，避免共享 sqlite 连接）"""
     progress = pyqtSignal(int, int)
     import_finished = pyqtSignal(str, int, int)   # obj_id, 成功数, 失败数
+    import_cancelled = pyqtSignal(str)            # obj_id（已回滚，无残留）
     error = pyqtSignal(str)
 
     def __init__(self, db_path: str, obj_id: str, obj_name: str, tags: dict,
@@ -35,26 +32,20 @@ class ImportWorker(QThread):
         self._cancel_requested = False
 
     def run(self):
-        from services.library_service import LibraryService
+        from services.library_service import LibraryService, ImportCancelled
         svc = None
         try:
             svc = LibraryService(self.db_path)
-
-            def cb(cur: int, total: int):
-                self.progress.emit(cur, total)
-                if self._cancel_requested:
-                    raise _ImportCanceled()
-
-            try:
-                ok, fail = svc.import_directory(
-                    self.obj_id, self.obj_name, self.tags,
-                    self.source_dir, self.storage_root, self.is_new,
-                    progress_cb=cb,
-                )
-            except _ImportCanceled:
-                self.import_finished.emit(self.obj_id, 0, 0)
-                return
+            ok, fail = svc.import_directory(
+                self.obj_id, self.obj_name, self.tags,
+                self.source_dir, self.storage_root, self.is_new,
+                progress_cb=lambda cur, total: self.progress.emit(cur, total),
+                cancel_check=lambda: self._cancel_requested,
+            )
             self.import_finished.emit(self.obj_id, ok, fail)
+        except ImportCancelled:
+            # 服务层已回滚本次导入，此处仅通知
+            self.import_cancelled.emit(self.obj_id)
         except Exception as e:
             self.error.emit(str(e))
         finally:
@@ -272,15 +263,19 @@ class ImportDialog(FramelessDialog):
 
         def on_finished(oid, ok, fail):
             prog.close()
-            if getattr(self.worker, "_cancel_requested", False):
-                QMessageBox.information(self, "导入已取消", "导入已取消。")
-            else:
-                msg = f"导入完成：成功 {ok} 张图片"
-                if fail:
-                    msg += f"，{fail} 张失败"
-                QMessageBox.information(self, "导入完成", msg)
+            msg = f"导入完成：成功 {ok} 张图片"
+            if fail:
+                msg += f"，{fail} 张失败"
+            QMessageBox.information(self, "导入完成", msg)
             self.accept()
             self.import_done.emit(oid)
+
+        def on_cancelled(oid):
+            prog.close()
+            QMessageBox.information(
+                self, "导入已取消", "导入已取消，本次未做任何改动。"
+            )
+            self.accept()
 
         def on_error(msg):
             prog.close()
@@ -288,6 +283,7 @@ class ImportDialog(FramelessDialog):
 
         self.worker.progress.connect(on_progress)
         self.worker.import_finished.connect(on_finished)
+        self.worker.import_cancelled.connect(on_cancelled)
         self.worker.error.connect(on_error)
         self.worker.finished.connect(self.worker.deleteLater)
         self.worker.start()
