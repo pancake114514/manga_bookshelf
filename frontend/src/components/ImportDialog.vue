@@ -18,6 +18,8 @@
       <div class="field-label">对象名称</div>
       <n-input v-model:value="name" placeholder="输入对象名称" />
       <TagFields v-model:tags="newTags" />
+      <div class="field-label">评分</div>
+      <n-rate v-model:value="rating" />
     </template>
 
     <!-- 追加到已有目录 -->
@@ -47,7 +49,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import {
-  NModal, NButton, NInput, NInputGroup, NSelect, NAlert, NProgress, useMessage,
+  NModal, NButton, NInput, NInputGroup, NSelect, NAlert, NProgress, NRate, useMessage,
 } from 'naive-ui'
 import { api, bridge } from '../api'
 import { store, refreshTagValues } from '../store'
@@ -67,6 +69,7 @@ const mode = ref(null)            // null | 'new' | 'append'
 const sourceDir = ref('')
 const name = ref('')
 const newTags = ref({})
+const rating = ref(0)
 const targetId = ref(null)
 const errMsg = ref('')
 const busy = ref(false)
@@ -97,10 +100,12 @@ async function run() {
       if (!name.value.trim()) { errMsg.value = '请输入对象名称'; return }
       const check = await api.validateName(name.value.trim())
       if (!check.ok) { errMsg.value = check.error; return }
+      const tags = { ...newTags.value }
+      if (rating.value) tags.rating = [String(rating.value)]
       result = await api.importDirectory({
         source_dir: sourceDir.value,
         name: name.value.trim(),
-        tags: newTags.value,
+        tags,
         is_new: true,
       })
     } else {
@@ -119,6 +124,7 @@ async function run() {
     sourceDir.value = ''
     name.value = ''
     newTags.value = {}
+    rating.value = 0
     refreshTagValues()
     emit('done')
   } catch (e) {

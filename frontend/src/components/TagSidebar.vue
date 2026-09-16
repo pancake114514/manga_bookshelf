@@ -5,6 +5,17 @@
       <n-switch size="small" :value="store.r18" @update:value="setR18" />
     </div>
 
+    <div class="group">
+      <div class="group-title">评分</div>
+      <div class="stars">
+        <span v-for="n in 5" :key="n" class="star" :class="{ on: n >= minRating }"
+              :title="`${n} 星及以上`" @click="setRatingFilter(n)">
+          <IconStarFill :size="17" />
+        </span>
+        <span v-if="minRating" class="star-clear" @click="clearRatingFilter">清除</span>
+      </div>
+    </div>
+
     <div v-for="(values, cat) in store.tagValues" :key="cat" class="group">
       <div class="group-title">{{ catLabel(cat) }}</div>
       <div class="chips">
@@ -24,10 +35,28 @@
 import { computed } from 'vue'
 import { NSwitch, NButton } from 'naive-ui'
 import { store, setR18 } from '../store'
-import { catLabel } from '../constants'
+import { catLabel, RATING_CAT } from '../constants'
+import { IconStarFill } from './icons'
 
 const selectedCount = computed(() =>
   Object.values(store.filters).reduce((n, v) => n + v.length, 0))
+
+// 评分筛选：filters.rating 取连续值 [n..5]，语义为「n 星及以上」
+const minRating = computed(() => {
+  const vals = store.filters[RATING_CAT]
+  return vals && vals.length ? 6 - vals.length : 0
+})
+function setRatingFilter(n) {
+  if (minRating.value === n) { clearRatingFilter(); return }
+  store.filters = {
+    ...store.filters,
+    [RATING_CAT]: Array.from({ length: 5 - n + 1 }, (_, i) => String(n + i)),
+  }
+}
+function clearRatingFilter() {
+  const { [RATING_CAT]: _drop, ...rest } = store.filters
+  store.filters = rest
+}
 
 function toggle(cat, val) {
   const arr = store.filters[cat] || []
@@ -70,4 +99,10 @@ function clearAll() { store.filters = {} }
   color: var(--ms-primary);
 }
 .clear { margin-top: 8px; width: 100%; }
+.stars { display: flex; align-items: center; gap: 2px; }
+.star { cursor: pointer; color: var(--text3); opacity: .45; transition: color .15s, opacity .15s; }
+.star:hover { opacity: .8; }
+.star.on { color: var(--ms-star); opacity: 1; }
+.star-clear { margin-left: 8px; font-size: 11px; opacity: .55; cursor: pointer; }
+.star-clear:hover { opacity: 1; color: var(--ms-primary); }
 </style>

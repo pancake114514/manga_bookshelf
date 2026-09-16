@@ -36,12 +36,20 @@ body {
   gap: 16px;
   align-items: start;
 }
+.shelf-grid.density-compact {
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 10px;
+}
+.shelf-grid.density-large {
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  gap: 20px;
+}
 .obj-card {
-  border: 1px solid var(--border, rgba(128,128,128,.25));
+  border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
   cursor: pointer;
-  background: var(--surface, transparent);
+  background: var(--surface);
   display: flex;
   flex-direction: column;
   transition: transform .18s, border-color .18s, box-shadow .18s, background .25s;
@@ -51,7 +59,11 @@ body {
   border-color: var(--ms-primary);
   box-shadow: 0 6px 18px rgba(0, 0, 0, .18);
 }
-.cover-box { position: relative; width: 100%; aspect-ratio: 5 / 7; overflow: hidden; background: var(--chip-bg, rgba(128,128,128,.12)); }
+.obj-card.selected {
+  border-color: var(--ms-primary);
+  box-shadow: 0 0 0 2px var(--ms-primary);
+}
+.cover-box { position: relative; width: 100%; aspect-ratio: 5 / 7; overflow: hidden; background: var(--chip-bg); }
 .cover-box img {
   width: 100%; height: 100%; object-fit: cover; display: block;
   transition: filter .2s;
@@ -73,7 +85,7 @@ body {
   position: absolute; inset: 0; z-index: 3;
   display: flex; flex-direction: column; justify-content: flex-end;
   padding: 12px; gap: 5px;
-  background: var(--ms-overlay, rgba(16,16,20,.72));
+  background: var(--ms-overlay);
   opacity: 0; transition: opacity .2s;
 }
 .obj-card:hover .hover-overlay { opacity: 1; }
@@ -82,6 +94,7 @@ body {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .hover-overlay .ov-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.hover-overlay .ov-rate { line-height: 1; }
 .card-info { padding: 10px 12px 12px; }
 .card-title {
   font-size: 13px; font-weight: 600;

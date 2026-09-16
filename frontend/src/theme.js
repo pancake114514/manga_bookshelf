@@ -18,6 +18,7 @@ export const darkCommon = {
   chipBgColor: 'rgba(255,255,255,.06)',
   overlayColor: 'rgba(16,16,20,.72)',
   r18Color: '#d03050',
+  starColor: '#f0a020',
   textColorBase: '#ececf1',
   textColor1: '#ececf1',
   textColor2: '#a0a0ac',
@@ -40,6 +41,7 @@ export const lightCommon = {
   chipBgColor: 'rgba(0,0,0,.045)',
   overlayColor: 'rgba(255,255,255,.78)',
   r18Color: '#d03050',
+  starColor: '#f0a020',
   textColorBase: '#1f1f25',
   textColor1: '#1f1f25',
   textColor2: '#55555e',
@@ -62,6 +64,7 @@ const CSS_VARS = {
   '--ms-primary': 'primary',
   '--ms-overlay': 'overlayColor',
   '--ms-danger': 'r18Color',
+  '--ms-star': 'starColor',
 }
 
 export function naiveTheme(theme) {
