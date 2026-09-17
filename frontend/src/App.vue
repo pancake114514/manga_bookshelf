@@ -3,8 +3,9 @@
     <n-message-provider>
       <n-dialog-provider>
         <div class="app-shell" :class="`theme-${store.theme}`" :style="cssVars(store.theme)">
-          <!-- 无边框窗口的自定义标题栏（仅桌面模式渲染），阅读器/首启向导下也保留 -->
-          <TitleBar />
+          <!-- 无边框窗口的自定义标题栏（仅桌面模式渲染）：主视图的窗口按钮已并入
+               TopBar 行尾，此处只为无顶栏工具行的视图（阅读器/首启向导）保留独立条 -->
+          <TitleBar v-if="showTitleBar" />
           <template v-if="store.ready">
             <SetupGate v-if="!store.storageRoot" />
             <template v-else>
@@ -51,6 +52,9 @@ import LibraryDialog from './components/LibraryDialog.vue'
 
 const showSidebar = computed(() =>
   store.view.name === 'shelf' || store.view.name === 'directory')
+// 独立标题栏条只在无 TopBar 的视图出现（主视图窗口按钮由 TopBar 行尾提供）
+const showTitleBar = computed(() =>
+  !store.ready || !store.storageRoot || store.view.name === 'reader')
 
 function retry() { boot() }
 

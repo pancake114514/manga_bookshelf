@@ -1,16 +1,16 @@
 <template>
   <div class="topbar">
-    <!-- 虚拟框一：与左侧栏等宽，logo 保持左对齐（与侧栏分隔线位置分割，不画线） -->
-    <div class="tb-logo-box">
+    <!-- 虚拟框一：与左侧栏等宽，logo 保持左对齐（与侧栏分隔线位置分割，不画线）；兼作窗口拖拽区 -->
+    <div class="tb-logo-box pywebview-drag-region">
       <span class="logo">MangaShelf</span>
     </div>
-    <!-- 虚拟框二：内容区，搜索框左缘对齐第一列卡片左缘 -->
+    <!-- 虚拟框二：内容区，搜索框左缘对齐第一列卡片左缘；空隙兼作窗口拖拽区 -->
     <div class="tb-search-box">
       <n-input ref="searchEl" v-model:value="kw" class="search" round
                placeholder="搜索对象名或标签…  (Ctrl+F)" clearable>
         <template #prefix><IconSearch :size="15" /></template>
       </n-input>
-      <div class="spacer" />
+      <div class="spacer pywebview-drag-region" />
       <n-switch :value="store.theme === 'dark'" size="small" @update:value="toggleTheme">
         <template #checked><IconMoon :size="12" /></template>
         <template #unchecked><IconSun :size="12" /></template>
@@ -24,6 +24,8 @@
         导入
       </n-button>
     </div>
+    <!-- 窗口按钮并入顶栏行尾并贴住窗口右缘，取消独立标题栏条 -->
+    <WindowControls class="tb-win-controls" />
   </div>
 </template>
 
@@ -32,6 +34,7 @@ import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { NInput, NButton, NSwitch } from 'naive-ui'
 import { store, toggleTheme } from '../store'
 import { debounce } from '../utils'
+import WindowControls from './WindowControls.vue'
 import {
   IconSearch, IconMoon, IconSun, IconLibrary, IconFolderPlus,
 } from './icons'
@@ -56,13 +59,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 .topbar {
   height: 58px; flex: none;
   display: flex; align-items: stretch;
-  padding-right: 18px;
+  /* 窗口按钮贴住窗口右缘，不预留右侧空白 */
   border-bottom: 1px solid var(--border);
 }
 .tb-logo-box {
   flex: none; width: var(--sidebar-w);
   display: flex; align-items: center;
   padding-left: 18px;
+  user-select: none;
 }
 .tb-search-box {
   flex: 1; min-width: 0;
@@ -71,5 +75,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 }
 .logo { font-family: Georgia, serif; font-size: 17px; font-weight: 700; letter-spacing: .5px; }
 .search { max-width: 380px; }
-.spacer { flex: 1; }
+.spacer { flex: 1; user-select: none; }
+.tb-win-controls { margin-left: 12px; }
 </style>
