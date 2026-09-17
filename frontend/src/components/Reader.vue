@@ -1,20 +1,31 @@
 <template>
   <main class="reader" :class="{ idle: !chromeVisible }" @wheel="onWheel" @mousemove="pokeChrome">
-    <div class="top">
-      <n-button size="small" @click="back"><IconBack :size="14" /> 返回</n-button>
-      <span class="obj-title">{{ reader.obj.name }}</span>
-      <span class="spacer" />
-      <span class="filename">{{ pageLabelFilename }}</span>
-      <n-button-group size="small">
-        <n-button :type="zoom === 'fit' ? 'primary' : 'default'" :secondary="zoom !== 'fit'" @click="setZoom('fit')">适应页面</n-button>
-        <n-button :type="zoom === 'width' ? 'primary' : 'default'" :secondary="zoom !== 'width'" @click="setZoom('width')">适应宽度</n-button>
-        <n-button :type="zoom === 'original' ? 'primary' : 'default'" :secondary="zoom !== 'original'" @click="setZoom('original')">原始</n-button>
-      </n-button-group>
-      <n-button size="small" :type="double ? 'primary' : 'default'" :secondary="!double"
-                :title="double ? '退出双页对开' : '双页对开（快捷键 D）'" @click="toggleDouble">
-        <IconDoublePage :size="14" /> 双页
-      </n-button>
-      <n-button size="small" @click="toggleFullscreen"><IconMaximize :size="13" /> 全屏</n-button>
+    <!-- 顶栏与主界面等高，整条均为窗口拖拽区，交互控件以 mousedown.stop 排除 -->
+    <div class="top pywebview-drag-region">
+      <!-- 左区：返回 + 对象名 -->
+      <div class="left">
+        <n-button size="small" @mousedown.stop @click="back"><IconBack :size="14" /> 返回</n-button>
+        <span class="obj-title">{{ reader.obj.name }}</span>
+      </div>
+      <!-- 中区：缩放/双页/全屏，随左右等宽区天然居中 -->
+      <div class="center">
+        <n-button-group size="small" @mousedown.stop>
+          <n-button :type="zoom === 'fit' ? 'primary' : 'default'" :secondary="zoom !== 'fit'" @click="setZoom('fit')">适应页面</n-button>
+          <n-button :type="zoom === 'width' ? 'primary' : 'default'" :secondary="zoom !== 'width'" @click="setZoom('width')">适应宽度</n-button>
+          <n-button :type="zoom === 'original' ? 'primary' : 'default'" :secondary="zoom !== 'original'" @click="setZoom('original')">原始</n-button>
+        </n-button-group>
+        <n-button size="small" @mousedown.stop :type="double ? 'primary' : 'default'" :secondary="!double"
+                  :title="double ? '退出双页对开' : '双页对开（快捷键 D）'" @click="toggleDouble">
+          <IconDoublePage :size="14" /> 双页
+        </n-button>
+        <n-button size="small" @mousedown.stop :type="fullscreen ? 'primary' : 'default'" @click="toggleFullscreen">
+          <IconMaximize :size="13" /> {{ fullscreen ? '退出全屏' : '全屏' }}
+        </n-button>
+      </div>
+      <!-- 右区：窗口按钮贴最右缘，与主界面顶栏一致 -->
+      <div class="right">
+        <WindowControls />
+      </div>
     </div>
 
     <div class="reader-stage" :class="[`zoom-${zoom}`]" @click="onStageClick">
@@ -45,9 +56,10 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { NButton, NButtonGroup, NSpin } from 'naive-ui'
-import { api } from '../api'
+import { api, bridge } from '../api'
 import { store } from '../store'
 import { IconBack, IconMaximize, IconDoublePage } from './icons'
+import WindowControls from './WindowControls.vue'
 
 const ZOOMS = ['fit', 'width', 'original']
 const CFG_DOUBLE = 'ui_reader_double'
@@ -61,6 +73,7 @@ const barEl = ref(null)
 const double = ref(false)
 const zoom = ref('fit')
 const chromeVisible = ref(true)
+const fullscreen = ref(false)
 let saveTimer = null
 let hideTimer = null
 
@@ -72,10 +85,6 @@ const label = computed(() =>
   double.value && index.value + 1 < total
     ? `${index.value + 1}-${index.value + 2} / ${total}`
     : `${index.value + 1} / ${total}`)
-const pageLabelFilename = computed(() =>
-  double.value
-    ? [current.value?.filename, reader.images[index.value + 1]?.filename].filter(Boolean).join(' · ')
-    : current.value?.filename)
 
 // 双页对开：右页在前（日漫右开本），展开为 [index+1 左, index 右]
 const spreadRight = computed(() => current.value?.image_url || '')
@@ -173,18 +182,20 @@ onUnmounted(() => {
   window.removeEventListener('keydown', onKey)
   clearTimeout(saveTimer)
   clearTimeout(hideTimer)
+  bridge.winExitFullscreen()                                 // 兜底还原全屏
   api.lastRead(reader.obj.id, index.value).catch(() => {})   // 退出前兜底落库
 })
 
 function back() {
   clearTimeout(saveTimer)
+  bridge.winExitFullscreen()
   api.lastRead(reader.obj.id, index.value).catch(() => {})
   store.view = { name: 'directory' }
 }
 
-function toggleFullscreen() {
-  if (document.fullscreenElement) document.exitFullscreen()
-  else document.documentElement.requestFullscreen().catch(() => {})
+// 真全屏走 Win32 窗口层（WebView2 不响应 HTML requestFullscreen）
+async function toggleFullscreen() {
+  fullscreen.value = await bridge.winToggleFullscreen()
 }
 
 // ── 进度条拖动 ──
@@ -208,16 +219,22 @@ function onBarMove(e) {
 
 <style scoped>
 .reader { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+/* 顶栏高度与主界面 TopBar 保持一致（58px）；左右等宽令中区控件天然居中 */
 .top {
-  height: 44px; flex: none;
-  display: flex; align-items: center; gap: 10px;
-  padding: 0 12px;
+  height: 58px; flex: none;
+  display: flex; align-items: stretch;
   border-bottom: 1px solid var(--border);
   transition: opacity .3s;
+  user-select: none;
 }
-.obj-title { font-size: 13px; font-weight: 600; }
-.spacer { flex: 1; }
-.filename { font-size: 11px; opacity: .55; }
+.left {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 10px;
+  padding-left: 12px;
+}
+.center { flex: none; display: flex; align-items: center; gap: 10px; }
+.right { flex: 1; display: flex; align-items: stretch; justify-content: flex-end; }
+.obj-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* 工具栏自动隐藏 */
 .reader.idle .top,

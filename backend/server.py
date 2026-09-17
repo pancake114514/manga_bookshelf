@@ -28,6 +28,110 @@ class Bridge:
 
     def __init__(self):
         self._maximized = False   # 无边框窗口无原生状态可查，由按钮路径自行跟踪
+        self._fs_rect = None      # 全屏前的窗口矩形，用于还原
+        self._rs = None           # 边缘拖拽缩放状态（方向/初始矩形/光标起点）
+
+    def toggle_fullscreen(self):
+        """阅读器真全屏：窗口铺满整个显示器（含任务栏），再次调用还原。
+
+        WebView2 宿主不响应 HTML requestFullscreen，全屏需在窗口层实现。
+        """
+        import ctypes
+        import webview
+
+        MONITOR_DEFAULTTONEAREST = 2
+        SWP_NOZORDER = 0x0004
+
+        class RECT(ctypes.Structure):
+            _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                        ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+        class MONITORINFO(ctypes.Structure):
+            _fields_ = [("cbSize", ctypes.c_ulong), ("rcMonitor", RECT),
+                        ("rcWork", RECT), ("dwFlags", ctypes.c_ulong)]
+
+        u = ctypes.windll.user32
+        u.MonitorFromWindow.restype = ctypes.c_void_p
+        u.MonitorFromWindow.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+        u.GetMonitorInfoW.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        hwnd = int(webview.windows[0].native.Handle.ToInt64())
+        if self._fs_rect is None:
+            wr = RECT()
+            u.GetWindowRect(hwnd, ctypes.byref(wr))
+            mi = MONITORINFO()
+            mi.cbSize = ctypes.sizeof(MONITORINFO)
+            u.GetMonitorInfoW(u.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), ctypes.byref(mi))
+            m = mi.rcMonitor
+            u.SetWindowPos(hwnd, 0, m.left, m.top,
+                           m.right - m.left, m.bottom - m.top, SWP_NOZORDER)
+            self._fs_rect = (wr.left, wr.top, wr.right, wr.bottom)
+        else:
+            l, t, r, b = self._fs_rect
+            u.SetWindowPos(hwnd, 0, l, t, r - l, b - t, SWP_NOZORDER)
+            self._fs_rect = None
+        return self._fs_rect is not None
+
+    def exit_fullscreen(self):
+        """退出全屏（非全屏态调用为空操作）。"""
+        if self._fs_rect is not None:
+            self.toggle_fullscreen()
+
+    # ── 边缘拖拽缩放（WebView2 子窗口跨进程覆盖客户区，Win32 命中测试不可达，
+    #    由前端边缘热区经桥接驱动，三段式：begin 记录起点 → move 实时调整 → end 结束）──
+    def begin_window_resize(self, direction, screen_x, screen_y):
+        import ctypes
+        import webview
+
+        u = ctypes.windll.user32
+        hwnd = int(webview.windows[0].native.Handle.ToInt64())
+        if u.IsZoomed(hwnd) or self._fs_rect is not None:
+            return False
+        class RECT(ctypes.Structure):
+            _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                        ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+        wr = RECT()
+        u.GetWindowRect(hwnd, ctypes.byref(wr))
+        self._rs = {'dir': direction, 'rect': (wr.left, wr.top, wr.right, wr.bottom),
+                    'x': screen_x, 'y': screen_y}
+        return True
+
+    def move_window_resize(self, screen_x, screen_y):
+        import ctypes
+        import webview
+
+        if not self._rs:
+            return False
+        u = ctypes.windll.user32
+        hwnd = int(webview.windows[0].native.Handle.ToInt64())
+        rs = self._rs
+        dx, dy = screen_x - rs['x'], screen_y - rs['y']
+        l, t, r, b = rs['rect']
+        d = rs['dir']
+        if 'e' in d:
+            r += dx
+        if 'w' in d:
+            l += dx
+        if 's' in d:
+            b += dy
+        if 'n' in d:
+            t += dy
+        MIN_W, MIN_H = 1000, 680   # 与 create_window 的 min_size 保持一致
+        if r - l < MIN_W:
+            if 'e' in d and 'w' not in d:
+                r = l + MIN_W
+            else:
+                l = r - MIN_W
+        if b - t < MIN_H:
+            if 's' in d and 'n' not in d:
+                b = t + MIN_H
+            else:
+                t = b - MIN_H
+        u.SetWindowPos(hwnd, 0, l, t, r - l, b - t, 0x0004)   # SWP_NOZORDER
+        return True
+
+    def end_window_resize(self):
+        self._rs = None
+        return True
 
     def pick_dir(self, title: str = "选择目录"):
         import webview
@@ -187,6 +291,18 @@ def clamp_maximize_to_work_area(window):
                                       0, get_long(hwnd, GWL_EXSTYLE) & 0xFFFFFFFF)
             frame = -adj.left
 
+            def is_fullscreen():
+                """窗口矩形与所在显示器完全一致即为真全屏（区别于最大化）。"""
+                wr = RECT()
+                user32.GetWindowRect(hwnd, ctypes.byref(wr))
+                mi = MONITORINFO()
+                mi.cbSize = ctypes.sizeof(MONITORINFO)
+                mon = user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
+                if mon and user32.GetMonitorInfoW(mon, ctypes.byref(mi)):
+                    return (wr.left, wr.top, wr.right, wr.bottom) == \
+                           (mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right, mi.rcMonitor.bottom)
+                return False
+
             def proc(h, msg, wp, lp):
                 if msg == WM_NCCALCSIZE and wp:
                     if user32.IsZoomed(h):
@@ -203,7 +319,7 @@ def clamp_maximize_to_work_area(window):
                     # 客户区铺满后默认链对边框带返回 HTNOWHERE/HTCLIENT，
                     # 这里按边框带宽自行返回缩放命中码；顶部/右侧命中带避开
                     # 行尾窗口按钮（3×46px、58px 顶栏行），按钮点击优先于缩放
-                    if not user32.IsZoomed(h):
+                    if not user32.IsZoomed(h) and not is_fullscreen():
                         wr = RECT()
                         user32.GetWindowRect(h, ctypes.byref(wr))
                         x = ctypes.c_short(lp & 0xFFFF).value
@@ -254,6 +370,8 @@ def clamp_maximize_to_work_area(window):
             # 强制重发 WM_NCCALCSIZE，让客户区立即按新规则铺满（否则要等下一次状态变化）
             user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0,
                                 SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED)
+            # 注：WebView2 渲染子窗口跨进程、无法子类化，边缘缩放由前端边缘热区
+            # （EdgeResize）经 Bridge 驱动，顶层的 WM_NCHITTEST 仅作兜底。
         except Exception as e:
             # 修正属于增强能力，失败不影响主流程
             print(f"最大化区域修正启用失败：{e}", flush=True)

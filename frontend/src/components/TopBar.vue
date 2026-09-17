@@ -1,25 +1,26 @@
 <template>
-  <div class="topbar">
-    <!-- 虚拟框一：与左侧栏等宽，logo 保持左对齐（与侧栏分隔线位置分割，不画线）；兼作窗口拖拽区 -->
-    <div class="tb-logo-box pywebview-drag-region">
+  <!-- 整条顶栏均为窗口拖拽区，交互控件以 mousedown.stop 排除 -->
+  <div class="topbar pywebview-drag-region">
+    <!-- 虚拟框一：与左侧栏等宽，logo 保持左对齐（与侧栏分隔线位置分割，不画线） -->
+    <div class="tb-logo-box">
       <span class="logo">MangaShelf</span>
     </div>
-    <!-- 虚拟框二：内容区，搜索框左缘对齐第一列卡片左缘；空隙兼作窗口拖拽区 -->
+    <!-- 虚拟框二：内容区，搜索框左缘对齐第一列卡片左缘 -->
     <div class="tb-search-box">
       <n-input ref="searchEl" v-model:value="kw" class="search" round
-               placeholder="搜索对象名或标签…  (Ctrl+F)" clearable>
+               placeholder="搜索对象名或标签…  (Ctrl+F)" clearable @mousedown.stop>
         <template #prefix><IconSearch :size="15" /></template>
       </n-input>
-      <div class="spacer pywebview-drag-region" />
-      <n-switch :value="store.theme === 'dark'" size="small" @update:value="toggleTheme">
+      <div class="spacer" />
+      <n-switch :value="store.theme === 'dark'" size="small" @mousedown.stop @update:value="toggleTheme">
         <template #checked><IconMoon :size="12" /></template>
         <template #unchecked><IconSun :size="12" /></template>
       </n-switch>
-      <n-button @click="store.ui.library = true">
+      <n-button @mousedown.stop @click="store.ui.library = true">
         <template #icon><IconLibrary :size="15" /></template>
         库管理
       </n-button>
-      <n-button type="primary" @click="store.ui.import = true">
+      <n-button type="primary" @mousedown.stop @click="store.ui.import = true">
         <template #icon><IconFolderPlus :size="15" /></template>
         导入
       </n-button>
