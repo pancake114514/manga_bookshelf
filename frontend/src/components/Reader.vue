@@ -45,8 +45,9 @@
     <div class="bottom">
       <div ref="barEl" class="progress" @pointerdown="onBarDown" @pointermove="onBarMove" @pointerup="dragging = false">
         <div class="track" />
-        <div class="filled" :style="{ width: `${fillPct}%` }" />
-        <div class="knob" :style="{ right: `${fillPct}%` }" />
+        <!-- 填充与滑块统一按「轨道有效长度」计算（两侧各内缩 20px），滑块圆心与填充边缘重合 -->
+        <div class="filled" :style="{ width: `calc((100% - 40px) * ${fillPct / 100})` }" />
+        <div class="knob" :style="{ right: `calc(20px + (100% - 40px) * ${fillPct / 100})` }" />
         <div class="page-label">{{ label }}</div>
       </div>
     </div>

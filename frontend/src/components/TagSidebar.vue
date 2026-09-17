@@ -8,7 +8,7 @@
     <div class="group">
       <div class="group-title">评分</div>
       <div class="stars">
-        <span v-for="n in 5" :key="n" class="star" :class="{ on: n >= minRating }"
+        <span v-for="n in 5" :key="n" class="star" :class="{ on: n <= minRating }"
               :title="`${n} 星及以上`" @click="setRatingFilter(n)">
           <IconStarFill :size="17" />
         </span>
