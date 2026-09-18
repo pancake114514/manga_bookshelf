@@ -134,3 +134,70 @@ pub fn validate_windows_path_name(name: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+// ── 单元测试（对标原 Python 版 test_file_utils 语义）────────────────────────
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn tmp(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("ms_test_fo_{tag}_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn mk_img(dir: &std::path::Path, name: &str) -> String {
+        let img = image::RgbImage::from_pixel(40, 60, image::Rgb([200, 100, 50]));
+        let p = dir.join(name);
+        img.save(&p).unwrap();
+        p.to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn collect_images_filters_supported_and_hidden() {
+        let d = tmp("collect");
+        mk_img(&d, "a.png");
+        mk_img(&d, "b.jpg");
+        fs::write(d.join("c.txt"), "x").unwrap();
+        fs::write(d.join(".hidden.png"), "x").unwrap();
+        let names: Vec<String> = collect_images(d.to_str().unwrap())
+            .into_iter()
+            .map(|p| PathBuf::from(p).file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(names.len(), 2, "只收集受支持格式且跳过隐藏文件: {names:?}");
+        assert!(names.contains(&"a.png".to_string()));
+        assert!(names.contains(&"b.jpg".to_string()));
+    }
+
+    #[test]
+    fn next_seq_number_from_empty_and_existing() {
+        let d = tmp("seq");
+        // 空/不存在的目录 → 起始 1
+        assert_eq!(next_seq_number(d.join("none").to_str().unwrap()), 1);
+        mk_img(&d, "0000001.png");
+        assert_eq!(next_seq_number(d.to_str().unwrap()), 2);
+    }
+
+    #[test]
+    fn copy_image_with_seq_name_creates_sequenced_file() {
+        let src_dir = tmp("cpsrc");
+        let dst_dir = tmp("cpdst");
+        let src = mk_img(&src_dir, "whatever.png");
+        let (fname, dest, used) = copy_image_with_seq_name(&src, dst_dir.to_str().unwrap(), 1).unwrap();
+        assert_eq!(fname, "0000001.png");
+        assert_eq!(used, 1);
+        assert!(PathBuf::from(&dest).is_file());
+        assert_eq!(next_seq_number(dst_dir.to_str().unwrap()), 2);
+    }
+
+    #[test]
+    fn validate_path_name_rules() {
+        assert!(validate_windows_path_name("正常名字").is_ok());
+        assert!(validate_windows_path_name("带 空格-1").is_ok());
+        for bad in ["a/b", "a\\b", "..", "a:b", "a?b", "a*b", "a<b", "a|b", ""] {
+            assert!(validate_windows_path_name(bad).is_err(), "应拒绝: {bad:?}");
+        }
+    }
+}

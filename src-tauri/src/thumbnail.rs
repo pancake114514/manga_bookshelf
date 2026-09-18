@@ -144,3 +144,61 @@ pub fn clear_cached_thumbs(cache_dir: &str, source_paths: &[String]) -> usize {
     removed
 }
 
+
+// ── 单元测试 ────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn tmp(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("ms_test_th_{tag}_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn generate_and_cache_thumbnail() {
+        let d = tmp("gen");
+        let img = image::RgbImage::from_pixel(800, 1200, image::Rgb([10, 200, 90]));
+        let src = d.join("big.png");
+        img.save(&src).unwrap();
+        let cache = d.join("cache");
+        fs::create_dir_all(&cache).unwrap();
+        let t1 = generate_thumbnail(src.to_str().unwrap(), cache.to_str().unwrap(), crate::config::THUMBNAIL_SIZE);
+        let t1 = t1.expect("应生成缩略图");
+        assert!(PathBuf::from(&t1).is_file());
+        // 尺寸符合要求（等比缩放至上限内）
+        let meta = image::image_dimensions(&t1).unwrap();
+        assert!(meta.0 <= 220 && meta.1 <= 300, "尺寸超限: {meta:?}");
+        // 再次生成 → 缓存命中（同一路径）
+        let t2 = generate_thumbnail(src.to_str().unwrap(), cache.to_str().unwrap(), crate::config::THUMBNAIL_SIZE).unwrap();
+        assert_eq!(t1, t2, "未变更的源应命中缓存");
+    }
+
+    #[test]
+    fn generate_thumbnail_missing_file_is_none() {
+        let d = tmp("miss");
+        assert!(generate_thumbnail(d.join("nope.png").to_str().unwrap(), d.to_str().unwrap(), crate::config::THUMBNAIL_SIZE).is_none());
+    }
+
+    #[test]
+    fn clear_cached_thumbs_removes_only_given_sources() {
+        let d = tmp("clear");
+        let img = image::RgbImage::from_pixel(50, 70, image::Rgb([5, 5, 5]));
+        let s1 = d.join("one.png");
+        let s2 = d.join("two.png");
+        img.save(&s1).unwrap();
+        img.save(&s2).unwrap();
+        let cache = d.join("c");
+        fs::create_dir_all(&cache).unwrap();
+        let t1 = generate_thumbnail(s1.to_str().unwrap(), cache.to_str().unwrap(), crate::config::THUMBNAIL_SIZE).unwrap();
+        let t2 = generate_thumbnail(s2.to_str().unwrap(), cache.to_str().unwrap(), crate::config::THUMBNAIL_SIZE).unwrap();
+        assert!(PathBuf::from(&t1).is_file() && PathBuf::from(&t2).is_file());
+        let removed = clear_cached_thumbs(cache.to_str().unwrap(), &[s1.to_string_lossy().to_string()]);
+        assert!(removed >= 1, "应至少移除 1 个缓存");
+        assert!(!PathBuf::from(&t1).exists(), "指定源的缓存应被清除");
+        assert!(PathBuf::from(&t2).exists(), "未指定源的缓存应保留");
+    }
+}

@@ -269,3 +269,25 @@ pub fn migrate_library(
 
     Ok((plans.len(), warnings))
 }
+
+// ── 单元测试（对标原 Python 版 test_library_manager 语义）───────────────────
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_writable_accepts_writable_dir() {
+        let d = std::env::temp_dir().join(format!("ms_test_lm_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        assert!(check_writable(d.to_str().unwrap()).is_ok());
+        // 校验后不应留下测试文件
+        assert!(!d.join(".manga_shelf_write_test").exists());
+    }
+
+    #[test]
+    fn check_writable_rejects_missing_dir() {
+        let missing = std::env::temp_dir()
+            .join(format!("ms_test_lm_none_{}", uuid::Uuid::new_v4()));
+        assert!(check_writable(missing.to_str().unwrap()).is_err());
+    }
+}

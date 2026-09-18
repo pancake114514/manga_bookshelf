@@ -135,8 +135,8 @@ impl LibraryService {
     }
 
     /// 检查存储路径是否已被（其他）对象占用
-    fn storage_path_taken(&self, path: &str, exclude_id: Option<&str>) -> bool {
-        let db = self.db.lock().unwrap();
+    /// 注意：调用方必须已持有 db 锁（对 std::sync::Mutex 重入加锁会死锁）
+    fn storage_path_taken(db: &Database, path: &str, exclude_id: Option<&str>) -> bool {
         let target = normalize_path(path);
         let conn = &db.conn;
         let mut stmt = match conn.prepare("SELECT id, storage_path FROM objects") {
@@ -206,7 +206,7 @@ impl LibraryService {
                 if let Some(sp) = &obj.storage_path {
                     if Path::new(sp).is_dir() {
                         // 防御：历史数据可能存在多对象共享同一存储目录
-                        if !self.storage_path_taken(sp, None) {
+                        if !Self::storage_path_taken(&db, sp, None) {
             let _ = fs::remove_dir_all(sp);
                         } else {
                             log::warn!("对象 {} 的存储目录与其他对象共享，跳过物理删除: {}", obj_id, sp);
@@ -245,7 +245,7 @@ impl LibraryService {
             .map(|o| o.name.as_str())
             .unwrap_or(obj_name);
         let rebuilt = Path::new(storage_root).join(name).to_string_lossy().to_string();
-        if self.storage_path_taken(&rebuilt, Some(obj_id)) {
+        if Self::storage_path_taken(&db, &rebuilt, Some(obj_id)) {
             return Err(format!("存储目录已被其他对象占用，无法重建：{rebuilt}"));
         }
         fs::create_dir_all(&rebuilt).map_err(|e| format!("创建目录失败: {e}"))?;
@@ -279,7 +279,7 @@ impl LibraryService {
 
         if is_new {
             storage_obj_dir = Path::new(storage_root).join(name).to_string_lossy().to_string();
-            if self.storage_path_taken(&storage_obj_dir, None) {
+            if Self::storage_path_taken(&db, &storage_obj_dir, None) {
                 return Err(format!("存储目录已被其他对象占用：{name}"));
             }
             // M4 防御：库根下已存在同名非空目录
@@ -305,6 +305,9 @@ impl LibraryService {
             }
             created_object = true;
             db.set_tags(obj_id, tags)?;
+            // 释放首个 guard：下方公共路径会重新加锁（std::Mutex 不可重入，
+            // 遮蔽不释放旧 guard，is_new 分支漏 drop 会在重加锁处死锁）
+            drop(db);
         } else {
             // 追加导入：使用 DB 记录的目录
             drop(db);
@@ -453,4 +456,266 @@ fn normalize_path(path: &str) -> String {
         s = s.to_lowercase();
     }
     s
+}
+
+// ── 单元测试（对标原 Python 版 test_library_service 语义）────────────────────
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{TagValue, Tags};
+    use std::collections::HashMap;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    fn tmp(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("ms_test_{}_{}", tag, uuid::Uuid::new_v4()));
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn mk_img(dir: &Path, name: &str) -> String {
+        let img = image::RgbImage::from_pixel(60, 90, image::Rgb([80, 120, 200]));
+        let p = dir.join(name);
+        img.save(&p).unwrap();
+        p.to_string_lossy().to_string()
+    }
+
+    fn tags(pairs: Vec<(&str, TagValue)>) -> Tags {
+        Tags(pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
+    }
+
+    /// 存储序号文件名为 7 位（0000001.png 起）
+    fn seq_name(n: i64) -> String {
+        format!("{n:07}.png")
+    }
+
+    fn list(vals: &[&str]) -> TagValue {
+        TagValue::List(vals.iter().map(|s| s.to_string()).collect())
+    }
+
+    fn new_svc(tag: &str) -> (LibraryService, PathBuf) {
+        let d = tmp(tag);
+        let svc = LibraryService::new(d.join("lib.db").to_str().unwrap()).unwrap();
+        (svc, d)
+    }
+
+    /// 造一个含 2 张图的对象，返回 (svc, 临时根, obj_id)
+    fn seeded(tag: &str, name: &str, tg: Tags) -> (LibraryService, PathBuf, String) {
+        let (svc, d) = new_svc(tag);
+        let src = d.join("src");
+        fs::create_dir_all(&src).unwrap();
+        mk_img(&src, "a.png");
+        mk_img(&src, "b.png");
+        let root = d.join("storage");
+        fs::create_dir_all(&root).unwrap();
+        let oid = uuid::Uuid::new_v4().to_string();
+        let (ok, fail) = svc
+            .import_directory(&oid, name, &tg, src.to_str().unwrap(), root.to_str().unwrap(), true, None, None)
+            .unwrap();
+        assert_eq!((ok, fail), (2, 0));
+        // 库迁移从配置读取 storage_root
+        svc.set_config("storage_root", root.to_str().unwrap()).unwrap();
+        (svc, d, oid)
+    }
+
+    #[test]
+    fn config_roundtrip() {
+        let (svc, _d) = new_svc("cfg");
+        assert_eq!(svc.get_config("k1").unwrap(), None);
+        svc.set_config("k1", "v1").unwrap();
+        assert_eq!(svc.get_config("k1").unwrap().as_deref(), Some("v1"));
+        svc.set_config("k1", "v2").unwrap();
+        assert_eq!(svc.get_config("k1").unwrap().as_deref(), Some("v2"));
+    }
+
+    #[test]
+    fn import_new_object_copies_files_and_records() {
+        let (svc, d, oid) = seeded("imp", "Alpha", tags(vec![("work", list(&["Alpha"]))]));
+        let obj = svc.get_object(&oid).unwrap().unwrap();
+        assert_eq!(obj.name, "Alpha");
+        assert_eq!(obj.image_count, 2);
+        let dir = d.join("storage").join("Alpha");
+        assert!(dir.join(seq_name(1)).is_file());
+        assert!(dir.join(seq_name(2)).is_file());
+        assert!(obj.first_image.as_deref().is_some());
+    }
+
+    #[test]
+    fn r18_hidden_by_default() {
+        let (svc, d, _) = seeded("r18a", "普通本", tags(vec![]));
+        let _ = d;
+        // 同一库里再造一个 r18 对象
+        let src = tmp("r18src");
+        mk_img(&src, "x.png");
+        let oid2 = uuid::Uuid::new_v4().to_string();
+        svc.import_directory(&oid2, "R18本", &tags(vec![("r18", TagValue::Bool(true))]),
+            src.to_str().unwrap(), svc_r18_root(&svc, "普通本").to_str().unwrap(),
+            true, None, None).unwrap();
+        assert_eq!(svc.get_all_objects(false).unwrap().len(), 1, "默认应只见普通对象");
+        assert_eq!(svc.get_all_objects(true).unwrap().len(), 2, "显式包含应见全部");
+    }
+
+    // 取已导入对象的存储根（storage_path 的父目录）
+    fn svc_r18_root(svc: &LibraryService, name: &str) -> PathBuf {
+        let obj = svc.get_all_objects(true).unwrap()
+            .into_iter().find(|o| o.name == name).unwrap();
+        PathBuf::from(obj.storage_path.clone().unwrap())
+            .parent().unwrap().to_path_buf()
+    }
+
+    #[test]
+    fn search_by_keyword_matches_name() {
+        let (svc, d, _) = seeded("search", "深夜食堂画集", tags(vec![("work", list(&["深夜食堂"]))]));
+        let _ = d;
+        assert_eq!(svc.search_objects("深夜", true).unwrap().len(), 1);
+        assert_eq!(svc.search_objects("不存在的关键字", true).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn filter_by_tag_category() {
+        let (svc, _d, _) = seeded("filt", "星海航路", tags(vec![("author", list(&["水濑叶月"]))]));
+        let mut f = HashMap::new();
+        f.insert("author".to_string(), vec!["水濑叶月".to_string()]);
+        assert_eq!(svc.filter_by_tags(&f, true).unwrap().len(), 1);
+        let mut f2 = HashMap::new();
+        f2.insert("author".to_string(), vec!["别人".to_string()]);
+        assert_eq!(svc.filter_by_tags(&f2, true).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn tag_values_aggregate() {
+        let (svc, _d, _) = seeded("tv", "作品一", tags(vec![("work", list(&["星海航路"]))]));
+        let vals = svc.get_tag_values("work").unwrap();
+        assert!(vals.contains(&"星海航路".to_string()));
+    }
+
+    #[test]
+    fn update_name_tags_lastread() {
+        let (svc, _d, oid) = seeded("upd", "旧名", tags(vec![("work", list(&["旧作"]))]));
+        svc.update_object_name(&oid, "新名").unwrap();
+        svc.set_object_tags(&oid, &tags(vec![("author", list(&["新作者"]))])).unwrap();
+        svc.update_last_read(&oid, 1).unwrap();
+        let obj = svc.get_object(&oid).unwrap().unwrap();
+        assert_eq!(obj.name, "新名");
+        assert!(obj.tags.0.contains_key("author"));
+        assert!(!obj.tags.0.contains_key("work"), "set_tags 应整体替换");
+        assert_eq!(obj.last_read_idx, 1);
+    }
+
+    #[test]
+    fn resolve_cover_prefers_explicit_and_falls_back() {
+        let (svc, _d, oid) = seeded("cov", "封面对象", tags(vec![]));
+        // 未设置封面：回退到首图
+        let obj = svc.get_object(&oid).unwrap().unwrap();
+        let fallback = svc.resolve_cover(&obj).unwrap();
+        assert!(fallback.ends_with(&seq_name(1)), "应回退首图: {fallback}");
+        // 显式指定第二张为封面
+        let explicit = PathBuf::from(obj.storage_path.clone().unwrap()).join(seq_name(2));
+        svc.update_object_cover(&oid, explicit.to_str().unwrap()).unwrap();
+        let obj2 = svc.get_object(&oid).unwrap().unwrap();
+        assert_eq!(svc.resolve_cover(&obj2).as_deref(), Some(explicit.to_string_lossy().to_string()).as_deref());
+    }
+
+    #[test]
+    fn import_append_extends_existing_object() {
+        let (svc, d, oid) = seeded("app", "合集", tags(vec![]));
+        let more = d.join("more");
+        fs::create_dir_all(&more).unwrap();
+        mk_img(&more, "c.png");
+        mk_img(&more, "d.png");
+        let root = d.join("storage");
+        let (ok, fail) = svc.import_directory(&oid, "合集", &tags(vec![]),
+            more.to_str().unwrap(), root.to_str().unwrap(), false, None, None).unwrap();
+        assert_eq!((ok, fail), (2, 0));
+        assert_eq!(svc.get_object(&oid).unwrap().unwrap().image_count, 4);
+    }
+
+    #[test]
+    fn import_rejects_nonempty_unowned_dir() {
+        let (svc, d) = new_svc("rej");
+        let root = d.join("storage");
+        // 目标位置预置一个非空目录（不属于任何对象）
+        fs::create_dir_all(root.join("占用名")).unwrap();
+        fs::write(root.join("占用名").join("keep.txt"), "x").unwrap();
+        let src = d.join("src");
+        fs::create_dir_all(&src).unwrap();
+        mk_img(&src, "a.png");
+        let oid = uuid::Uuid::new_v4().to_string();
+        let res = svc.import_directory(&oid, "占用名", &tags(vec![]),
+            src.to_str().unwrap(), root.to_str().unwrap(), true, None, None);
+        assert!(res.is_err(), "非空且不属于任何对象的目录应拒绝导入");
+        // 预置文件不受影响
+        assert!(root.join("占用名").join("keep.txt").is_file());
+    }
+
+    #[test]
+    fn delete_object_keep_files_vs_with_files() {
+        // 仅删记录：文件保留
+        let (svc, _d, oid) = seeded("del1", "保留文件", tags(vec![]));
+        let dir1 = PathBuf::from(svc.get_object(&oid).unwrap().unwrap().storage_path.clone().unwrap());
+        svc.delete_object(&oid, false, None).unwrap();
+        assert!(svc.get_object(&oid).unwrap().is_none());
+        assert!(dir1.join(seq_name(1)).is_file());
+        // 连文件删除：存储目录移除
+        let (svc2, _d2, oid2) = seeded("del2", "连文件删", tags(vec![]));
+        let sp = PathBuf::from(svc2.get_object(&oid2).unwrap().unwrap().storage_path.clone().unwrap());
+        let root2 = sp.parent().unwrap();
+        svc2.delete_object(&oid2, true, Some(root2.to_str().unwrap())).unwrap();
+        assert!(svc2.get_object(&oid2).unwrap().is_none());
+        assert!(!sp.exists(), "存储目录应被删除");
+    }
+
+    #[test]
+    fn import_single_files_appends() {
+        let (svc, d, oid) = seeded("single", "散图目标", tags(vec![]));
+        let loose = d.join("loose");
+        fs::create_dir_all(&loose).unwrap();
+        mk_img(&loose, "p1.png");
+        mk_img(&loose, "p2.png");
+        let root = d.join("storage").to_string_lossy().to_string();
+        let (ok, fail) = svc.import_single_files(&oid, &[
+            loose.join("p1.png").to_string_lossy().to_string(),
+            loose.join("p2.png").to_string_lossy().to_string(),
+            loose.join("nope.png").to_string_lossy().to_string(),
+        ], &root).unwrap();
+        assert_eq!((ok, fail), (2, 1), "缺失文件计入失败");
+        assert_eq!(svc.get_object(&oid).unwrap().unwrap().image_count, 4);
+    }
+
+    #[test]
+    fn migrate_library_moves_dir_and_updates_paths() {
+        let (svc, d, oid) = seeded("mig", "迁移对象", tags(vec![]));
+        let old_dir = PathBuf::from(svc.get_object(&oid).unwrap().unwrap().storage_path.clone().unwrap());
+        let new_root = d.join("new_root");
+        fs::create_dir_all(&new_root).unwrap();
+        let (moved, warnings) = svc.migrate_library(new_root.to_str().unwrap(), None).unwrap();
+        assert_eq!(moved, 1);
+        assert!(warnings.is_empty(), "不应有库外警告: {warnings:?}");
+        assert!(!old_dir.exists(), "旧目录应被移走");
+        let obj = svc.get_object(&oid).unwrap().unwrap();
+        let new_dir = PathBuf::from(obj.storage_path.clone().unwrap());
+        // 迁移写入的是 canonicalize 路径（Windows 带 \?\ 前缀），对比前同样规范化
+        let new_root_c = fs::canonicalize(&new_root).unwrap();
+        assert!(new_dir.starts_with(&new_root_c), "路径应指向新根: {new_dir:?}");
+        assert!(new_dir.join(seq_name(1)).is_file());
+        let imgs = svc.get_images(&oid).unwrap();
+        assert!(PathBuf::from(&imgs[0].filepath).is_file(), "图片路径应指向新位置");
+    }
+
+    #[test]
+    fn migrate_same_name_dir_auto_renames() {
+        let (svc, d, oid) = seeded("mig2", "同名目录", tags(vec![]));
+        let new_root = d.join("new_root2");
+        // 新根下预置同名非空目录 → 迁移应自动重命名而非失败
+        fs::create_dir_all(new_root.join("同名目录")).unwrap();
+        fs::write(new_root.join("同名目录").join("keep.txt"), "x").unwrap();
+        let res = svc.migrate_library(new_root.to_str().unwrap(), None);
+        assert!(res.is_ok(), "同名目录应自动重命名: {res:?}");
+        let obj = svc.get_object(&oid).unwrap().unwrap();
+        let new_dir = PathBuf::from(obj.storage_path.clone().unwrap());
+        let new_root_c = fs::canonicalize(&new_root).unwrap();
+        assert!(new_dir.starts_with(&new_root_c));
+        assert!(new_dir.join(seq_name(1)).is_file());
+        assert!(new_root.join("同名目录").join("keep.txt").is_file(), "预置文件不应被破坏");
+    }
 }
