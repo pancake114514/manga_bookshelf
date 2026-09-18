@@ -104,10 +104,6 @@ pub fn generate_thumbnail(
     Some(thumb_path.to_string_lossy().to_string())
 }
 
-pub fn generate_grid_thumbnail(source_path: &str, cache_dir: &str) -> Option<String> {
-    generate_thumbnail(source_path, cache_dir, GRID_THUMB_SIZE)
-}
-
 /// 清理指定源文件的所有缩略图缓存（含全部尺寸常量、含该源文件的所有 mtime 版本）
 pub fn clear_cached_thumbs(cache_dir: &str, source_paths: &[String]) -> usize {
     if source_paths.is_empty() {
@@ -140,25 +136,11 @@ pub fn clear_cached_thumbs(cache_dir: &str, source_paths: &[String]) -> usize {
         // 提取 hash 部分（去掉 __ 后缀和 .jpg 后缀）
         let stem = fname.split("__").next().unwrap_or(&fname);
         let stem = stem.rsplit_once('.').map(|(s, _)| s).unwrap_or(stem);
-        if prefixes.contains(stem) {
-            if fs::remove_file(entry.path()).is_ok() {
+        if prefixes.contains(stem)
+            && fs::remove_file(entry.path()).is_ok() {
                 removed += 1;
             }
-        }
     }
     removed
 }
 
-/// 获取目录中的第一张图片
-pub fn get_first_image_in_dir(storage_path: &str) -> Option<String> {
-    let entries = fs::read_dir(storage_path).ok()?;
-    let mut files: Vec<String> = entries
-        .filter_map(|e| e.ok())
-        .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
-        .filter(|n| !n.starts_with('.') && is_supported_image(n))
-        .collect();
-    files.sort();
-    files
-        .first()
-        .map(|f| Path::new(storage_path).join(f).to_string_lossy().to_string())
-}

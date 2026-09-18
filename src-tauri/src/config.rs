@@ -1,7 +1,5 @@
 //! 配置常量 — 与 Python 版 config.py 对等
 
-pub const APP_NAME: &str = "MangaShelf";
-
 pub const SUPPORTED_FORMATS: &[&str] = &[
     ".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif", ".tiff", ".tif",
 ];
@@ -11,17 +9,6 @@ pub const GRID_THUMB_SIZE: (u32, u32) = (160, 160);
 pub const COVER_THUMB_SIZE: (u32, u32) = (180, 240);
 
 pub const THUMB_CACHE_DIR: &str = ".thumbcache";
-
-pub fn tag_categories() -> Vec<(&'static str, &'static str)> {
-    vec![
-        ("work", "作品"),
-        ("author", "作者"),
-        ("character", "角色"),
-        ("cm", "CM"),
-        ("censored", "修正"),
-        ("r18", "R-18"),
-    ]
-}
 
 pub fn tag_category_order() -> Vec<&'static str> {
     vec!["work", "author", "character", "cm", "censored", "r18"]

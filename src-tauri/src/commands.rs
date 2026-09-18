@@ -8,8 +8,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use tauri::{Manager, State};
-use tauri_plugin_dialog::DialogExt;
+use tauri::State;
 
 use crate::config::{tag_category_order, THUMBNAIL_SIZE, GRID_THUMB_SIZE, COVER_THUMB_SIZE};
 use crate::db::{AssembledObject, ImageRow, TagValue, Tags, new_uuid};
@@ -76,16 +75,6 @@ pub struct ConfigBody {
 #[derive(Deserialize)]
 pub struct NameBody {
     pub name: String,
-}
-
-#[derive(Deserialize)]
-pub struct QueryParams {
-    #[serde(default)]
-    pub q: String,
-    #[serde(default)]
-    pub include_r18: bool,
-    #[serde(default)]
-    pub filters: String,
 }
 
 // ── 响应体 ────────────────────────────────────────────────────────────────────

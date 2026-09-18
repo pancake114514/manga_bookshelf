@@ -8,10 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use crate::config::THUMB_CACHE_DIR;
-use crate::db::{
-    self, AssembledObject, Database, ImageRow, TagValue, Tags, new_uuid,
-};
+use crate::db::{AssembledObject, Database, ImageRow, Tags, new_uuid};
 use crate::file_ops::{
     collect_images, copy_image_with_seq_name, next_seq_number,
 };
@@ -20,10 +17,6 @@ use crate::thumbnail::{clear_cached_thumbs, get_thumb_cache_dir};
 pub struct LibraryService {
     pub db: Mutex<Database>,
 }
-
-/// 导入被取消
-#[derive(Debug)]
-pub struct ImportCancelled;
 
 impl LibraryService {
     pub fn new(db_path: &str) -> Result<Self, String> {
@@ -41,14 +34,6 @@ impl LibraryService {
 
     pub fn set_config(&self, key: &str, value: &str) -> Result<(), String> {
         self.db.lock().unwrap().set_config(key, value)
-    }
-
-    pub fn get_config_bool(&self, key: &str, default: bool) -> Result<bool, String> {
-        self.db.lock().unwrap().get_config_bool(key, default)
-    }
-
-    pub fn set_config_bool(&self, key: &str, value: bool) -> Result<(), String> {
-        self.db.lock().unwrap().set_config_bool(key, value)
     }
 
     // ── 查询 ───────────────────────────────────────────────────────────────
@@ -101,10 +86,6 @@ impl LibraryService {
 
     pub fn get_images(&self, obj_id: &str) -> Result<Vec<ImageRow>, String> {
         self.db.lock().unwrap().get_images(obj_id)
-    }
-
-    pub fn get_image_count(&self, obj_id: &str) -> Result<i64, String> {
-        self.db.lock().unwrap().get_image_count(obj_id)
     }
 
     pub fn get_tag_values(&self, category: &str) -> Result<Vec<String>, String> {
@@ -177,11 +158,10 @@ impl LibraryService {
                     Some(s) if !s.trim().is_empty() => s,
                     _ => continue,
                 };
-                if normalize_path(&sp) == target {
-                    if exclude_id.is_none() || exclude_id != Some(oid.as_str()) {
+                if normalize_path(&sp) == target
+                    && (exclude_id.is_none() || exclude_id != Some(oid.as_str())) {
                         return true;
                     }
-                }
             }
         }
         false
@@ -274,6 +254,7 @@ impl LibraryService {
     }
 
     /// 导入整个目录到 storage_root 下。返回 (成功数, 失败数)。
+    #[allow(clippy::too_many_arguments)]  // 参数组与 Python 版导入语义一一对应
     pub fn import_directory(
         &self,
         obj_id: &str,
@@ -426,8 +407,7 @@ impl LibraryService {
                 .file_name()
                 .and_then(|n| n.to_str())
                 .map(|n| n.starts_with('.'))
-                .unwrap_or(true))
-            .map(|p| p.clone())
+                .unwrap_or(true)).cloned()
             .collect();
         sorted.sort_by_key(|p| {
             Path::new(p)
@@ -456,7 +436,7 @@ impl LibraryService {
     pub fn migrate_library(
         &self,
         new_root: &str,
-        progress_cb: Option<&dyn Fn(usize, usize, &str)>,
+        progress_cb: crate::library_manager::ProgressCb,
     ) -> Result<(usize, Vec<String>), String> {
         crate::library_manager::migrate_library(self, new_root, progress_cb)
     }

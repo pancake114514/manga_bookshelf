@@ -29,17 +29,6 @@ pub struct ImagePathUpdate {
     pub new_path: String,
 }
 
-#[derive(Debug)]
-pub struct LibraryMigrationError(pub String);
-
-impl std::fmt::Display for LibraryMigrationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::error::Error for LibraryMigrationError {}
-
 pub fn check_writable(path: &str) -> Result<(), String> {
     if !Path::new(path).is_dir() {
         return Err(format!("目录不存在：\n{path}"));
@@ -52,10 +41,6 @@ pub fn check_writable(path: &str) -> Result<(), String> {
 
 pub fn get_storage_root(db: &Database) -> Option<String> {
     db.get_config("storage_root").ok().flatten()
-}
-
-pub fn set_storage_root(db: &Database, path: &str) -> Result<(), String> {
-    db.set_config("storage_root", path)
 }
 
 fn normalize_path(path: &str) -> String {
@@ -167,13 +152,15 @@ pub fn prepare_library_migration(
     Ok((old_root, new_root, plans))
 }
 
+pub type ProgressCb<'a> = Option<&'a dyn Fn(usize, usize, &str)>;
+
 pub fn migrate_library(
     service: &LibraryService,
     new_root: &str,
-    progress_cb: Option<&dyn Fn(usize, usize, &str)>,
+    progress_cb: ProgressCb,
 ) -> Result<(usize, Vec<String>), String> {
     let db = service.db.lock().unwrap();
-    let (old_root, new_root, plans) = prepare_library_migration(&db, &new_root)?;
+    let (old_root, new_root, plans) = prepare_library_migration(&db, new_root)?;
 
     let total_steps = (plans.len() * 2 + 1).max(1);
     let mut current_step = 0usize;

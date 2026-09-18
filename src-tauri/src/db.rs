@@ -28,14 +28,6 @@ pub struct ObjectRow {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TagRow {
-    pub id: i64,
-    pub object_id: String,
-    pub category: String,
-    pub value: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageRow {
     pub id: String,
     pub object_id: String,
@@ -175,7 +167,7 @@ impl Database {
                 params![key],
                 |row| row.get::<_, String>(0),
             )
-            .map(|v| Some(v))
+            .map(Some)
             .or_else(|e| match e {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
                 _ => Err(e),
@@ -191,27 +183,6 @@ impl Database {
             )
             .map_err(|e| format!("写入配置失败: {e}"))?;
         Ok(())
-    }
-
-    pub fn get_config_bool(&self, key: &str, default: bool) -> Result<bool, String> {
-        match self.get_config(key)? {
-            Some(v) => Ok(matches!(
-                v.trim().to_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )),
-            None => Ok(default),
-        }
-    }
-
-    pub fn get_config_int(&self, key: &str, default: i64) -> Result<i64, String> {
-        match self.get_config(key)? {
-            Some(v) => v.parse().map_err(|_| format!("配置值不是整数: {v}")),
-            None => Ok(default),
-        }
-    }
-
-    pub fn set_config_bool(&self, key: &str, value: bool) -> Result<(), String> {
-        self.set_config(key, if value { "1" } else { "0" })
     }
 
     // ── 对象 CRUD ────────────────────────────────────────────────────────────
@@ -243,7 +214,7 @@ impl Database {
             .query_row(
                 "SELECT * FROM objects WHERE id=?",
                 params![obj_id],
-                |row| ObjectRow::from_row(row),
+                ObjectRow::from_row,
             )
             .map_err(|e| format!("查询对象失败: {e}"))
     }
@@ -307,32 +278,6 @@ impl Database {
     }
 
     // ── 批量查询 ────────────────────────────────────────────────────────────
-
-    pub fn get_all_object_ids(&self, include_r18: bool) -> Result<Vec<String>, String> {
-        let sql = "SELECT id FROM objects ORDER BY created_at DESC";
-        let mut stmt = self
-            .conn
-            .prepare(sql)
-            .map_err(|e| format!("查询对象列表失败: {e}"))?;
-        let ids: Result<Vec<String>, _> = stmt
-            .query_map([], |row| row.get::<_, String>(0))
-            .map_err(|e| format!("查询对象列表失败: {e}"))?
-            .collect();
-        let ids = ids.map_err(|e| format!("查询对象列表失败: {e}"))?;
-
-        if include_r18 {
-            return Ok(ids);
-        }
-        // 过滤 R-18
-        let mut result = Vec::with_capacity(ids.len());
-        for id in ids {
-            let tags = self.get_tags(&id)?;
-            if !tags.is_r18() {
-                result.push(id);
-            }
-        }
-        Ok(result)
-    }
 
     /// 批量组装对象（一次查 tags、图片数量、首图路径，避免 N+1）
     pub fn assemble_objects(
@@ -453,7 +398,7 @@ impl Database {
             .prepare(sql)
             .map_err(|e| format!("查询全部对象失败: {e}"))?;
         let rows: Vec<ObjectRow> = stmt
-            .query_map([], |row| ObjectRow::from_row(row))
+            .query_map([], ObjectRow::from_row)
             .map_err(|e| format!("查询全部对象失败: {e}"))?
             .filter_map(|r| r.ok())
             .collect();
@@ -482,7 +427,7 @@ impl Database {
             .prepare(sql)
             .map_err(|e| format!("搜索对象失败: {e}"))?;
         let rows: Vec<ObjectRow> = stmt
-            .query_map(params![pattern, pattern], |row| ObjectRow::from_row(row))
+            .query_map(params![pattern, pattern], ObjectRow::from_row)
             .map_err(|e| format!("搜索对象失败: {e}"))?
             .filter_map(|r| r.ok())
             .collect();
@@ -655,7 +600,7 @@ impl Database {
             )
             .map_err(|e| format!("查询图片失败: {e}"))?;
         let rows: Vec<ImageRow> = stmt
-            .query_map(params![obj_id], |row| ImageRow::from_row(row))
+            .query_map(params![obj_id], ImageRow::from_row)
             .map_err(|e| format!("查询图片失败: {e}"))?
             .filter_map(|r| r.ok())
             .collect();
@@ -672,10 +617,6 @@ impl Database {
             .map_err(|e| format!("查询图片数量失败: {e}"))
     }
 
-    pub fn get_images_map(&self, obj_id: &str) -> Result<HashMap<String, String>, String> {
-        let images = self.get_images(obj_id)?;
-        Ok(images.into_iter().map(|i| (i.id, i.filepath)).collect())
-    }
 }
 
 // ── Row 映射 trait ────────────────────────────────────────────────────────────
