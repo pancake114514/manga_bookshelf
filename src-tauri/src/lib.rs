@@ -37,9 +37,10 @@ pub fn run() {
         .manage(service)
         .register_uri_scheme_protocol("mangashelf", move |app, request| {
             let svc = app.app_handle().state::<LibraryService>();
-            // request.uri() 形如 "mangashelf://object/{oid}/cover"
-            // Tauri 2 的 URI scheme 会将 host+path 合并
+            // wry 在 Windows 上将 http://mangashelf.localhost/path 还原为
+            // mangashelf://localhost/path 后传给此 handler
             let url = request.uri().to_string();
+            log::info!("mangashelf URI request: {}", url);
 
             match resolve_image_url(&svc, &url) {
                 Ok((path, thumb_size)) => {

@@ -209,7 +209,7 @@ fn serialize_object(o: &AssembledObject) -> ObjectSummary {
         image_count: o.image_count,
         last_read_idx: o.last_read_idx,
         created_at: o.created_at.clone(),
-        cover_url: format!("mangashelf://object/{}/cover", o.id),
+        cover_url: asset_url(&format!("object/{}/cover", o.id)),
     }
 }
 
@@ -218,13 +218,24 @@ fn serialize_image(img: &ImageRow, obj_id: &str) -> ImageSummary {
         id: img.id.clone(),
         filename: img.filename.clone(),
         sort_order: img.sort_order,
-        thumb_url: format!("mangashelf://object/{}/thumb/{}", obj_id, img.id),
-        image_url: format!("mangashelf://object/{}/image/{}", obj_id, img.id),
+        thumb_url: asset_url(&format!("object/{}/thumb/{}", obj_id, img.id)),
+        image_url: asset_url(&format!("object/{}/image/{}", obj_id, img.id)),
     }
 }
 
 fn storage_root_of(svc: &LibraryService) -> Option<String> {
     svc.get_config("storage_root").ok().flatten()
+}
+
+fn asset_url(path: &str) -> String {
+    // Tauri 2 自定义协议 URL 格式因平台而异：
+    // Windows (WebView2):  http://mangashelf.localhost/{path}  (默认 http, 非 https)
+    // macOS/Linux:         mangashelf://localhost/{path}
+    if cfg!(target_os = "windows") {
+        format!("http://mangashelf.localhost/{}", path)
+    } else {
+        format!("mangashelf://localhost/{}", path)
+    }
 }
 
 // ── Tauri Commands ────────────────────────────────────────────────────────────
@@ -327,7 +338,7 @@ pub fn get_object_detail(
         image_count,
         last_read_idx: obj.last_read_idx,
         created_at: obj.created_at.clone(),
-        cover_url: format!("mangashelf://object/{}/cover", obj.id),
+        cover_url: asset_url(&format!("object/{}/cover", obj.id)),
         storage_path: obj.storage_path.clone(),
         images: images
             .iter()
@@ -480,16 +491,17 @@ pub fn set_config_value(
 
 // ── 图片/缩略图 URL scheme 处理 ───────────────────────────────────────────────
 
-/// 解析 mangashelf:// URL 并返回本地文件路径
-/// 格式：
-///   mangashelf://object/{oid}/cover           → 封面图（可带 ?kind=grid|card|cover）
-///   mangashelf://object/{oid}/image/{img_id}  → 原图
-///   mangashelf://object/{oid}/thumb/{img_id}  → 缩略图
+/// 解析自定义协议 URL 并返回本地文件路径
+/// Tauri 2 自定义协议在不同平台上 URI 格式不同：
+///   Windows:  https://mangashelf.localhost/object/{oid}/cover
+///   macOS/Linux: mangashelf://localhost/object/{oid}/cover
+/// 统一提取 /object/{oid}/... 路径部分进行解析。
 pub fn resolve_image_url(svc: &LibraryService, url: &str) -> Result<(String, Option<(u32, u32)>), String> {
-    // 去掉 scheme
+    // 提取 path 部分：找到 "/object/" 的位置
     let path = url
-        .strip_prefix("mangashelf://")
-        .ok_or("无效的 URL scheme")?;
+        .find("/object/")
+        .map(|i| &url[i + 1..])  // 去掉前导 '/'
+        .ok_or("无效的 URL: 缺少 /object/ 路径")?;
 
     // 分割路径
     let parts: Vec<&str> = path.split('/').collect();
