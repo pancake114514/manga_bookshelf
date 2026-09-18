@@ -19,18 +19,30 @@ let dragging = null
 
 const EDGES = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
 
+// pywebview API 调用并发派发不保序，用串行队列保证 begin/move/end 严格按序
+let resizeQueue = Promise.resolve()
+const enqueue = (fn) => {
+  resizeQueue = resizeQueue.then(fn).catch(() => {})
+}
+
 function begin(ev, dir) {
   dragging = dir
-  bridge.winBeginResize(dir, ev.screenX, ev.screenY)
+  const x = ev.screenX
+  const y = ev.screenY
+  enqueue(() => bridge.winBeginResize(dir, x, y))
   window.addEventListener('mousemove', onMove)
   window.addEventListener('mouseup', onUp)
 }
 function onMove(ev) {
-  if (dragging) bridge.winResizeMove(ev.screenX, ev.screenY)
+  if (dragging) {
+    const x = ev.screenX
+    const y = ev.screenY
+    enqueue(() => bridge.winResizeMove(x, y))
+  }
 }
 function onUp() {
   dragging = null
-  bridge.winEndResize()
+  enqueue(() => bridge.winEndResize())
   window.removeEventListener('mousemove', onMove)
   window.removeEventListener('mouseup', onUp)
 }

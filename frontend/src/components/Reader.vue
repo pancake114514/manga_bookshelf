@@ -1,7 +1,7 @@
 <template>
   <main class="reader" :class="{ idle: !chromeVisible }" @wheel="onWheel" @mousemove="pokeChrome">
-    <!-- 顶栏与主界面等高，整条均为窗口拖拽区，交互控件以 mousedown.stop 排除 -->
-    <div class="top pywebview-drag-region">
+    <!-- 顶栏与主界面等高，整条均可拖动（系统原生拖动），交互控件以 mousedown.stop 排除 -->
+    <div class="top" @mousedown="barMouseDown">
       <!-- 左区：返回 + 对象名 -->
       <div class="left">
         <n-button size="small" @mousedown.stop @click="back"><IconBack :size="14" /> 返回</n-button>
@@ -59,6 +59,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { NButton, NButtonGroup, NSpin } from 'naive-ui'
 import { api, bridge } from '../api'
 import { store } from '../store'
+import { barMouseDown } from '../windowState'
 import { IconBack, IconMaximize, IconDoublePage } from './icons'
 import WindowControls from './WindowControls.vue'
 

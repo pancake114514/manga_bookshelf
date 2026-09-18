@@ -15,16 +15,16 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { onMounted } from 'vue'
 import { bridge } from '../api'
+import { maximized, syncMaximized } from '../windowState'
 import { IconMinus, IconWinMax, IconWinRestore, IconX } from './icons'
 
-// 无边框窗口无原生最大化状态可查，由按钮点击路径自行跟踪
-const maximized = ref(false)
-
+// maximized 为共享状态（windowState）：原生拖动还原/贴靠后经轮询同步，不会陈旧
 async function toggleMax() {
   maximized.value = await bridge.winToggleMaximize()
 }
+onMounted(() => syncMaximized())
 </script>
 
 <style scoped>

@@ -27,9 +27,160 @@ class Bridge:
     """暴露给前端 window.pywebview.api 的本地能力（目录/文件选择、窗口控制）。"""
 
     def __init__(self):
-        self._maximized = False   # 无边框窗口无原生状态可查，由按钮路径自行跟踪
         self._fs_rect = None      # 全屏前的窗口矩形，用于还原
         self._rs = None           # 边缘拖拽缩放状态（方向/初始矩形/光标起点）
+        self._mv = None           # 顶栏拖动移动状态（矩形/光标起点/最大化还原标记）
+
+    def _win_rect(self, hwnd):
+        import ctypes
+
+        class RECT(ctypes.Structure):
+            _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                        ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+        wr = RECT()
+        ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(wr))
+        return wr.left, wr.top, wr.right, wr.bottom
+
+    def begin_move_drag(self, screen_x, screen_y):
+        """顶栏拖动移动窗口（三段式之一）。
+
+        WebView2 子窗口跨进程截走按键按下事件，系统原生 SC_MOVE 移动循环
+        因顶层队列无按下状态而无法维持，故由前端顶栏驱动、SetWindowPos 移动。
+        最大化状态下不立即还原：待首次移动时再还原并让窗口跟随光标（原生手感）。
+        还原目标尺寸在 begin 时（稳定的最大化态）读取并冻结，避免还原过程中
+        的中间尺寸污染记录。
+        """
+        import ctypes
+        import webview
+
+        if self._fs_rect is not None:
+            return False
+        u = ctypes.windll.user32
+        hwnd = int(webview.windows[0].native.Handle.ToInt64())
+        wr = self._win_rect(hwnd)
+        zoomed = bool(u.IsZoomed(hwnd))
+        target = None
+        if zoomed:
+            if _last_normal_rect:
+                nl, nt, nr_, nb = _last_normal_rect[-1]
+                target = (nr_ - nl, nb - nt)
+            if not target or target[0] < 300 or target[1] < 200:
+                # 回退：WINDOWPLACEMENT 的普通态矩形
+                class POINT(ctypes.Structure):
+                    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+                class WRECT(ctypes.Structure):
+                    _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                                ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+                class WINDOWPLACEMENT(ctypes.Structure):
+                    _fields_ = [("length", ctypes.c_uint), ("flags", ctypes.c_uint),
+                                ("showCmd", ctypes.c_uint), ("ptMinPosition", POINT),
+                                ("ptMaxPosition", POINT), ("rcNormalPosition", WRECT)]
+                wp = WINDOWPLACEMENT()
+                wp.length = ctypes.sizeof(WINDOWPLACEMENT)
+                u.GetWindowPlacement(hwnd, ctypes.byref(wp))
+                rc = wp.rcNormalPosition
+                target = (rc.right - rc.left, rc.bottom - rc.top)
+        self._mv = {'rect': (wr[0], wr[1], wr[2], wr[3]), 'x': screen_x, 'y': screen_y,
+                    'zoomed': zoomed, 'restored': False, 'target': target}
+        _size_record_suppressed[0] = True   # 拖动/还原过程中的尺寸变化不写入参照矩形
+        return True
+
+    def move_drag_to(self, screen_x, screen_y):
+        import ctypes
+        import webview
+
+        if not self._mv:
+            return False
+        u = ctypes.windll.user32
+        hwnd = int(webview.windows[0].native.Handle.ToInt64())
+        mv = self._mv
+        if mv['zoomed'] and not mv['restored']:
+            # 最大化中首次拖动：先经 WinForms restore() 同步其 WindowState 账本
+            # （手动清样式会让账本停在「最大化」，之后点最大化成为空操作），
+            # 随后单次原子 SetWindowPos 盖掉 restore() 落下的（可能脏的）边界，
+            # FRAMECHANGED 使 NCCALCSIZE 在最终普通态执行、客户区铺满。
+            # 光标按顶栏横向比例落在标题栏上（原生还原手感）
+            nw, nh = mv['target'] or (1264, 781)
+            webview.windows[0].restore()
+            ratio = min(1.0, max(0.0, (screen_x - mv['rect'][0]) / max(1, mv['rect'][2] - mv['rect'][0])))
+            new_l = int(screen_x - ratio * nw)
+            new_t = int(screen_y - 29)   # 顶栏高度一半，光标落在标题栏上
+            u.SetWindowPos(hwnd, 0, new_l, new_t, nw, nh, 0x0004 | 0x0020)   # NOZORDER|FRAMECHANGED
+            mv.update(rect=(new_l, new_t, new_l + nw, new_t + nh),
+                      x=screen_x, y=screen_y, restored=True)
+            return True
+        l, t, r, b = mv['rect']
+        dx, dy = screen_x - mv['x'], screen_y - mv['y']
+        # SWP_NOSIZE 必须显式传：cx=cy=0 且无该标志会被解释为「设尺寸为 0×0」，
+        # 被 MinimumSize 钳制成最小窗口（拖一下就变 1000×680 的根因）
+        u.SetWindowPos(hwnd, 0, int(l + dx), int(t + dy), 0, 0, 0x0001 | 0x0004)   # NOSIZE|NOZORDER
+        return True
+
+    def end_move_drag(self, screen_x, screen_y, moved=True):
+        """拖动结束：清除拖动状态；实际拖动过且光标贴近屏幕边缘时执行贴靠
+        （顶=最大化，左/右=半屏）。未移动的单击也必须走到这里清状态，
+        否则残留的拖动状态会抑制后续的最大化切换。"""
+        import ctypes
+        import webview
+
+        mv = self._mv
+        self._mv = None
+        _size_record_suppressed[0] = False
+        if not mv or not moved:
+            return False
+        u = ctypes.windll.user32
+        hwnd = int(webview.windows[0].native.Handle.ToInt64())
+        class RECT(ctypes.Structure):
+            _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                        ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+        class MONITORINFO(ctypes.Structure):
+            _fields_ = [("cbSize", ctypes.c_ulong), ("rcMonitor", RECT),
+                        ("rcWork", RECT), ("dwFlags", ctypes.c_ulong)]
+        u.MonitorFromWindow.restype = ctypes.c_void_p
+        u.MonitorFromWindow.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+        u.GetMonitorInfoW.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        mi = MONITORINFO()
+        mi.cbSize = ctypes.sizeof(MONITORINFO)
+        u.GetMonitorInfoW(u.MonitorFromWindow(hwnd, 2), ctypes.byref(mi))   # MONITOR_DEFAULTTONEAREST
+        wa = mi.rcWork
+        if screen_y <= wa.top + 4:
+            webview.windows[0].maximize()   # 顶部贴靠最大化（走工作区钳制，不盖任务栏）
+        elif screen_x <= wa.left + 4:
+            u.SetWindowPos(hwnd, 0, wa.left, wa.top,
+                           (wa.right - wa.left) // 2, wa.bottom - wa.top, 0x0004)
+        elif screen_x >= wa.right - 4:
+            half = (wa.right - wa.left) // 2
+            u.SetWindowPos(hwnd, 0, wa.left + half, wa.top,
+                           wa.right - wa.left - half, wa.bottom - wa.top, 0x0004)
+        return True
+
+    def is_maximized(self):
+        import ctypes
+        import webview
+
+        hwnd = int(webview.windows[0].native.Handle.ToInt64())
+        return bool(ctypes.windll.user32.IsZoomed(hwnd))
+
+    def toggle_maximize(self):
+        """最大化/还原切换（以系统 IsZoomed 实时状态为准，拖动还原等路径不会造成状态陈旧）。
+
+        顶栏拖动进行中不响应（拖完快速再抓顶栏会命中前端双击判定，此处与
+        拖动还原竞态会把 WS_MAXIMIZE 设回，造成样式与几何撕裂）。
+        """
+        import ctypes
+        import webview
+
+        if self._mv:
+            return bool(ctypes.windll.user32.IsZoomed(
+                int(webview.windows[0].native.Handle.ToInt64())))
+        u = ctypes.windll.user32
+        hwnd = int(webview.windows[0].native.Handle.ToInt64())
+        w = webview.windows[0]
+        if u.IsZoomed(hwnd):
+            w.restore()
+            return False
+        w.maximize()
+        return True
 
     def toggle_fullscreen(self):
         """阅读器真全屏：窗口铺满整个显示器（含任务栏），再次调用还原。
@@ -150,18 +301,6 @@ class Bridge:
         import webview
         webview.windows[0].minimize()
 
-    def toggle_maximize(self):
-        """最大化/还原切换，返回切换后的状态供前端更新按钮图标。"""
-        import webview
-        w = webview.windows[0]
-        if self._maximized:
-            w.restore()
-            self._maximized = False
-        else:
-            w.maximize()
-            self._maximized = True
-        return self._maximized
-
     def close_window(self):
         import webview
         webview.windows[0].destroy()
@@ -206,7 +345,9 @@ def enable_native_resize(window):
     window.events.shown += apply
 
 
-_wndproc_refs = []   # 持有 WNDPROC 回调引用，防止被垃圾回收导致窗口过程失效
+_wndproc_refs = []          # 持有 WNDPROC 回调引用，防止被垃圾回收导致窗口过程失效
+_last_normal_rect = []      # 最后一次普通（非最大化/全屏）状态的窗口矩形，供最大化拖动还原使用
+_size_record_suppressed = [False]   # 顶栏拖动还原进行中时暂停记录，防止脏尺寸自我污染
 
 
 def clamp_maximize_to_work_area(window):
@@ -226,6 +367,8 @@ def clamp_maximize_to_work_area(window):
     WM_GETMINMAXINFO = 0x0024
     WM_NCCALCSIZE = 0x0083
     WM_NCHITTEST = 0x0084
+    WM_SIZE = 0x0005
+    SIZE_RESTORED = 0
     HTCLIENT = 1
     HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT = 10, 11, 12, 13
     HTTOPRIGHT, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT = 14, 15, 16, 17
@@ -306,14 +449,22 @@ def clamp_maximize_to_work_area(window):
             def proc(h, msg, wp, lp):
                 if msg == WM_NCCALCSIZE and wp:
                     if user32.IsZoomed(h):
-                        # 最大化时窗口矩形按惯例外扩了 frame，客户区对应内缩
                         ncp = ctypes.cast(lp, ctypes.POINTER(NCCALCSIZE_PARAMS)).contents
                         rc = ncp.rgrc[0]
+                        # 最大化时窗口矩形按惯例外扩了 frame，客户区对应内缩
                         rc.left += frame
                         rc.top += frame
                         rc.right -= frame
                         rc.bottom -= frame
                     return 0   # 其余状态客户区铺满整个窗口，不留非客户区
+                if msg == WM_SIZE and (wp & 0xFFFF) == SIZE_RESTORED and not is_fullscreen() \
+                        and not _size_record_suppressed[0]:
+                    # SIZE_RESTORED：持续记录普通状态矩形，供最大化拖动还原使用
+                    wr = RECT()
+                    user32.GetWindowRect(h, ctypes.byref(wr))
+                    if wr.right - wr.left >= 300 and wr.bottom - wr.top >= 200:
+                        _last_normal_rect.clear()
+                        _last_normal_rect.append((wr.left, wr.top, wr.right, wr.bottom))
                 if msg == WM_NCHITTEST:
                     res = call_proc(old_proc, h, msg, wp, lp)
                     # 客户区铺满后默认链对边框带返回 HTNOWHERE/HTCLIENT，
@@ -348,6 +499,17 @@ def clamp_maximize_to_work_area(window):
                             return HTCLIENT
                     return res
                 if msg == WM_GETMINMAXINFO:
+                    # 最大化协商发生在窗口仍为普通态时，此处捕获的矩形即
+                    # 「最大化前的普通尺寸」，供拖动还原使用（覆盖按钮/Win+Up/
+                    # 拖到顶部等所有最大化路径）；拖动还原进行中不记录，
+                    # 防止还原瞬间的最大化中间态污染参照矩形
+                    if not user32.IsZoomed(h) and not is_fullscreen() \
+                            and not _size_record_suppressed[0]:
+                        wr = RECT()
+                        user32.GetWindowRect(h, ctypes.byref(wr))
+                        if wr.right - wr.left >= 300 and wr.bottom - wr.top >= 200:
+                            _last_normal_rect.clear()
+                            _last_normal_rect.append((wr.left, wr.top, wr.right, wr.bottom))
                     mi = MONITORINFO()
                     mi.cbSize = ctypes.sizeof(MONITORINFO)
                     mon = user32.MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST)

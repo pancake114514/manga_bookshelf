@@ -86,4 +86,20 @@ export const bridge = {
   winEndResize() {
     if (this.available()) window.pywebview.api.end_window_resize()
   },
+  // 顶栏拖动移动（三段式；最大化时首次移动自动还原，结束时按边缘贴靠）
+  winBeginMoveDrag(screenX, screenY) {
+    if (!this.available()) return Promise.resolve(false)
+    return window.pywebview.api.begin_move_drag(screenX, screenY)
+  },
+  winMoveDragTo(screenX, screenY) {
+    if (this.available()) window.pywebview.api.move_drag_to(screenX, screenY)
+  },
+  winEndMoveDrag(screenX, screenY, moved) {
+    if (!this.available()) return Promise.resolve()
+    return window.pywebview.api.end_move_drag(screenX, screenY, !!moved)
+  },
+  async winIsMaximized() {
+    if (!this.available()) return false
+    return await window.pywebview.api.is_maximized()
+  },
 }

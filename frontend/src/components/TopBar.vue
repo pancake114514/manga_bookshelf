@@ -1,6 +1,7 @@
 <template>
-  <!-- 整条顶栏均为窗口拖拽区，交互控件以 mousedown.stop 排除 -->
-  <div class="topbar pywebview-drag-region">
+  <!-- 整条顶栏均可拖动：按下后移交系统原生拖动（还原最大化/贴靠由系统处理），
+       交互控件以 mousedown.stop 排除 -->
+  <div class="topbar" @mousedown="barMouseDown">
     <!-- 虚拟框一：与左侧栏等宽，logo 保持左对齐（与侧栏分隔线位置分割，不画线） -->
     <div class="tb-logo-box">
       <span class="logo">MangaShelf</span>
@@ -35,6 +36,7 @@ import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { NInput, NButton, NSwitch } from 'naive-ui'
 import { store, toggleTheme } from '../store'
 import { debounce } from '../utils'
+import { barMouseDown } from '../windowState'
 import WindowControls from './WindowControls.vue'
 import {
   IconSearch, IconMoon, IconSun, IconLibrary, IconFolderPlus,
