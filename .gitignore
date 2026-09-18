@@ -5,7 +5,7 @@ __pycache__/
 # pytest
 .pytest_cache/
 
-# Reasonix 本地元数据
+# Reasonrix 本地元数据
 .reasonix/
 reasonix.toml
 
@@ -24,10 +24,14 @@ frontend/dist/
 
 # 本地 AI 协作数据
 .workbuddy/
+.zcode/
 
 # IDE 本地配置
 settings.json
 .idea/
+
+# Rust / Tauri
+src-tauri/target/
 
 # 临时/数据文件
 git_commit_result.txt
@@ -36,3 +40,6 @@ git_commit_result.txt
 *.bak
 .write_test
 .manga_shelf_write_test
+
+# 临时调试目录
+.temp/

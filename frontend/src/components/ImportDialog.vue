@@ -51,7 +51,7 @@ import { ref, computed } from 'vue'
 import {
   NModal, NButton, NInput, NInputGroup, NSelect, NAlert, NProgress, NRate, useMessage,
 } from 'naive-ui'
-import { api, bridge } from '../api'
+import { api, dialog } from '../api'
 import { store, refreshTagValues } from '../store'
 import TagFields from './TagFields.vue'
 import { IconFolder, IconLibrary } from './icons'
@@ -78,15 +78,12 @@ const objectOptions = computed(() =>
   store.objects.map(o => ({ label: o.name, value: o.id })))
 
 async function pickSource() {
-  const dir = await bridge.pickDir('选择要导入的文件夹')
+  const dir = await dialog.pickDir('选择要导入的文件夹')
   if (dir) {
     sourceDir.value = dir
     if (mode.value === 'new' && !name.value) {
       name.value = dir.split(/[\\/]/).filter(Boolean).pop() || ''
     }
-  } else if (!bridge.available()) {
-    const p = window.prompt('浏览器调试模式：请输入源文件夹完整路径')
-    if (p) sourceDir.value = p
   }
 }
 

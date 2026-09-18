@@ -1,4 +1,0 @@
-# 开发/打包依赖
--r requirements.txt
-pyinstaller==6.19.0
-pytest==9.1.1

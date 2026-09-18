@@ -1,59 +1,28 @@
 <template>
-  <!-- 无边框窗口的边缘缩放热区（仅桌面模式渲染）；WebView2 覆盖客户区导致
-       Win32 边缘命中不可达，缩放由热区拖动经桥接驱动，z-index 高于全部内容 -->
+  <!-- 无边框窗口的边缘缩放热区（仅桌面模式渲染）。
+       按下即调用 Tauri 原生缩放循环，由 OS 驱动
+       （DPI、最小尺寸、平滑度与系统边框行为一致，避免 JS 手算坐标的竞态）。 -->
   <template v-if="ready">
     <div v-for="e in EDGES" :key="e" :class="['edge', `edge-${e}`]"
-         @mousedown.prevent="begin($event, e)" />
+         @mousedown.prevent="begin(e)" />
   </template>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
-import { bridge } from '../api'
+import { ref } from 'vue'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 
-// pywebview 注入 js_api 有延迟，轮询探测；浏览器调试模式 5s 后放弃（不渲染热区）
-const ready = ref(false)
-let timer = null
-let giveUp = null
-let dragging = null
+const ready = ref(true) // Tauri 模式下始终可用
 
 const EDGES = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
-
-// pywebview API 调用并发派发不保序，用串行队列保证 begin/move/end 严格按序
-let resizeQueue = Promise.resolve()
-const enqueue = (fn) => {
-  resizeQueue = resizeQueue.then(fn).catch(() => {})
+const DIRECTIONS = {
+  n: 'North', s: 'South', e: 'East', w: 'West',
+  ne: 'NorthEast', nw: 'NorthWest', se: 'SouthEast', sw: 'SouthWest',
 }
 
-function begin(ev, dir) {
-  dragging = dir
-  const x = ev.screenX
-  const y = ev.screenY
-  enqueue(() => bridge.winBeginResize(dir, x, y))
-  window.addEventListener('mousemove', onMove)
-  window.addEventListener('mouseup', onUp)
+function begin(dir) {
+  getCurrentWindow().startResizeDragging(DIRECTIONS[dir])
 }
-function onMove(ev) {
-  if (dragging) {
-    const x = ev.screenX
-    const y = ev.screenY
-    enqueue(() => bridge.winResizeMove(x, y))
-  }
-}
-function onUp() {
-  dragging = null
-  enqueue(() => bridge.winEndResize())
-  window.removeEventListener('mousemove', onMove)
-  window.removeEventListener('mouseup', onUp)
-}
-
-onMounted(() => {
-  timer = setInterval(() => {
-    if (bridge.available()) { ready.value = true; clearInterval(timer) }
-  }, 300)
-  giveUp = setTimeout(() => clearInterval(timer), 15000)
-})
-onUnmounted(() => { clearInterval(timer); clearTimeout(giveUp); onUp() })
 </script>
 
 <style scoped>

@@ -57,7 +57,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { NButton, NButtonGroup, NSpin } from 'naive-ui'
-import { api, bridge } from '../api'
+import { api, win } from '../api'
 import { store } from '../store'
 import { barMouseDown } from '../windowState'
 import { IconBack, IconMaximize, IconDoublePage } from './icons'
@@ -184,20 +184,20 @@ onUnmounted(() => {
   window.removeEventListener('keydown', onKey)
   clearTimeout(saveTimer)
   clearTimeout(hideTimer)
-  bridge.winExitFullscreen()                                 // 兜底还原全屏
+  win.exitFullscreen()                                         // 兜底还原全屏
   api.lastRead(reader.obj.id, index.value).catch(() => {})   // 退出前兜底落库
 })
 
 function back() {
   clearTimeout(saveTimer)
-  bridge.winExitFullscreen()
+  win.exitFullscreen()
   api.lastRead(reader.obj.id, index.value).catch(() => {})
   store.view = { name: 'directory' }
 }
 
 // 真全屏走 Win32 窗口层（WebView2 不响应 HTML requestFullscreen）
 async function toggleFullscreen() {
-  fullscreen.value = await bridge.winToggleFullscreen()
+  fullscreen.value = await win.toggleFullscreen()
 }
 
 // ── 进度条拖动 ──
@@ -290,9 +290,8 @@ function onBarMove(e) {
   background: var(--card); border: 2px solid var(--ms-primary);
 }
 .page-label {
-  position: absolute; inset: 0;
+  position: absolute; top: 26px; left: 0; right: 0; bottom: 0;
   display: flex; align-items: center; justify-content: center;
-  padding-top: 14px;
-  font-size: 11px; color: var(--text2); opacity: .8;
+  font-size: 11px; line-height: 14px; color: var(--text2); opacity: .8;
 }
 </style>

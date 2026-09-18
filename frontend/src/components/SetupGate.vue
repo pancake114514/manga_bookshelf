@@ -23,27 +23,19 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref } from 'vue'
 import { NCard, NButton, NInput, NInputGroup, NAlert, NText, useMessage } from 'naive-ui'
-import { api, bridge } from '../api'
+import { api, dialog } from '../api'
 import { store } from '../store'
 
 const message = useMessage()
 const path = ref('')
 const warn = ref('')
 const saving = ref(false)
-const bridgeOk = ref(false)
-
-onMounted(() => {
-  // pywebview 注入 api 有延迟，轮询等待
-  const t = setInterval(() => {
-    if (bridge.available()) { bridgeOk.value = true; clearInterval(t) }
-  }, 300)
-  setTimeout(() => clearInterval(t), 5000)
-})
+const bridgeOk = ref(true)
 
 async function browse() {
-  const dir = await bridge.pickDir('选择图库根目录')
+  const dir = await dialog.pickDir('选择图库根目录')
   if (dir) path.value = dir
 }
 

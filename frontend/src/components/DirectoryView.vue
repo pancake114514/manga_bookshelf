@@ -3,7 +3,7 @@
     <div class="info-bar">
       <n-button size="small" @click="back"><IconBack :size="14" /> 书架</n-button>
       <div class="info-row">
-        <img class="cover" :src="`/api/objects/${detail.id}/cover?kind=cover&_=${detail.cover_url ?? ''}`" alt="">
+        <img class="cover" :src="detail.cover_url" alt="">
         <div class="meta">
           <div class="title-row">
             <h2 class="title">{{ detail.name }}</h2>
@@ -97,7 +97,7 @@ function continueRead() {
 .dir-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .info-bar { flex: none; padding: 14px 20px 16px; border-bottom: 1px solid var(--border, rgba(128,128,128,.2)); }
 .info-row { display: flex; gap: 16px; margin-top: 12px; }
-.cover { width: 120px; height: 168px; object-fit: cover; border-radius: 6px; background: var(--chip-bg, rgba(128,128,128,.12)); }
+.cover { width: 172px; aspect-ratio: 5 / 7; object-fit: cover; border-radius: 10px; background: var(--chip-bg, rgba(128,128,128,.12)); }
 .meta { flex: 1; min-width: 0; }
 .rate-row { margin-top: 8px; line-height: 1; }
 .title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
