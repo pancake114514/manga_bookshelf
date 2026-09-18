@@ -34,7 +34,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { NModal, NButton, NInput, NInputGroup, NAlert, NProgress, useMessage } from 'naive-ui'
-import { api, bridge } from '../api'
+import { api, dialog } from '../api'
 import { store } from '../store'
 
 const props = defineProps({ show: Boolean })
@@ -51,12 +51,8 @@ const errMsg = ref('')
 const busy = ref(false)
 
 async function browse() {
-  const dir = await bridge.pickDir('选择新的图库目录')
+  const dir = await dialog.pickDir('选择新的图库目录')
   if (dir) newRoot.value = dir
-  else if (!bridge.available()) {
-    const p = window.prompt('浏览器调试模式：请输入新图库根目录完整路径')
-    if (p) newRoot.value = p
-  }
 }
 
 async function run() {

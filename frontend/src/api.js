@@ -1,105 +1,111 @@
-// 统一 API 封装：非 2xx 抛出后端 detail 信息
-async function jfetch(url, opts = {}) {
-  const r = await fetch(url, opts)
-  if (!r.ok) {
-    let msg = r.statusText
-    try { const d = await r.json(); msg = typeof d.detail === 'string' ? d.detail : JSON.stringify(d.detail) } catch { /* ignore */ }
-    throw new Error(msg)
-  }
-  const ct = r.headers.get('content-type') || ''
-  return ct.includes('json') ? r.json() : r
-}
+// Tauri API 封装 — 替代原 fetch /api/* 调用
+// 所有后端调用通过 Tauri IPC invoke，不再走 HTTP
 
-const post = (url, body) => jfetch(url, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(body),
-})
+import { invoke } from '@tauri-apps/api/core'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
+import { getCurrentWindow } from '@tauri-apps/api/window'
+
+// ── 后端调用 ──────────────────────────────────────────────────────────────
 
 export const api = {
-  state: () => jfetch('/api/state'),
-  setup: (path) => post('/api/setup', { path }),
-  validateName: (name) => post('/api/validate-name', { name }),
+  // 状态 / 初始化
+  state: () => invoke('get_state'),
+  setup: (path) => invoke('setup', { body: { path } }),
+  checkWritable: (path) => invoke('check_writable', { body: { path } }),
+  validateName: (name) => invoke('validate_name', { body: { name } }),
 
-  objects: (q, includeR18, filters) =>
-    jfetch(`/api/objects?q=${encodeURIComponent(q)}&include_r18=${includeR18}&filters=${encodeURIComponent(JSON.stringify(filters))}`),
-  object: (id) => jfetch(`/api/objects/${id}`),
-  tagValues: () => jfetch('/api/tag-values'),
+  // 对象查询
+  objects: (q = '', includeR18 = false, filters = {}) =>
+    invoke('get_objects', { q, includeR18, filters: JSON.stringify(filters) }),
+  object: (id) => invoke('get_object_detail', { oid: id }),
+  tagValues: () => invoke('get_tag_values'),
 
-  updateObject: (id, patch) => jfetch(`/api/objects/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(patch),
-  }),
-  deleteObject: (id, deleteFiles) =>
-    jfetch(`/api/objects/${id}?delete_files=${deleteFiles}`, { method: 'DELETE' }),
-  lastRead: (id, idx) => post(`/api/objects/${id}/last-read`, { idx }),
+  // 对象变更
+  updateObject: (id, patch) => invoke('update_object', { oid: id, body: patch }),
+  deleteObject: (id, deleteFiles = false) =>
+    invoke('delete_object', { oid: id, deleteFiles }),
+  lastRead: (id, idx) => invoke('set_last_read', { oid: id, body: { idx } }),
 
-  importDirectory: (body) => post('/api/import/directory', body),
-  migrate: (newRoot) => post('/api/migrate', { new_root: newRoot }),
+  // 导入
+  importDirectory: (body) => invoke('import_directory', { body }),
+  importFiles: (body) => invoke('import_files', { body }),
 
-  getConfig: (key) => jfetch(`/api/config/${key}`),
-  setConfig: (key, value) => jfetch('/api/config', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key, value }),
-  }),
+  // 库管理
+  migrate: (newRoot) => invoke('migrate', { body: { newRoot } }),
+
+  // 配置
+  getConfig: (key) => invoke('get_config_value', { key }).then(r => r.value),
+  setConfig: (key, value) =>
+    invoke('set_config_value', { body: { key, value } }),
 }
 
-// pywebview 桥：桌面模式下用原生对话框选目录/文件；浏览器模式降级
-export const bridge = {
-  available: () => typeof window !== 'undefined' && !!window.pywebview?.api,
+// ── 窗口控制 ──────────────────────────────────────────────────────────────
+
+export const win = {
+  async minimize() {
+    await getCurrentWindow().minimize()
+  },
+  async toggleMaximize() {
+    const w = getCurrentWindow()
+    if (await w.isMaximized()) {
+      await w.unmaximize()
+      return false
+    } else {
+      await w.maximize()
+      return true
+    }
+  },
+  async isMaximized() {
+    return await getCurrentWindow().isMaximized()
+  },
+  async toggleFullscreen() {
+    const w = getCurrentWindow()
+    const isFs = await w.isFullscreen()
+    await w.setFullscreen(!isFs)
+    return !isFs
+  },
+  async exitFullscreen() {
+    await getCurrentWindow().setFullscreen(false)
+  },
+  close() {
+    getCurrentWindow().close()
+  },
+  // 无边框窗口拖拽 — Tauri 原生支持，只需调用 startDragging
+  async startDrag() {
+    await getCurrentWindow().startDragging()
+  },
+}
+
+// ── 文件/目录选择对话框 ───────────────────────────────────────────────────
+
+export const dialog = {
   async pickDir(title = '选择目录') {
-    if (this.available()) return await window.pywebview.api.pick_dir(title)
-    return null
+    const result = await openDialog({ directory: true, title })
+    return result || null
   },
   async pickFiles(title = '选择文件') {
-    if (this.available()) return await window.pywebview.api.pick_files(title)
-    return null
-  },
-  // 自定义标题栏的窗口控制（仅桌面模式有意义）
-  winMinimize() {
-    if (this.available()) window.pywebview.api.minimize()
-  },
-  async winToggleMaximize() {
-    if (!this.available()) return false
-    return await window.pywebview.api.toggle_maximize()
-  },
-  winClose() {
-    if (this.available()) window.pywebview.api.close_window()
-  },
-  // 阅读器真全屏（WebView2 不响应 HTML requestFullscreen，走 Win32 窗口层）
-  async winToggleFullscreen() {
-    if (!this.available()) return false
-    return await window.pywebview.api.toggle_fullscreen()
-  },
-  winExitFullscreen() {
-    if (this.available()) window.pywebview.api.exit_fullscreen()
-  },
-  // 边缘拖拽缩放（WebView2 子窗口跨进程，Win32 命中测试不可达，由前端热区驱动）
-  winBeginResize(dir, screenX, screenY) {
-    if (this.available()) window.pywebview.api.begin_window_resize(dir, screenX, screenY)
-  },
-  winResizeMove(screenX, screenY) {
-    if (this.available()) window.pywebview.api.move_window_resize(screenX, screenY)
-  },
-  winEndResize() {
-    if (this.available()) window.pywebview.api.end_window_resize()
-  },
-  // 顶栏拖动移动（三段式；最大化时首次移动自动还原，结束时按边缘贴靠）
-  winBeginMoveDrag(screenX, screenY) {
-    if (!this.available()) return Promise.resolve(false)
-    return window.pywebview.api.begin_move_drag(screenX, screenY)
-  },
-  winMoveDragTo(screenX, screenY) {
-    if (this.available()) window.pywebview.api.move_drag_to(screenX, screenY)
-  },
-  winEndMoveDrag(screenX, screenY, moved) {
-    if (!this.available()) return Promise.resolve()
-    return window.pywebview.api.end_move_drag(screenX, screenY, !!moved)
-  },
-  async winIsMaximized() {
-    if (!this.available()) return false
-    return await window.pywebview.api.is_maximized()
+    const result = await openDialog({
+      multiple: true,
+      title,
+      filters: [{
+        name: '图片文件',
+        extensions: ['jpg', 'jpeg', 'png', 'bmp', 'webp', 'gif', 'tiff', 'tif'],
+      }],
+    })
+    if (!result) return []
+    return Array.isArray(result) ? result : [result]
   },
 }
+
+// ── 常量 ─────────────────────────────────────────────────────────────────
+
+export const TAG_CATEGORIES = {
+  work: '作品',
+  author: '作者',
+  character: '角色',
+  cm: 'CM',
+  censored: '修正',
+  r18: 'R-18',
+}
+
+export const TAG_CATEGORY_ORDER = ['work', 'author', 'character', 'cm', 'censored', 'r18']

@@ -1,6 +1,7 @@
 <template>
-  <!-- 无边框窗口的边缘缩放热区（仅桌面模式渲染）；WebView2 覆盖客户区导致
-       Win32 边缘命中不可达，缩放由热区拖动经桥接驱动，z-index 高于全部内容 -->
+  <!-- 无边框窗口的边缘缩放热区（仅桌面模式渲染）。
+       Tauri decorations:false 下 Win32 原生边缘缩放不可达，
+       由热区拖动经 Tauri set_size/set_position 驱动。 -->
   <template v-if="ready">
     <div v-for="e in EDGES" :key="e" :class="['edge', `edge-${e}`]"
          @mousedown.prevent="begin($event, e)" />
@@ -9,51 +10,64 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
-import { bridge } from '../api'
+import { getCurrentWindow, LogicalPosition, LogicalSize } from '@tauri-apps/api/window'
 
-// pywebview 注入 js_api 有延迟，轮询探测；浏览器调试模式 5s 后放弃（不渲染热区）
-const ready = ref(false)
-let timer = null
-let giveUp = null
+const ready = ref(true) // Tauri 模式下始终可用
 let dragging = null
+let startPos = null
+let startRect = null
 
 const EDGES = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
 
-// pywebview API 调用并发派发不保序，用串行队列保证 begin/move/end 严格按序
-let resizeQueue = Promise.resolve()
-const enqueue = (fn) => {
-  resizeQueue = resizeQueue.then(fn).catch(() => {})
-}
-
-function begin(ev, dir) {
+async function begin(ev, dir) {
   dragging = dir
-  const x = ev.screenX
-  const y = ev.screenY
-  enqueue(() => bridge.winBeginResize(dir, x, y))
+  const win = getCurrentWindow()
+  startPos = { x: ev.screenX, y: ev.screenY }
+  startRect = {
+    x: (await win.outerPosition()).x,
+    y: (await win.outerPosition()).y,
+    w: (await win.outerSize()).width,
+    h: (await win.outerSize()).height,
+  }
   window.addEventListener('mousemove', onMove)
   window.addEventListener('mouseup', onUp)
 }
-function onMove(ev) {
-  if (dragging) {
-    const x = ev.screenX
-    const y = ev.screenY
-    enqueue(() => bridge.winResizeMove(x, y))
+
+async function onMove(ev) {
+  if (!dragging || !startPos || !startRect) return
+  const win = getCurrentWindow()
+  const dx = ev.screenX - startPos.x
+  const dy = ev.screenY - startPos.y
+  let { x, y, w, h } = startRect
+
+  if (dragging.includes('e')) w += dx
+  if (dragging.includes('w')) { x += dx; w -= dx }
+  if (dragging.includes('s')) h += dy
+  if (dragging.includes('n')) { y += dy; h -= dy }
+
+  const MIN_W = 1000, MIN_H = 680
+  if (w < MIN_W) {
+    if (dragging.includes('w')) x -= (MIN_W - w)
+    w = MIN_W
   }
+  if (h < MIN_H) {
+    if (dragging.includes('n')) y -= (MIN_H - h)
+    h = MIN_H
+  }
+
+  await win.setPosition(new LogicalPosition(x, y))
+  await win.setSize(new LogicalSize(w, h))
 }
+
 function onUp() {
   dragging = null
-  enqueue(() => bridge.winEndResize())
+  startPos = null
+  startRect = null
   window.removeEventListener('mousemove', onMove)
   window.removeEventListener('mouseup', onUp)
 }
 
-onMounted(() => {
-  timer = setInterval(() => {
-    if (bridge.available()) { ready.value = true; clearInterval(timer) }
-  }, 300)
-  giveUp = setTimeout(() => clearInterval(timer), 15000)
-})
-onUnmounted(() => { clearInterval(timer); clearTimeout(giveUp); onUp() })
+onUnmounted(() => onUp())
 </script>
 
 <style scoped>

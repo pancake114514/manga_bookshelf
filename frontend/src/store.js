@@ -1,7 +1,7 @@
 import { reactive } from 'vue'
 import { api } from './api'
 
-// UI 偏好的 config 键（后端 config 表 KV，值统一为字符串）
+// UI 偏好的 config 键
 const CFG = {
   theme: 'ui_theme',
   r18: 'ui_r18',
@@ -12,35 +12,32 @@ const DENSITIES = ['compact', 'standard', 'large']
 const DEFAULT_SORT = { key: 'created_at', desc: true }
 
 function readConfig(key) {
-  return api.getConfig(key).then(r => r.value).catch(() => null)
+  return Promise.resolve(api.getConfig(key)).catch(() => null)
 }
 
-// 全局状态：视图切换 + 书架数据 + 筛选/主题/偏好
+// 全局状态
 export const store = reactive({
   ready: false,
-  bootError: null,      // 启动失败信息（后端未就绪等），非空时展示错误态
+  bootError: null,
   storageRoot: null,
 
   theme: 'dark',
   r18: false,
   keyword: '',
-  filters: {},          // { cat: [values] }
-  tagValues: {},        // { cat: [values] }
+  filters: {},
+  tagValues: {},
 
-  // 书架偏好（持久化到后端 config）
-  sort: { ...DEFAULT_SORT },   // { key: created_at|name|images|rating|progress, desc }
-  density: 'standard',         // compact | standard | large
+  sort: { ...DEFAULT_SORT },
+  density: 'standard',
 
-  objects: [],          // 最近一次查询结果（书架与「追加导入」下拉共用）
-  reloadTick: 0,        // 导入等外部操作后 +1，书架监听后静默刷新
-  view: { name: 'shelf' },   // shelf | directory | reader
+  objects: [],
+  reloadTick: 0,
+  view: { name: 'shelf' }, // shelf | directory | reader
 
-  // 全局对话框开关（对话框统一挂载在 App 层）
   ui: { import: false, library: false },
 
-  // 阅读器上下文
-  reader: null,         // { obj, images, index }
-  directory: null,      // { obj }
+  reader: null,
+  directory: null,
 })
 
 export async function boot() {
@@ -49,7 +46,8 @@ export async function boot() {
     const st = await api.state()
     store.storageRoot = st.valid ? st.storage_root : null
     const [theme, r18, sort, density] = await Promise.all([
-      readConfig(CFG.theme), readConfig(CFG.r18), readConfig(CFG.sort), readConfig(CFG.density),
+      readConfig(CFG.theme), readConfig(CFG.r18),
+      readConfig(CFG.sort), readConfig(CFG.density),
     ])
     if (theme === 'light' || theme === 'dark') store.theme = theme
     store.r18 = r18 === '1'

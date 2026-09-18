@@ -3,10 +3,7 @@
     <n-message-provider>
       <n-dialog-provider>
         <div class="app-shell" :class="`theme-${store.theme}`" :style="cssVars(store.theme)">
-          <!-- 无边框窗口的自定义标题栏（仅桌面模式渲染）：主视图与阅读器的窗口按钮
-               均已并入各自顶栏行尾，此处只为无顶栏工具行的视图（首启向导/启动异常）保留 -->
           <TitleBar v-if="showTitleBar" />
-          <!-- 无边框窗口边缘缩放热区（仅桌面模式渲染） -->
           <EdgeResize />
           <template v-if="store.ready">
             <SetupGate v-if="!store.storageRoot" />
@@ -18,13 +15,12 @@
                 <DirectoryView v-else-if="store.view.name === 'directory'" :obj="store.directory.obj" />
                 <Reader v-else-if="store.view.name === 'reader'" />
               </div>
-              <!-- 全局对话框：统一挂载在应用层，开关状态在 store.ui -->
               <ImportDialog v-model:show="store.ui.import" @done="store.reloadTick++" />
               <LibraryDialog v-model:show="store.ui.library" />
             </template>
           </template>
           <div v-else-if="store.bootError" class="boot-error">
-            <n-result status="error" title="无法连接本地服务" :description="store.bootError">
+            <n-result status="error" title="启动失败" :description="store.bootError">
               <template #footer>
                 <n-button type="primary" @click="retry">重试</n-button>
               </template>
@@ -55,17 +51,14 @@ import LibraryDialog from './components/LibraryDialog.vue'
 
 const showSidebar = computed(() =>
   store.view.name === 'shelf' || store.view.name === 'directory')
-// 独立标题栏条只在无任何顶栏的视图出现（首启向导/启动异常；主视图与阅读器窗口按钮均在其顶栏行尾）
 const showTitleBar = computed(() => !store.ready || !store.storageRoot)
 
 function retry() { boot() }
-
 onMounted(() => boot())
 </script>
 
 <style scoped>
-.boot-loading,
-.boot-error {
+.boot-loading, .boot-error {
   height: 100vh; display: flex; align-items: center; justify-content: center;
 }
 </style>

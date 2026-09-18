@@ -66,9 +66,8 @@
 <script setup>
 import { ref, watch, onMounted, onUnmounted, h } from 'vue'
 import { useMessage, useDialog, NCheckbox, NSelect, NButton, NButtonGroup, NModal, NEmpty } from 'naive-ui'
-import { api } from '../api'
+import { api, dialog as fileDialog } from '../api'
 import { store, refreshTagValues, setSort, setDensity } from '../store'
-import { bridge } from '../api'
 import { CATS } from '../constants'
 import { IconArrowUp, IconArrowDown, IconCheckSquare, IconX } from './icons'
 import ObjectCard from './ObjectCard.vue'
@@ -279,7 +278,7 @@ function editObj(obj) {
 }
 
 async function changeCover(obj) {
-  let path = await bridge.pickFiles('选择封面图片')
+  let path = await fileDialog.pickFiles('选择封面图片')
   if (path === null) {                 // 浏览器模式降级
     path = window.prompt('输入封面图片完整路径：')
     if (!path) return

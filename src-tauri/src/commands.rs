@@ -1,0 +1,548 @@
+//! Tauri commands 层 — 替代 Python 版 backend/api.py 的 FastAPI 路由
+//!
+//! 通过 Tauri IPC 暴露给前端调用的命令，每个命令对应一个原 API 端点。
+//! 使用 tauri::State 共享 LibraryService 实例。
+//! 图片/缩略图通过 convert_file_src 以前端可访问的 URL 返回。
+
+use std::collections::HashMap;
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
+use tauri::{Manager, State};
+use tauri_plugin_dialog::DialogExt;
+
+use crate::config::{tag_category_order, THUMBNAIL_SIZE, GRID_THUMB_SIZE, COVER_THUMB_SIZE};
+use crate::db::{AssembledObject, ImageRow, TagValue, Tags, new_uuid};
+use crate::library_manager;
+use crate::service::LibraryService;
+use crate::thumbnail::generate_thumbnail;
+use crate::file_ops::validate_windows_path_name;
+// ── 请求体 ────────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct SetupBody {
+    pub path: String,
+}
+
+#[derive(Deserialize)]
+pub struct PathBody {
+    pub path: String,
+}
+
+#[derive(Deserialize)]
+pub struct ObjectPatch {
+    pub name: Option<String>,
+    pub tags: Option< serde_json::Value>,
+    pub cover_image: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct LastReadBody {
+    pub idx: i64,
+}
+
+#[derive(Deserialize)]
+pub struct ImportDirectoryBody {
+    pub source_dir: String,
+    pub name: String,
+    #[serde(default)]
+    pub tags: serde_json::Value,
+    #[serde(default = "default_true")]
+    pub is_new: bool,
+    pub obj_id: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Deserialize)]
+pub struct ImportFilesBody {
+    pub obj_id: String,
+    pub paths: Vec<String>,
+}
+
+#[derive(Deserialize)]
+pub struct MigrateBody {
+    pub new_root: String,
+}
+
+#[derive(Deserialize)]
+pub struct ConfigBody {
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Deserialize)]
+pub struct NameBody {
+    pub name: String,
+}
+
+#[derive(Deserialize)]
+pub struct QueryParams {
+    #[serde(default)]
+    pub q: String,
+    #[serde(default)]
+    pub include_r18: bool,
+    #[serde(default)]
+    pub filters: String,
+}
+
+// ── 响应体 ────────────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct StateResponse {
+    pub storage_root: Option<String>,
+    pub valid: bool,
+}
+
+#[derive(Serialize)]
+pub struct ObjectSummary {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub obj_type: String,
+    pub tags: serde_json::Value,
+    pub image_count: i64,
+    pub last_read_idx: i64,
+    pub created_at: Option<String>,
+    pub cover_url: String,
+}
+
+#[derive(Serialize)]
+pub struct ObjectDetail {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub obj_type: String,
+    pub tags: serde_json::Value,
+    pub image_count: i64,
+    pub last_read_idx: i64,
+    pub created_at: Option<String>,
+    pub cover_url: String,
+    pub storage_path: Option<String>,
+    pub images: Vec<ImageSummary>,
+}
+
+#[derive(Serialize)]
+pub struct ImageSummary {
+    pub id: String,
+    pub filename: String,
+    pub sort_order: i64,
+    pub thumb_url: String,
+    pub image_url: String,
+}
+
+#[derive(Serialize)]
+pub struct ImportResult {
+    pub ok: bool,
+    pub obj_id: Option<String>,
+    pub success: i64,
+    pub failed: i64,
+}
+
+#[derive(Serialize)]
+pub struct MigrateResult {
+    pub ok: bool,
+    pub moved: usize,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct SimpleResult {
+    pub ok: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct ConfigResponse {
+    pub key: String,
+    pub value: Option<String>,
+}
+
+// ── 序列化辅助 ────────────────────────────────────────────────────────────────
+
+fn tags_to_json(tags: &Tags) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for (cat, val) in &tags.0 {
+        match val {
+            TagValue::Bool(b) => {
+                map.insert(cat.clone(), serde_json::Value::Bool(*b));
+            }
+            TagValue::List(v) => {
+                map.insert(
+                    cat.clone(),
+                    serde_json::Value::Array(v.iter().map(|s| serde_json::Value::String(s.clone())).collect()),
+                );
+            }
+        }
+    }
+    serde_json::Value::Object(map)
+}
+
+fn json_to_tags(value: &serde_json::Value) -> Tags {
+    let mut map: HashMap<String, TagValue> = HashMap::new();
+    if let Some(obj) = value.as_object() {
+        for (cat, val) in obj {
+            if cat == "r18" {
+                map.insert("r18".into(), TagValue::Bool(val.as_bool().unwrap_or(false)));
+            } else if let Some(arr) = val.as_array() {
+                let vals: Vec<String> = arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect();
+                map.insert(cat.clone(), TagValue::List(vals));
+            } else if let Some(s) = val.as_str() {
+                map.insert(cat.clone(), TagValue::List(vec![s.to_string()]));
+            }
+        }
+    }
+    Tags(map)
+}
+
+fn serialize_object(o: &AssembledObject) -> ObjectSummary {
+    ObjectSummary {
+        id: o.id.clone(),
+        name: o.name.clone(),
+        obj_type: o.obj_type.clone(),
+        tags: tags_to_json(&o.tags),
+        image_count: o.image_count,
+        last_read_idx: o.last_read_idx,
+        created_at: o.created_at.clone(),
+        cover_url: format!("mangashelf://object/{}/cover", o.id),
+    }
+}
+
+fn serialize_image(img: &ImageRow, obj_id: &str) -> ImageSummary {
+    ImageSummary {
+        id: img.id.clone(),
+        filename: img.filename.clone(),
+        sort_order: img.sort_order,
+        thumb_url: format!("mangashelf://object/{}/thumb/{}", obj_id, img.id),
+        image_url: format!("mangashelf://object/{}/image/{}", obj_id, img.id),
+    }
+}
+
+fn storage_root_of(svc: &LibraryService) -> Option<String> {
+    svc.get_config("storage_root").ok().flatten()
+}
+
+// ── Tauri Commands ────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn get_state(svc: State<'_, LibraryService>) -> Result<StateResponse, String> {
+    let root = storage_root_of(&svc)?;
+    let valid = root
+        .as_ref()
+        .map(|r| Path::new(r).is_dir() && library_manager::check_writable(r).is_ok())
+        .unwrap_or(false);
+    Ok(StateResponse {
+        storage_root: root,
+        valid,
+    })
+}
+
+#[tauri::command]
+pub fn setup(svc: State<'_, LibraryService>, body: SetupBody) -> Result<SimpleResult, String> {
+    if let Err(e) = library_manager::check_writable(&body.path) {
+        return Ok(SimpleResult { ok: false, error: Some(e) });
+    }
+    svc.set_config("storage_root", &body.path)?;
+    Ok(SimpleResult { ok: true, error: None })
+}
+
+#[tauri::command]
+pub fn check_writable(body: PathBody) -> Result<SimpleResult, String> {
+    match library_manager::check_writable(&body.path) {
+        Ok(()) => Ok(SimpleResult { ok: true, error: None }),
+        Err(e) => Ok(SimpleResult { ok: false, error: Some(e) }),
+    }
+}
+
+#[tauri::command]
+pub fn validate_name(body: NameBody) -> Result<SimpleResult, String> {
+    match validate_windows_path_name(&body.name) {
+        Ok(()) => Ok(SimpleResult { ok: true, error: None }),
+        Err(e) => Ok(SimpleResult { ok: false, error: Some(e) }),
+    }
+}
+
+#[tauri::command]
+pub fn get_objects(
+    svc: State<'_, LibraryService>,
+    q: Option<String>,
+    include_r18: Option<bool>,
+    filters: Option<String>,
+) -> Result<Vec<ObjectSummary>, String> {
+    let q = q.unwrap_or_default();
+    let include_r18 = include_r18.unwrap_or(false);
+    let filters_str = filters.unwrap_or_else(|| "{}".to_string());
+
+    let tag_filters: HashMap<String, Vec<String>> = if filters_str.is_empty() || filters_str == "{}" {
+        HashMap::new()
+    } else {
+        let parsed: serde_json::Value = serde_json::from_str(&filters_str)
+            .map_err(|e| format!("filters 不是合法 JSON: {e}"))?;
+        let mut map = HashMap::new();
+        if let Some(obj) = parsed.as_object() {
+            for (cat, val) in obj {
+                if let Some(arr) = val.as_array() {
+                    let vals: Vec<String> = arr
+                        .iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect();
+                    map.insert(cat.clone(), vals);
+                }
+            }
+        }
+        map
+    };
+
+    let objects = if !q.is_empty() {
+        svc.search_objects(&q, include_r18)?
+    } else if !tag_filters.is_empty() {
+        svc.filter_by_tags(&tag_filters, include_r18)?
+    } else {
+        svc.get_all_objects(include_r18)?
+    };
+
+    Ok(objects.iter().map(serialize_object).collect())
+}
+
+#[tauri::command]
+pub fn get_object_detail(
+    svc: State<'_, LibraryService>,
+    oid: String,
+) -> Result<ObjectDetail, String> {
+    let obj = svc
+        .get_object(&oid)?
+        .ok_or("对象不存在")?;
+    let images = svc.get_images(&oid)?;
+    let image_count = images.len() as i64;
+    let detail = ObjectDetail {
+        id: obj.id.clone(),
+        name: obj.name.clone(),
+        obj_type: obj.obj_type.clone(),
+        tags: tags_to_json(&obj.tags),
+        image_count,
+        last_read_idx: obj.last_read_idx,
+        created_at: obj.created_at.clone(),
+        cover_url: format!("mangashelf://object/{}/cover", obj.id),
+        storage_path: obj.storage_path.clone(),
+        images: images
+            .iter()
+            .map(|i| serialize_image(i, &obj.id))
+            .collect(),
+    };
+    Ok(detail)
+}
+
+#[tauri::command]
+pub fn get_tag_values(
+    svc: State<'_, LibraryService>,
+) -> Result<HashMap<String, Vec<String>>, String> {
+    let mut result = HashMap::new();
+    for cat in tag_category_order() {
+        if cat == "r18" {
+            continue;
+        }
+        let vals = svc.get_tag_values(cat)?;
+        result.insert(cat.to_string(), vals);
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn update_object(
+    svc: State<'_, LibraryService>,
+    oid: String,
+    body: ObjectPatch,
+) -> Result<SimpleResult, String> {
+    let obj = svc.get_object(&oid)?;
+    if obj.is_none() {
+        return Err("对象不存在".to_string());
+    }
+    if let Some(name) = body.name {
+        svc.update_object_name(&oid, &name)?;
+    }
+    if let Some(tags) = body.tags {
+        let tags = json_to_tags(&tags);
+        svc.set_object_tags(&oid, &tags)?;
+    }
+    if let Some(cover) = body.cover_image {
+        svc.update_object_cover(&oid, &cover)?;
+    }
+    Ok(SimpleResult { ok: true, error: None })
+}
+
+#[tauri::command]
+pub fn set_last_read(
+    svc: State<'_, LibraryService>,
+    oid: String,
+    body: LastReadBody,
+) -> Result<SimpleResult, String> {
+    svc.update_last_read(&oid, body.idx)?;
+    Ok(SimpleResult { ok: true, error: None })
+}
+
+#[tauri::command]
+pub fn delete_object(
+    svc: State<'_, LibraryService>,
+    oid: String,
+    delete_files: Option<bool>,
+) -> Result<SimpleResult, String> {
+    let delete_files = delete_files.unwrap_or(false);
+    let root = storage_root_of(&svc);
+    svc.delete_object(&oid, delete_files, root.as_deref())?;
+    Ok(SimpleResult { ok: true, error: None })
+}
+
+#[tauri::command]
+pub fn import_directory(
+    svc: State<'_, LibraryService>,
+    body: ImportDirectoryBody,
+) -> Result<ImportResult, String> {
+    if !Path::new(&body.source_dir).is_dir() {
+        return Err(format!("源目录不存在：{}", body.source_dir));
+    }
+    let obj_id = body.obj_id.unwrap_or_else(new_uuid);
+    let tags = json_to_tags(&body.tags);
+    let root = storage_root_of(&svc).ok_or("图库未配置")?;
+
+    let (ok, fail) = svc.import_directory(
+        &obj_id,
+        &body.name,
+        &tags,
+        &body.source_dir,
+        &root,
+        body.is_new,
+        None,
+        None,
+    )?;
+    Ok(ImportResult {
+        ok: true,
+        obj_id: Some(obj_id),
+        success: ok,
+        failed: fail,
+    })
+}
+
+#[tauri::command]
+pub fn import_files(
+    svc: State<'_, LibraryService>,
+    body: ImportFilesBody,
+) -> Result<ImportResult, String> {
+    for p in &body.paths {
+        if !Path::new(p).is_file() {
+            return Err(format!("文件不存在：{p}"));
+        }
+    }
+    let root = storage_root_of(&svc).ok_or("图库未配置")?;
+    let (ok, fail) = svc.import_single_files(&body.obj_id, &body.paths, &root)?;
+    Ok(ImportResult {
+        ok: true,
+        obj_id: Some(body.obj_id),
+        success: ok,
+        failed: fail,
+    })
+}
+
+#[tauri::command]
+pub fn migrate(
+    svc: State<'_, LibraryService>,
+    body: MigrateBody,
+) -> Result<MigrateResult, String> {
+    let (moved, warnings) = svc.migrate_library(&body.new_root, None)?;
+    Ok(MigrateResult {
+        ok: true,
+        moved,
+        warnings,
+    })
+}
+
+#[tauri::command]
+pub fn get_config_value(
+    svc: State<'_, LibraryService>,
+    key: String,
+) -> Result<ConfigResponse, String> {
+    let value = svc.get_config(&key)?;
+    Ok(ConfigResponse { key, value })
+}
+
+#[tauri::command]
+pub fn set_config_value(
+    svc: State<'_, LibraryService>,
+    body: ConfigBody,
+) -> Result<SimpleResult, String> {
+    svc.set_config(&body.key, &body.value)?;
+    Ok(SimpleResult { ok: true, error: None })
+}
+
+// ── 图片/缩略图 URL scheme 处理 ───────────────────────────────────────────────
+
+/// 解析 mangashelf:// URL 并返回本地文件路径
+/// 格式：
+///   mangashelf://object/{oid}/cover           → 封面图（可带 ?kind=grid|card|cover）
+///   mangashelf://object/{oid}/image/{img_id}  → 原图
+///   mangashelf://object/{oid}/thumb/{img_id}  → 缩略图
+pub fn resolve_image_url(svc: &LibraryService, url: &str) -> Result<(String, Option<(u32, u32)>), String> {
+    // 去掉 scheme
+    let path = url
+        .strip_prefix("mangashelf://")
+        .ok_or("无效的 URL scheme")?;
+
+    // 分割路径
+    let parts: Vec<&str> = path.split('/').collect();
+    // parts: ["object", oid, "cover" | "image" | "thumb", img_id?]
+    if parts.len() < 3 {
+        return Err("URL 路径不完整".to_string());
+    }
+    let oid = parts[1];
+    let kind = parts[2];
+
+    match kind {
+        "cover" => {
+            let obj = svc
+                .get_object(oid)?
+                .ok_or("对象不存在")?;
+            let cover = svc.resolve_cover(&obj).ok_or("无封面")?;
+            // kind 从 query 参数获取，这里简化为返回 cover 尺寸
+            Ok((cover, Some(COVER_THUMB_SIZE)))
+        }
+        "image" | "thumb" => {
+            if parts.len() < 4 {
+                return Err("缺少图片 ID".to_string());
+            }
+            let img_id = parts[3];
+            let images = svc.get_images(oid)?;
+            let img = images
+                .iter()
+                .find(|i| i.id == img_id)
+                .ok_or("图片不存在")?;
+            if kind == "thumb" {
+                Ok((img.filepath.clone(), Some(GRID_THUMB_SIZE)))
+            } else {
+                Ok((img.filepath.clone(), None))
+            }
+        }
+        _ => Err(format!("未知的图片类型: {kind}")),
+    }
+}
+
+/// 生成缩略图并返回路径，供 Tauri 的 asset protocol 使用
+pub fn get_thumbnail_path(
+    svc: &LibraryService,
+    source_path: &str,
+    kind: &str,
+) -> Result<String, String> {
+    let root = storage_root_of(svc).ok_or("图库未配置")?;
+    let cache_dir = crate::thumbnail::get_thumb_cache_dir(&root);
+    let size = match kind {
+        "grid" => GRID_THUMB_SIZE,
+        "cover" => COVER_THUMB_SIZE,
+        _ => THUMBNAIL_SIZE,
+    };
+    let thumb = generate_thumbnail(source_path, &cache_dir, size)
+        .ok_or("缩略图生成失败")?;
+    Ok(thumb)
+}
