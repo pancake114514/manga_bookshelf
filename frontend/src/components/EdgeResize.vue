@@ -1,73 +1,28 @@
 <template>
   <!-- 无边框窗口的边缘缩放热区（仅桌面模式渲染）。
-       Tauri decorations:false 下 Win32 原生边缘缩放不可达，
-       由热区拖动经 Tauri set_size/set_position 驱动。 -->
+       按下即调用 Tauri 原生缩放循环，由 OS 驱动
+       （DPI、最小尺寸、平滑度与系统边框行为一致，避免 JS 手算坐标的竞态）。 -->
   <template v-if="ready">
     <div v-for="e in EDGES" :key="e" :class="['edge', `edge-${e}`]"
-         @mousedown.prevent="begin($event, e)" />
+         @mousedown.prevent="begin(e)" />
   </template>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
-import { getCurrentWindow, LogicalPosition, LogicalSize } from '@tauri-apps/api/window'
+import { ref } from 'vue'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 
 const ready = ref(true) // Tauri 模式下始终可用
-let dragging = null
-let startPos = null
-let startRect = null
 
 const EDGES = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
-
-async function begin(ev, dir) {
-  dragging = dir
-  const win = getCurrentWindow()
-  startPos = { x: ev.screenX, y: ev.screenY }
-  startRect = {
-    x: (await win.outerPosition()).x,
-    y: (await win.outerPosition()).y,
-    w: (await win.outerSize()).width,
-    h: (await win.outerSize()).height,
-  }
-  window.addEventListener('mousemove', onMove)
-  window.addEventListener('mouseup', onUp)
+const DIRECTIONS = {
+  n: 'North', s: 'South', e: 'East', w: 'West',
+  ne: 'NorthEast', nw: 'NorthWest', se: 'SouthEast', sw: 'SouthWest',
 }
 
-async function onMove(ev) {
-  if (!dragging || !startPos || !startRect) return
-  const win = getCurrentWindow()
-  const dx = ev.screenX - startPos.x
-  const dy = ev.screenY - startPos.y
-  let { x, y, w, h } = startRect
-
-  if (dragging.includes('e')) w += dx
-  if (dragging.includes('w')) { x += dx; w -= dx }
-  if (dragging.includes('s')) h += dy
-  if (dragging.includes('n')) { y += dy; h -= dy }
-
-  const MIN_W = 1000, MIN_H = 680
-  if (w < MIN_W) {
-    if (dragging.includes('w')) x -= (MIN_W - w)
-    w = MIN_W
-  }
-  if (h < MIN_H) {
-    if (dragging.includes('n')) y -= (MIN_H - h)
-    h = MIN_H
-  }
-
-  await win.setPosition(new LogicalPosition(x, y))
-  await win.setSize(new LogicalSize(w, h))
+function begin(dir) {
+  getCurrentWindow().startResizeDragging(DIRECTIONS[dir])
 }
-
-function onUp() {
-  dragging = null
-  startPos = null
-  startRect = null
-  window.removeEventListener('mousemove', onMove)
-  window.removeEventListener('mouseup', onUp)
-}
-
-onUnmounted(() => onUp())
 </script>
 
 <style scoped>
