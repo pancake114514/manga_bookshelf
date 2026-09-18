@@ -6,8 +6,8 @@ __pycache__/
 .pytest_cache/
 
 # Reasonrix 本地元数据
-.reasonrix/
-reasonrix.toml
+.reasonix/
+reasonix.toml
 
 # 构建产物
 build/
@@ -40,3 +40,6 @@ git_commit_result.txt
 *.bak
 .write_test
 .manga_shelf_write_test
+
+# 临时调试目录
+.temp/
