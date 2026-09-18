@@ -1,7 +1,8 @@
 <template>
   <div class="obj-card" :class="{ 'is-r18': isR18, selected }" :style="animStyle"
        @click="selectMode && $emit('toggle-select', obj.id)"
-       @dblclick.stop="!selectMode && $emit('open', obj)">
+       @dblclick.stop="!selectMode && $emit('open', obj)"
+       @contextmenu.prevent="onContextMenu">
     <div class="cover-box">
       <img :src="coverUrl" loading="lazy" alt="">
       <template v-if="isR18 && !revealed">
@@ -38,13 +39,19 @@
         <span v-else>{{ timeLabel }}</span>
       </div>
     </div>
+
+    <!-- 右键自定义菜单（替代 WebView 默认菜单） -->
+    <n-dropdown trigger="manual" :show="ctxMenu.show" :x="ctxMenu.x" :y="ctxMenu.y"
+                :options="menuOptions" placement="bottom-start"
+                @select="onMenuSelect" @clickoutside="ctxMenu.show = false" />
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { NButton, NRate } from 'naive-ui'
-import { IconLock, IconPlay, IconEdit, IconImage, IconTrash, IconCheck, IconStarFill } from './icons'
+import { computed, reactive, h } from 'vue'
+import { NButton, NRate, NDropdown, useMessage } from 'naive-ui'
+import { api } from '../api'
+import { IconLock, IconPlay, IconEdit, IconImage, IconTrash, IconCheck, IconStarFill, IconFolder } from './icons'
 
 const props = defineProps({
   obj: { type: Object, required: true },
@@ -53,7 +60,41 @@ const props = defineProps({
   selectMode: { type: Boolean, default: false },
   selected: { type: Boolean, default: false },
 })
-defineEmits(['open', 'edit', 'cover', 'del', 'rate', 'toggle-select'])
+const emit = defineEmits(['open', 'edit', 'cover', 'del', 'rate', 'toggle-select'])
+const message = useMessage()
+
+// ── 右键菜单 ─────────────────────────────────────────────
+const ctxMenu = reactive({ show: false, x: 0, y: 0 })
+const renderIcon = (Icon) => () => h(Icon, { size: 15 })
+const menuOptions = [
+  { label: '在资源管理器中打开', key: 'explore', icon: renderIcon(IconFolder) },
+  { type: 'divider' },
+  { label: '阅读', key: 'open', icon: renderIcon(IconPlay) },
+  { label: '编辑对象信息', key: 'edit', icon: renderIcon(IconEdit) },
+  { label: '设置封面图', key: 'cover', icon: renderIcon(IconImage) },
+  { type: 'divider' },
+  { label: '删除', key: 'del', icon: renderIcon(IconTrash), props: { style: 'color: #d03050;' } },
+]
+
+function onContextMenu(e) {
+  ctxMenu.x = e.clientX
+  ctxMenu.y = e.clientY
+  ctxMenu.show = true
+}
+
+async function onMenuSelect(key) {
+  ctxMenu.show = false
+  // 打开目录为本组件内直接调用后端，其余复用已有 emit
+  if (key === 'explore') {
+    try {
+      await api.openInExplorer(props.obj.id)
+    } catch (err) {
+      message.error(`打开失败：${err?.message || err}`)
+    }
+    return
+  }
+  emit(key, props.obj)
+}
 
 const isR18 = computed(() => !!props.obj.tags?.r18)
 const rating = computed(() => Number(props.obj.tags?.rating?.[0] || 0))

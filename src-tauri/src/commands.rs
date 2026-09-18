@@ -563,3 +563,25 @@ pub fn get_thumbnail_path(
         .ok_or("缩略图生成失败")?;
     Ok(thumb)
 }
+
+// ── 系统集成 ──────────────────────────────────────────────────────────────────
+
+/// 在系统资源管理器中打开对象的存储目录（Windows: explorer 选中该文件夹）
+#[tauri::command]
+pub fn open_in_explorer(
+    app: tauri::AppHandle,
+    svc: State<'_, LibraryService>,
+    oid: String,
+) -> Result<(), String> {
+    let obj = svc
+        .get_object(&oid)?
+        .ok_or("对象不存在")?;
+    let path = obj.storage_path.ok_or("该对象没有存储目录")?;
+    if !Path::new(&path).is_dir() {
+        return Err(format!("目录不存在：{path}"));
+    }
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .reveal_item_in_dir(path)
+        .map_err(|e| format!("打开资源管理器失败: {e}"))
+}

@@ -33,6 +33,9 @@ export const api = {
   // 库管理
   migrate: (newRoot) => invoke('migrate', { body: { newRoot } }),
 
+  // 系统集成
+  openInExplorer: (id) => invoke('open_in_explorer', { oid: id }),
+
   // 配置
   getConfig: (key) => invoke('get_config_value', { key }).then(r => r.value),
   setConfig: (key, value) =>

@@ -34,6 +34,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(service)
         .register_uri_scheme_protocol("mangashelf", move |app, request| {
             let svc = app.app_handle().state::<LibraryService>();
@@ -83,6 +84,7 @@ pub fn run() {
             commands::migrate,
             commands::get_config_value,
             commands::set_config_value,
+            commands::open_in_explorer,
         ])
         .run(tauri::generate_context!())
         .expect("启动 MangaShelf 失败");
