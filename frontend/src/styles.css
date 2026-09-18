@@ -5,7 +5,15 @@ html, body, #app { height: 100%; }
 body {
   font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
   overflow: hidden;
+  /* 桌面应用交互：左键拖动不产生文字/元素选中；输入框除外 */
+  user-select: none;
+  -webkit-user-select: none;
 }
+input, textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+img { -webkit-user-drag: none; }
 
 .app-shell {
   height: 100vh; display: flex; flex-direction: column;
