@@ -4,9 +4,16 @@
 
 use tauri::Manager;
 
-use crate::commands::{get_thumbnail_path, resolve_image_url};
-use crate::config;
-use crate::service::LibraryService;
+mod commands;
+mod config;
+mod db;
+mod file_ops;
+mod library_manager;
+mod service;
+mod thumbnail;
+
+use commands::{get_thumbnail_path, resolve_image_url};
+use service::LibraryService;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -29,7 +36,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(service)
         .register_uri_scheme_protocol("mangashelf", move |app, request| {
-            let svc = app.state::<LibraryService>();
+            let svc = app.app_handle().state::<LibraryService>();
             // request.uri() 形如 "mangashelf://object/{oid}/cover"
             // Tauri 2 的 URI scheme 会将 host+path 合并
             let url = request.uri().to_string();
@@ -93,7 +100,7 @@ fn read_file_response(path: &str) -> tauri::http::Response<std::borrow::Cow<'sta
         }
         Err(_) => tauri::http::Response::builder()
             .status(404)
-            .body(std::borrow::Cow::Borrowed(b"文件不存在"))
+            .body(std::borrow::Cow::Borrowed("File not found".as_bytes()))
             .unwrap(),
     }
 }

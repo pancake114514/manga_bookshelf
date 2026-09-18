@@ -116,10 +116,10 @@ pub fn prepare_library_migration(
     for obj in objects {
         let old_dir = obj.storage_path.as_deref().unwrap_or("").trim().to_string();
         if old_dir.is_empty() {
-            return Err(format!("对象"{}"缺少存储路径，无法迁移。", obj.name));
+            return Err(format!("对象\"{}\"缺少存储路径，无法迁移。", obj.name));
         }
         if !Path::new(&old_dir).is_dir() {
-            return Err(format!("对象"{}"的目录不存在：\n{old_dir}", obj.name));
+            return Err(format!("对象\"{}\"的目录不存在：\n{old_dir}", obj.name));
         }
 
         // 目标目录冲突时自动加后缀重命名

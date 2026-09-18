@@ -164,10 +164,10 @@ impl LibraryService {
         };
         let rows = stmt
             .query_map([], |row| {
-                (
+                Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, Option<String>>(1)?,
-                )
+                ))
             })
             .ok();
         if let Some(rows) = rows {

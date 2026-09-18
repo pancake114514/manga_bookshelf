@@ -5,11 +5,11 @@
   "identifier": "com.pancake.mangashelf",
   "build": {
     "beforeDevCommand": {
-      "cmd": "npm run dev",
+      "script": "npm run dev",
       "cwd": "../frontend"
     },
     "beforeBuildCommand": {
-      "cmd": "npm run build",
+      "script": "npm run build",
       "cwd": "../frontend"
     },
     "frontendDist": "../frontend/dist",

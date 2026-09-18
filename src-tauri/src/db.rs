@@ -359,11 +359,11 @@ impl Database {
                 .map_err(|e| format!("批量查标签失败: {e}"))?;
             let rows_iter = stmt
                 .query_map(rusqlite::params_from_iter(obj_ids.iter()), |row| {
-                    (
+                    Ok((
                         row.get::<_, String>(0)?, // object_id
                         row.get::<_, String>(1)?, // category
                         row.get::<_, String>(2)?, // value
-                    )
+                    ))
                 })
                 .map_err(|e| format!("批量查标签失败: {e}"))?;
             for r in rows_iter {
@@ -384,7 +384,7 @@ impl Database {
                 .map_err(|e| format!("批量查图片数失败: {e}"))?;
             let rows_iter = stmt
                 .query_map(rusqlite::params_from_iter(obj_ids.iter()), |row| {
-                    (row.get::<_, String>(0)?, row.get::<_, i64>(1)?)
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
                 })
                 .map_err(|e| format!("批量查图片数失败: {e}"))?;
             for r in rows_iter {
@@ -413,7 +413,7 @@ impl Database {
                 .map_err(|e| format!("批量查首图失败: {e}"))?;
             let rows_iter = stmt
                 .query_map(rusqlite::params_from_iter(obj_ids.iter()), |row| {
-                    (row.get::<_, String>(0)?, row.get::<_, String>(1)?)
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                 })
                 .map_err(|e| format!("批量查首图失败: {e}"))?;
             for r in rows_iter {
@@ -529,7 +529,7 @@ impl Database {
             .map_err(|e| format!("查询标签失败: {e}"))?;
         let raw: Vec<(String, String)> = stmt
             .query_map(params![obj_id], |row| {
-                (row.get::<_, String>(0)?, row.get::<_, String>(1)?)
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })
             .map_err(|e| format!("查询标签失败: {e}"))?
             .filter_map(|r| r.ok())

@@ -231,7 +231,7 @@ fn storage_root_of(svc: &LibraryService) -> Option<String> {
 
 #[tauri::command]
 pub fn get_state(svc: State<'_, LibraryService>) -> Result<StateResponse, String> {
-    let root = storage_root_of(&svc)?;
+    let root = storage_root_of(&svc);
     let valid = root
         .as_ref()
         .map(|r| Path::new(r).is_dir() && library_manager::check_writable(r).is_ok())
