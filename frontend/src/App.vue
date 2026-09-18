@@ -3,8 +3,11 @@
     <n-message-provider>
       <n-dialog-provider>
         <div class="app-shell" :class="`theme-${store.theme}`" :style="cssVars(store.theme)">
-          <!-- 无边框窗口的自定义标题栏（仅桌面模式渲染），阅读器/首启向导下也保留 -->
-          <TitleBar />
+          <!-- 无边框窗口的自定义标题栏（仅桌面模式渲染）：主视图与阅读器的窗口按钮
+               均已并入各自顶栏行尾，此处只为无顶栏工具行的视图（首启向导/启动异常）保留 -->
+          <TitleBar v-if="showTitleBar" />
+          <!-- 无边框窗口边缘缩放热区（仅桌面模式渲染） -->
+          <EdgeResize />
           <template v-if="store.ready">
             <SetupGate v-if="!store.storageRoot" />
             <template v-else>
@@ -42,6 +45,7 @@ import { naiveTheme, themeOverrides, cssVars } from './theme'
 import SetupGate from './components/SetupGate.vue'
 import TitleBar from './components/TitleBar.vue'
 import TopBar from './components/TopBar.vue'
+import EdgeResize from './components/EdgeResize.vue'
 import TagSidebar from './components/TagSidebar.vue'
 import Bookshelf from './components/Bookshelf.vue'
 import DirectoryView from './components/DirectoryView.vue'
@@ -51,6 +55,8 @@ import LibraryDialog from './components/LibraryDialog.vue'
 
 const showSidebar = computed(() =>
   store.view.name === 'shelf' || store.view.name === 'directory')
+// 独立标题栏条只在无任何顶栏的视图出现（首启向导/启动异常；主视图与阅读器窗口按钮均在其顶栏行尾）
+const showTitleBar = computed(() => !store.ready || !store.storageRoot)
 
 function retry() { boot() }
 

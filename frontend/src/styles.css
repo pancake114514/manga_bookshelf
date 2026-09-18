@@ -33,18 +33,19 @@ body {
 }
 
 /* ── 对象卡片 ── */
+/* 固定列宽：卡片尺寸不随窗口宽度伸缩（窗口变宽仅增加留白） */
 .shelf-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  grid-template-columns: repeat(auto-fill, 176px);
   gap: 16px;
   align-items: start;
 }
 .shelf-grid.density-compact {
-  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  grid-template-columns: repeat(auto-fill, 132px);
   gap: 10px;
 }
 .shelf-grid.density-large {
-  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  grid-template-columns: repeat(auto-fill, 232px);
   gap: 20px;
 }
 .obj-card {

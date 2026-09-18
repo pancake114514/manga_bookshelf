@@ -114,7 +114,7 @@ function continueRead() {
 .grid-wrap { flex: 1; overflow-y: auto; padding: 20px; }
 .thumb-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, 150px);   /* 固定列宽，不随窗口伸缩 */
   gap: 12px;
 }
 .thumb-card {

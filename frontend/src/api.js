@@ -68,4 +68,38 @@ export const bridge = {
   winClose() {
     if (this.available()) window.pywebview.api.close_window()
   },
+  // 阅读器真全屏（WebView2 不响应 HTML requestFullscreen，走 Win32 窗口层）
+  async winToggleFullscreen() {
+    if (!this.available()) return false
+    return await window.pywebview.api.toggle_fullscreen()
+  },
+  winExitFullscreen() {
+    if (this.available()) window.pywebview.api.exit_fullscreen()
+  },
+  // 边缘拖拽缩放（WebView2 子窗口跨进程，Win32 命中测试不可达，由前端热区驱动）
+  winBeginResize(dir, screenX, screenY) {
+    if (this.available()) window.pywebview.api.begin_window_resize(dir, screenX, screenY)
+  },
+  winResizeMove(screenX, screenY) {
+    if (this.available()) window.pywebview.api.move_window_resize(screenX, screenY)
+  },
+  winEndResize() {
+    if (this.available()) window.pywebview.api.end_window_resize()
+  },
+  // 顶栏拖动移动（三段式；最大化时首次移动自动还原，结束时按边缘贴靠）
+  winBeginMoveDrag(screenX, screenY) {
+    if (!this.available()) return Promise.resolve(false)
+    return window.pywebview.api.begin_move_drag(screenX, screenY)
+  },
+  winMoveDragTo(screenX, screenY) {
+    if (this.available()) window.pywebview.api.move_drag_to(screenX, screenY)
+  },
+  winEndMoveDrag(screenX, screenY, moved) {
+    if (!this.available()) return Promise.resolve()
+    return window.pywebview.api.end_move_drag(screenX, screenY, !!moved)
+  },
+  async winIsMaximized() {
+    if (!this.available()) return false
+    return await window.pywebview.api.is_maximized()
+  },
 }
