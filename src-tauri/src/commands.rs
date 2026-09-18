@@ -515,10 +515,8 @@ pub fn resolve_image_url(svc: &LibraryService, url: &str) -> Result<(String, Opt
                 return Err("缺少图片 ID".to_string());
             }
             let img_id = parts[3];
-            let images = svc.get_images(oid)?;
-            let img = images
-                .iter()
-                .find(|i| i.id == img_id)
+            let img = svc
+                .get_image_by_id(oid, img_id)?
                 .ok_or("图片不存在")?;
             if kind == "thumb" {
                 Ok((img.filepath.clone(), Some(GRID_THUMB_SIZE)))

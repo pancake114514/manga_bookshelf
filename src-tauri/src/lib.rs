@@ -36,37 +36,44 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .manage(service)
-        .register_uri_scheme_protocol("mangashelf", move |app, request| {
-            let svc = app.app_handle().state::<LibraryService>();
+        .register_asynchronous_uri_scheme_protocol("mangashelf", move |ctx, request, responder| {
             // wry 在 Windows 上将 http://mangashelf.localhost/path 还原为
             // mangashelf://localhost/path 后传给此 handler
             let url = request.uri().to_string();
             log::info!("mangashelf URI request: {}", url);
 
-            match resolve_image_url(&svc, &url) {
-                Ok((path, thumb_size)) => {
-                    if let Some(size) = thumb_size {
-                        // 需要缩略图
-                        let kind = format!("{}_{}", size.0, size.1);
-                        match get_thumbnail_path(&svc, &path, &kind) {
-                            Ok(thumb_path) => read_file_response(&thumb_path),
-                            Err(_) => {
-                                // 缩略图失败，返回原图
-                                read_file_response(&path)
+            // 同步版协议 handler 在 WebView2 上于主线程执行，而缩略图生成
+            // （解码原图 + Lanczos3 缩放）是重活，会堵死 UI 事件循环导致窗口无响应；
+            // 必须用异步版并把处理放到后台线程，完成后经 responder 回给 WebView
+            let app = ctx.app_handle().clone();
+            std::thread::spawn(move || {
+                let svc = app.state::<LibraryService>();
+                let response = match resolve_image_url(&svc, &url) {
+                    Ok((path, thumb_size)) => {
+                        if let Some(size) = thumb_size {
+                            // 需要缩略图
+                            let kind = format!("{}_{}", size.0, size.1);
+                            match get_thumbnail_path(&svc, &path, &kind) {
+                                Ok(thumb_path) => read_file_response(&thumb_path),
+                                Err(_) => {
+                                    // 缩略图失败，返回原图
+                                    read_file_response(&path)
+                                }
                             }
+                        } else {
+                            read_file_response(&path)
                         }
-                    } else {
-                        read_file_response(&path)
                     }
-                }
-                Err(e) => {
-                    log::warn!("解析图片 URL 失败: {e} | {url}");
-                    tauri::http::Response::builder()
-                        .status(404)
-                        .body(e.into_bytes().into())
-                        .unwrap()
-                }
-            }
+                    Err(e) => {
+                        log::warn!("解析图片 URL 失败: {e} | {url}");
+                        tauri::http::Response::builder()
+                            .status(404)
+                            .body(e.into_bytes().into())
+                            .unwrap()
+                    }
+                };
+                responder.respond(response);
+            });
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_state,

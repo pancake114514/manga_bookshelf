@@ -88,6 +88,10 @@ impl LibraryService {
         self.db.lock().unwrap().get_images(obj_id)
     }
 
+    pub fn get_image_by_id(&self, obj_id: &str, img_id: &str) -> Result<Option<ImageRow>, String> {
+        self.db.lock().unwrap().get_image_by_id(obj_id, img_id)
+    }
+
     pub fn get_tag_values(&self, category: &str) -> Result<Vec<String>, String> {
         self.db.lock().unwrap().get_all_tag_values(category)
     }

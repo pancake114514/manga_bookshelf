@@ -607,6 +607,20 @@ impl Database {
         Ok(rows)
     }
 
+    /// 按图片 ID 直查（协议层缩略图/原图请求用，避免每次全量查询后线性查找）
+    pub fn get_image_by_id(&self, obj_id: &str, img_id: &str) -> Result<Option<ImageRow>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT * FROM images WHERE object_id=? AND id=?")
+            .map_err(|e| format!("查询图片失败: {e}"))?;
+        let mut rows: Vec<ImageRow> = stmt
+            .query_map(params![obj_id, img_id], ImageRow::from_row)
+            .map_err(|e| format!("查询图片失败: {e}"))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows.pop())
+    }
+
     pub fn get_image_count(&self, obj_id: &str) -> Result<i64, String> {
         self.conn
             .query_row(
