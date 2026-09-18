@@ -290,9 +290,8 @@ function onBarMove(e) {
   background: var(--card); border: 2px solid var(--ms-primary);
 }
 .page-label {
-  position: absolute; inset: 0;
+  position: absolute; top: 26px; left: 0; right: 0; bottom: 0;
   display: flex; align-items: center; justify-content: center;
-  padding-top: 14px;
-  font-size: 11px; color: var(--text2); opacity: .8;
+  font-size: 11px; line-height: 14px; color: var(--text2); opacity: .8;
 }
 </style>
