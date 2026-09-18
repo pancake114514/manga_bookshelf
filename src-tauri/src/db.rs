@@ -538,18 +538,19 @@ impl Database {
     }
 
     fn tags_from_raw(raw: &[(String, String)]) -> Tags {
+        use std::collections::hash_map::Entry;
         let mut map: HashMap<String, TagValue> = HashMap::new();
         for (cat, val) in raw {
             if cat == "r18" {
                 map.insert("r18".into(), TagValue::Bool(val == "true"));
             } else {
                 match map.entry(cat.clone()) {
-                    std::collections::HashMapEntry::Occupied(mut e) => {
+                    Entry::Occupied(mut e) => {
                         if let TagValue::List(v) = e.get_mut() {
                             v.push(val.clone());
                         }
                     }
-                    std::collections::HashMapEntry::Vacant(e) => {
+                    Entry::Vacant(e) => {
                         e.insert(TagValue::List(vec![val.clone()]));
                     }
                 }

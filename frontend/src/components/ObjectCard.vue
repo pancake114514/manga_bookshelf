@@ -57,7 +57,7 @@ defineEmits(['open', 'edit', 'cover', 'del', 'rate', 'toggle-select'])
 
 const isR18 = computed(() => !!props.obj.tags?.r18)
 const rating = computed(() => Number(props.obj.tags?.rating?.[0] || 0))
-const coverUrl = computed(() => `/api/objects/${props.obj.id}/cover?kind=card&_=${props.obj.cover_url ?? ''}`)
+const coverUrl = computed(() => props.obj.cover_url || '')
 const animStyle = computed(() => props.animDelay ? { animationDelay: `${props.animDelay}ms` } : {})
 const tagList = computed(() => {
   const tags = props.obj.tags || {}

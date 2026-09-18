@@ -96,7 +96,7 @@ pub fn copy_image_with_seq_name(
     }
 }
 
-/// 校验是否是合法 Windows 路径名，返回 (ok, error_msg)
+/// 校验是否是合法 Windows 路径名
 pub fn validate_windows_path_name(name: &str) -> Result<(), String> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
@@ -105,10 +105,19 @@ pub fn validate_windows_path_name(name: &str) -> Result<(), String> {
     if name.len() > 200 {
         return Err("名称过长（最多 200 个字符）".to_string());
     }
-    let illegal = r'\/:*?"<>|';
-    let bad: Vec<char> = name.chars().filter(|c| illegal.contains(*c)).collect();
+    let illegal_chars = ['\\', '/', ':', '*', '?', '"', '<', '>', '|'];
+    let bad: Vec<char> = name.chars().filter(|c| illegal_chars.contains(c)).collect();
     if !bad.is_empty() {
-        let unique: String = bad.iter().collect::<std::collections::HashSet<_>>().into_iter().collect();
+        let unique: String = {
+            let mut seen: std::collections::HashSet<char> = std::collections::HashSet::new();
+            let mut result = String::new();
+            for c in &bad {
+                if seen.insert(*c) {
+                    result.push(*c);
+                }
+            }
+            result
+        };
         return Err(format!("包含非法字符：{unique}"));
     }
     let reserved = [

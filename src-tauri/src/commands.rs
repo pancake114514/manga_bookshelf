@@ -529,7 +529,8 @@ pub fn resolve_image_url(svc: &LibraryService, url: &str) -> Result<(String, Opt
     }
 }
 
-/// 生成缩略图并返回路径，供 Tauri 的 asset protocol 使用
+/// 生成缩略图并返回路径，供 Tauri 的 asset protocol 使用。
+/// kind 格式为 "{w}_{h}"，直接解析为尺寸。
 pub fn get_thumbnail_path(
     svc: &LibraryService,
     source_path: &str,
@@ -537,11 +538,15 @@ pub fn get_thumbnail_path(
 ) -> Result<String, String> {
     let root = storage_root_of(svc).ok_or("图库未配置")?;
     let cache_dir = crate::thumbnail::get_thumb_cache_dir(&root);
-    let size = match kind {
-        "grid" => GRID_THUMB_SIZE,
-        "cover" => COVER_THUMB_SIZE,
-        _ => THUMBNAIL_SIZE,
-    };
+    // 解析 "w_h" 格式
+    let size = kind
+        .split_once('_')
+        .and_then(|(w, h)| {
+            let w: u32 = w.parse().ok()?;
+            let h: u32 = h.parse().ok()?;
+            Some((w, h))
+        })
+        .unwrap_or(THUMBNAIL_SIZE);
     let thumb = generate_thumbnail(source_path, &cache_dir, size)
         .ok_or("缩略图生成失败")?;
     Ok(thumb)

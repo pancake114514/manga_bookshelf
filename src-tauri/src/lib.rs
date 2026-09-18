@@ -2,11 +2,11 @@
 //!
 //! 初始化 LibraryService、注册 commands、配置插件。
 
-use std::sync::Mutex;
+use tauri::Manager;
 
-use mangashelf_lib::commands::*;
-use mangashelf_lib::config;
-use mangashelf_lib::service::LibraryService;
+use crate::commands::{get_thumbnail_path, resolve_image_url};
+use crate::config;
+use crate::service::LibraryService;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -30,16 +30,17 @@ pub fn run() {
         .manage(service)
         .register_uri_scheme_protocol("mangashelf", move |app, request| {
             let svc = app.state::<LibraryService>();
+            // request.uri() 形如 "mangashelf://object/{oid}/cover"
+            // Tauri 2 的 URI scheme 会将 host+path 合并
             let url = request.uri().to_string();
 
             match resolve_image_url(&svc, &url) {
                 Ok((path, thumb_size)) => {
                     if let Some(size) = thumb_size {
                         // 需要缩略图
-                        match get_thumbnail_path(&svc, &path, &format!("{}_{}", size.0, size.1)) {
-                            Ok(thumb_path) => {
-                                read_file_response(&thumb_path)
-                            }
+                        let kind = format!("{}_{}", size.0, size.1);
+                        match get_thumbnail_path(&svc, &path, &kind) {
+                            Ok(thumb_path) => read_file_response(&thumb_path),
                             Err(_) => {
                                 // 缩略图失败，返回原图
                                 read_file_response(&path)
@@ -53,33 +54,33 @@ pub fn run() {
                     log::warn!("解析图片 URL 失败: {e} | {url}");
                     tauri::http::Response::builder()
                         .status(404)
-                        .body(e.into_bytes())
+                        .body(e.into_bytes().into())
                         .unwrap()
                 }
             }
         })
         .invoke_handler(tauri::generate_handler![
-            get_state,
-            setup,
-            check_writable,
-            validate_name,
-            get_objects,
-            get_object_detail,
-            get_tag_values,
-            update_object,
-            set_last_read,
-            delete_object,
-            import_directory,
-            import_files,
-            migrate,
-            get_config_value,
-            set_config_value,
+            commands::get_state,
+            commands::setup,
+            commands::check_writable,
+            commands::validate_name,
+            commands::get_objects,
+            commands::get_object_detail,
+            commands::get_tag_values,
+            commands::update_object,
+            commands::set_last_read,
+            commands::delete_object,
+            commands::import_directory,
+            commands::import_files,
+            commands::migrate,
+            commands::get_config_value,
+            commands::set_config_value,
         ])
         .run(tauri::generate_context!())
         .expect("启动 MangaShelf 失败");
 }
 
-fn read_file_response(path: &str) -> tauri::http::Response<Vec<u8>> {
+fn read_file_response(path: &str) -> tauri::http::Response<std::borrow::Cow<'static, [u8]>> {
     match std::fs::read(path) {
         Ok(data) => {
             let mime = guess_mime(path);
@@ -87,12 +88,12 @@ fn read_file_response(path: &str) -> tauri::http::Response<Vec<u8>> {
                 .status(200)
                 .header("Content-Type", mime)
                 .header("Cache-Control", "max-age=3600")
-                .body(data)
+                .body(std::borrow::Cow::Owned(data))
                 .unwrap()
         }
         Err(_) => tauri::http::Response::builder()
             .status(404)
-            .body(b"文件不存在".to_vec())
+            .body(std::borrow::Cow::Borrowed(b"文件不存在"))
             .unwrap(),
     }
 }

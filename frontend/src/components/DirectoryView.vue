@@ -3,7 +3,7 @@
     <div class="info-bar">
       <n-button size="small" @click="back"><IconBack :size="14" /> 书架</n-button>
       <div class="info-row">
-        <img class="cover" :src="`/api/objects/${detail.id}/cover?kind=cover&_=${detail.cover_url ?? ''}`" alt="">
+        <img class="cover" :src="detail.cover_url" alt="">
         <div class="meta">
           <div class="title-row">
             <h2 class="title">{{ detail.name }}</h2>

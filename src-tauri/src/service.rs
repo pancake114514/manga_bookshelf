@@ -18,7 +18,7 @@ use crate::file_ops::{
 use crate::thumbnail::{clear_cached_thumbs, get_thumb_cache_dir};
 
 pub struct LibraryService {
-    db: Mutex<Database>,
+    pub db: Mutex<Database>,
 }
 
 /// 导入被取消
@@ -229,7 +229,7 @@ impl LibraryService {
                         if !self.storage_path_taken(sp, None) {
             let _ = fs::remove_dir_all(sp);
                         } else {
-                            log::warning!("对象 {} 的存储目录与其他对象共享，跳过物理删除: {}", obj_id, sp);
+                            log::warn!("对象 {} 的存储目录与其他对象共享，跳过物理删除: {}", obj_id, sp);
                         }
                     }
                 }
