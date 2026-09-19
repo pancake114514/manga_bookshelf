@@ -154,12 +154,25 @@ pub fn prepare_library_migration(
 
 pub type ProgressCb<'a> = Option<&'a dyn Fn(usize, usize, &str)>;
 
+/// 将已移动的目录按逆序移回原位，返回回滚失败的描述列表
+fn rollback_moved_dirs(moved_dirs: &[(String, String)]) -> Vec<String> {
+    let mut errors: Vec<String> = Vec::new();
+    for (old_dir, new_dir) in moved_dirs.iter().rev() {
+        if Path::new(new_dir).exists() && !Path::new(old_dir).exists() {
+            if let Err(e) = fs::rename(new_dir, old_dir) {
+                errors.push(format!("{new_dir} → {old_dir}: {e}"));
+            }
+        }
+    }
+    errors
+}
+
 pub fn migrate_library(
     service: &LibraryService,
     new_root: &str,
     progress_cb: ProgressCb,
 ) -> Result<(usize, Vec<String>), String> {
-    let db = service.db.lock().unwrap();
+    let db = service.db.lock().unwrap_or_else(|p| p.into_inner());
     let (old_root, new_root, plans) = prepare_library_migration(&db, new_root)?;
 
     let total_steps = (plans.len() * 2 + 1).max(1);
@@ -199,13 +212,31 @@ pub fn migrate_library(
 
     fs::create_dir_all(&new_root).map_err(|e| format!("创建新根目录失败: {e}"))?;
 
-    // 执行迁移
-    for plan in &plans {
-        emit(&format!("正在迁移：{}", plan.name));
-        fs::rename(&plan.old_dir, &plan.new_dir).map_err(|e| {
-            format!("迁移目录失败 ({} → {}): {e}", plan.old_dir, plan.new_dir)
-        })?;
-        moved_dirs.push((plan.old_dir.clone(), plan.new_dir.clone()));
+    // 执行迁移（目录移动）。任一步失败必须回滚已移动的目录，
+    // 否则库会进入"文件在新根、DB 仍指旧根"的损坏状态
+    let rename_result: Result<(), String> = (|| {
+        for plan in &plans {
+            emit(&format!("正在迁移：{}", plan.name));
+            if let Err(e) = fs::rename(&plan.old_dir, &plan.new_dir) {
+                return Err(format!(
+                    "迁移目录失败 ({} → {}): {e}",
+                    plan.old_dir, plan.new_dir
+                ));
+            }
+            moved_dirs.push((plan.old_dir.clone(), plan.new_dir.clone()));
+        }
+        Ok(())
+    })();
+
+    if let Err(e) = rename_result {
+        let rollback_errors = rollback_moved_dirs(&moved_dirs);
+        if !rollback_errors.is_empty() {
+            return Err(format!(
+                "迁移失败：{e}\n\n以下目录回滚失败，请手动恢复：\n{}",
+                rollback_errors.join("\n")
+            ));
+        }
+        return Err(e);
     }
 
     // 更新数据库（事务内）
@@ -236,14 +267,7 @@ pub fn migrate_library(
         Err(e) => {
             let _ = db.conn.execute_batch("ROLLBACK");
             // 回滚已移动的目录
-            let mut rollback_errors: Vec<String> = Vec::new();
-            for (old_dir, new_dir) in moved_dirs.iter().rev() {
-                if Path::new(new_dir).exists() && !Path::new(old_dir).exists() {
-                    if let Err(e2) = fs::rename(new_dir, old_dir) {
-                        rollback_errors.push(format!("{new_dir} → {old_dir}: {e2}"));
-                    }
-                }
-            }
+            let rollback_errors = rollback_moved_dirs(&moved_dirs);
             if !rollback_errors.is_empty() {
                 return Err(format!(
                     "迁移失败：{e}\n\n以下目录回滚失败，请手动恢复：\n{}",
@@ -289,5 +313,33 @@ mod tests {
         let missing = std::env::temp_dir()
             .join(format!("ms_test_lm_none_{}", uuid::Uuid::new_v4()));
         assert!(check_writable(missing.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn rollback_moved_dirs_restores_positions() {
+        let d = std::env::temp_dir().join(format!("ms_test_rb_{}", uuid::Uuid::new_v4()));
+        let old_root = d.join("old");
+        let new_root = d.join("new");
+        fs::create_dir_all(old_root.join("obj1")).unwrap();
+        fs::create_dir_all(old_root.join("obj2")).unwrap();
+        fs::create_dir_all(&new_root).unwrap();
+        fs::rename(old_root.join("obj1"), new_root.join("obj1")).unwrap();
+        fs::rename(old_root.join("obj2"), new_root.join("obj2")).unwrap();
+        let moved = vec![
+            (
+                old_root.join("obj1").to_string_lossy().to_string(),
+                new_root.join("obj1").to_string_lossy().to_string(),
+            ),
+            (
+                old_root.join("obj2").to_string_lossy().to_string(),
+                new_root.join("obj2").to_string_lossy().to_string(),
+            ),
+        ];
+        assert!(rollback_moved_dirs(&moved).is_empty());
+        assert!(old_root.join("obj1").is_dir(), "obj1 应回到原位");
+        assert!(old_root.join("obj2").is_dir(), "obj2 应回到原位");
+        assert!(!new_root.join("obj1").exists());
+        assert!(!new_root.join("obj2").exists());
+        let _ = fs::remove_dir_all(&d);
     }
 }

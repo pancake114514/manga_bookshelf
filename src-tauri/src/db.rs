@@ -209,20 +209,17 @@ impl Database {
         }
     }
 
-    pub fn get_object(&self, obj_id: &str) -> Result<ObjectRow, String> {
-        self.conn
-            .query_row(
-                "SELECT * FROM objects WHERE id=?",
-                params![obj_id],
-                ObjectRow::from_row,
-            )
-            .map_err(|e| format!("查询对象失败: {e}"))
-    }
-
     pub fn get_object_opt(&self, obj_id: &str) -> Result<Option<ObjectRow>, String> {
-        match self.get_object(obj_id) {
+        match self.conn.query_row(
+            "SELECT * FROM objects WHERE id=?",
+            params![obj_id],
+            ObjectRow::from_row,
+        ) {
             Ok(o) => Ok(Some(o)),
-            Err(_) => Ok(None),
+            // 仅"不存在"映射为 None；其他错误原样上抛，
+            // 避免瞬时 DB 故障被调用方（如追加导入的目录重建）误判为对象缺失
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(format!("查询对象失败: {e}")),
         }
     }
 
