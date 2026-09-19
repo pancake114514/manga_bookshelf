@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '284da9df-5b83-41ca-bd18-ceec1bf5cdc9'
-  PropagateID: '284da9df-5b83-41ca-bd18-ceec1bf5cdc9'
-  ReservedCode1: '5589c271-133f-4dfe-afb7-bee12cb8751b'
-  ReservedCode2: '5589c271-133f-4dfe-afb7-bee12cb8751b'
----
-
 # MangaShelf — 本地漫画管理器 (Tauri 2 重构版)
 
 基于 **Tauri 2 + Rust + Vue3 + Naive UI** 的本地漫画/图片管理工具。
