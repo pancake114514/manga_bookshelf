@@ -2,6 +2,8 @@
 //!
 //! UI/Tauri commands 只依赖本服务，不直接访问 Database。
 //! 借助 Mutex<Connection> 实现线程安全（rusqlite Connection 本身不是 Sync）。
+//! 加锁一律 unwrap_or_else(|p| p.into_inner())：DB 操作均为单语句/事务级原子操作，
+//! 持锁线程 panic 后从毒锁恢复是安全的，避免一次 panic 永久瘫痪整个后端。
 
 use std::collections::HashMap;
 use std::fs;
@@ -29,17 +31,17 @@ impl LibraryService {
     // ── 配置 ───────────────────────────────────────────────────────────────
 
     pub fn get_config(&self, key: &str) -> Result<Option<String>, String> {
-        self.db.lock().unwrap().get_config(key)
+        self.db.lock().unwrap_or_else(|p| p.into_inner()).get_config(key)
     }
 
     pub fn set_config(&self, key: &str, value: &str) -> Result<(), String> {
-        self.db.lock().unwrap().set_config(key, value)
+        self.db.lock().unwrap_or_else(|p| p.into_inner()).set_config(key, value)
     }
 
     // ── 查询 ───────────────────────────────────────────────────────────────
 
     pub fn get_all_objects(&self, include_r18: bool) -> Result<Vec<AssembledObject>, String> {
-        self.db.lock().unwrap().get_all_objects(include_r18)
+        self.db.lock().unwrap_or_else(|p| p.into_inner()).get_all_objects(include_r18)
     }
 
     pub fn search_objects(
@@ -47,7 +49,7 @@ impl LibraryService {
         keyword: &str,
         include_r18: bool,
     ) -> Result<Vec<AssembledObject>, String> {
-        self.db.lock().unwrap().search_objects(keyword, include_r18)
+        self.db.lock().unwrap_or_else(|p| p.into_inner()).search_objects(keyword, include_r18)
     }
 
     pub fn filter_by_tags(
@@ -55,11 +57,11 @@ impl LibraryService {
         filters: &HashMap<String, Vec<String>>,
         include_r18: bool,
     ) -> Result<Vec<AssembledObject>, String> {
-        self.db.lock().unwrap().filter_by_tags(filters, include_r18)
+        self.db.lock().unwrap_or_else(|p| p.into_inner()).filter_by_tags(filters, include_r18)
     }
 
     pub fn get_object(&self, obj_id: &str) -> Result<Option<AssembledObject>, String> {
-        let db = self.db.lock().unwrap();
+        let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
         let obj = db.get_object_opt(obj_id)?;
         if obj.is_none() {
             return Ok(None);
@@ -85,15 +87,15 @@ impl LibraryService {
     }
 
     pub fn get_images(&self, obj_id: &str) -> Result<Vec<ImageRow>, String> {
-        self.db.lock().unwrap().get_images(obj_id)
+        self.db.lock().unwrap_or_else(|p| p.into_inner()).get_images(obj_id)
     }
 
     pub fn get_image_by_id(&self, obj_id: &str, img_id: &str) -> Result<Option<ImageRow>, String> {
-        self.db.lock().unwrap().get_image_by_id(obj_id, img_id)
+        self.db.lock().unwrap_or_else(|p| p.into_inner()).get_image_by_id(obj_id, img_id)
     }
 
     pub fn get_tag_values(&self, category: &str) -> Result<Vec<String>, String> {
-        self.db.lock().unwrap().get_all_tag_values(category)
+        self.db.lock().unwrap_or_else(|p| p.into_inner()).get_all_tag_values(category)
     }
 
     /// 返回对象封面路径；未设置封面时取第一张图片
@@ -120,22 +122,22 @@ impl LibraryService {
     // ── 变更 ───────────────────────────────────────────────────────────────
 
     pub fn update_object_name(&self, obj_id: &str, name: &str) -> Result<(), String> {
-        self.db.lock().unwrap().update_object_name(obj_id, name)
+        self.db.lock().unwrap_or_else(|p| p.into_inner()).update_object_name(obj_id, name)
     }
 
     pub fn set_object_tags(&self, obj_id: &str, tags: &Tags) -> Result<(), String> {
-        self.db.lock().unwrap().set_tags(obj_id, tags)
+        self.db.lock().unwrap_or_else(|p| p.into_inner()).set_tags(obj_id, tags)
     }
 
     pub fn update_object_cover(&self, obj_id: &str, cover_image: &str) -> Result<(), String> {
         self.db
             .lock()
-            .unwrap()
+            .unwrap_or_else(|p| p.into_inner())
             .update_object_cover(obj_id, cover_image)
     }
 
     pub fn update_last_read(&self, obj_id: &str, idx: i64) -> Result<(), String> {
-        self.db.lock().unwrap().update_last_read(obj_id, idx)
+        self.db.lock().unwrap_or_else(|p| p.into_inner()).update_last_read(obj_id, idx)
     }
 
     /// 检查存储路径是否已被（其他）对象占用
@@ -178,7 +180,7 @@ impl LibraryService {
         delete_files: bool,
         storage_root: Option<&str>,
     ) -> Result<(), String> {
-        let db = self.db.lock().unwrap();
+        let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
         let obj = db.get_object_opt(obj_id)?;
 
         // 清理缩略图缓存
@@ -224,14 +226,14 @@ impl LibraryService {
 
     // ── 导入 ───────────────────────────────────────────────────────────────
 
-    /// 追加导入时解析目标目录
+    /// 追加导入时解析目标目录（必要时按对象名重建）。
+    /// db 由调用方持锁传入（本函数在导入流程的短锁阶段内调用）
     fn resolve_append_target_dir(
-        &self,
+        db: &Database,
         obj_id: &str,
         obj_name: &str,
         storage_root: &str,
     ) -> Result<String, String> {
-        let db = self.db.lock().unwrap();
         let obj = db.get_object_opt(obj_id)?;
         let storage_path = obj
             .as_ref()
@@ -249,7 +251,7 @@ impl LibraryService {
             .map(|o| o.name.as_str())
             .unwrap_or(obj_name);
         let rebuilt = Path::new(storage_root).join(name).to_string_lossy().to_string();
-        if Self::storage_path_taken(&db, &rebuilt, Some(obj_id)) {
+        if Self::storage_path_taken(db, &rebuilt, Some(obj_id)) {
             return Err(format!("存储目录已被其他对象占用，无法重建：{rebuilt}"));
         }
         fs::create_dir_all(&rebuilt).map_err(|e| format!("创建目录失败: {e}"))?;
@@ -258,6 +260,12 @@ impl LibraryService {
     }
 
     /// 导入整个目录到 storage_root 下。返回 (成功数, 失败数)。
+    ///
+    /// 执行分三段，把慢速文件 IO 排除在 db 锁之外，导入期间其他命令不被阻塞：
+    /// ① 短锁：建对象/标签，或解析追加目标目录；
+    /// ② 无锁：复制文件（支持取消/进度回调）；
+    /// ③ 短锁：图片记录入库 + 封面。
+    /// 任一步失败统一走回滚，不残留半成品对象/目录/文件。
     #[allow(clippy::too_many_arguments)]  // 参数组与 Python 版导入语义一一对应
     pub fn import_directory(
         &self,
@@ -277,99 +285,127 @@ impl LibraryService {
         let mut created_object = false;
         let mut created_dir = false;
         let mut created_images: Vec<(String, String)> = Vec::new();
-        let storage_obj_dir;
+        let mut copied_files: Vec<String> = Vec::new();
+        let mut storage_obj_dir = String::new();
 
-        let db = self.db.lock().unwrap();
-
-        if is_new {
-            storage_obj_dir = Path::new(storage_root).join(name).to_string_lossy().to_string();
-            if Self::storage_path_taken(&db, &storage_obj_dir, None) {
-                return Err(format!("存储目录已被其他对象占用：{name}"));
-            }
-            // M4 防御：库根下已存在同名非空目录
-            if Path::new(&storage_obj_dir).is_dir()
-                && fs::read_dir(&storage_obj_dir)
-                    .map(|mut d| d.next().is_some())
-                    .unwrap_or(false)
-            {
-                return Err(format!(
-                    "目录已存在且非空（不属于任何对象），为避免误删其中文件已拒绝导入：{storage_obj_dir}"
-                ));
-            }
-            let dir_existed = Path::new(&storage_obj_dir).is_dir();
-            created_dir = !dir_existed;
-            fs::create_dir_all(&storage_obj_dir)
-                .map_err(|e| format!("创建存储目录失败: {e}"))?;
-
-            if !db.create_object(obj_id, "directory", name, source_dir, &storage_obj_dir)? {
-                if created_dir {
-                    let _ = fs::remove_dir_all(&storage_obj_dir);
+        let result: Result<(i64, i64), String> = (|| {
+            // ── ① 短锁：建对象，或解析追加目标 ──
+            if is_new {
+                let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+                let dir = Path::new(storage_root).join(name).to_string_lossy().to_string();
+                if Self::storage_path_taken(&db, &dir, None) {
+                    return Err(format!("存储目录已被其他对象占用：{name}"));
                 }
-                return Err(format!("对象 ID 冲突，创建失败：{obj_id}"));
-            }
-            created_object = true;
-            db.set_tags(obj_id, tags)?;
-            // 释放首个 guard：下方公共路径会重新加锁（std::Mutex 不可重入，
-            // 遮蔽不释放旧 guard，is_new 分支漏 drop 会在重加锁处死锁）
-            drop(db);
-        } else {
-            // 追加导入：使用 DB 记录的目录
-            drop(db);
-            storage_obj_dir = self.resolve_append_target_dir(obj_id, name, storage_root)?;
-        }
-
-        // 收集图片并复制
-        let images = collect_images(source_dir);
-        let total = images.len();
-        let mut seq = next_seq_number(&storage_obj_dir);
-        let db = self.db.lock().unwrap();
-        let sort_start = db.get_image_count(obj_id).unwrap_or(0);
-
-        let mut ok: i64 = 0;
-        let mut fail: i64 = 0;
-
-        for (i, src) in images.iter().enumerate() {
-            // 检查取消
-            if let Some(cancel) = cancel_check {
-                if cancel() {
-                    // 回滚
-                    drop(db);
-                    self.rollback_import(obj_id, created_object, created_dir, &storage_obj_dir, &created_images)?;
-                    return Err("导入已取消".to_string());
+                // M4 防御：库根下已存在同名非空目录
+                if Path::new(&dir).is_dir()
+                    && fs::read_dir(&dir)
+                        .map(|mut d| d.next().is_some())
+                        .unwrap_or(false)
+                {
+                    return Err(format!(
+                        "目录已存在且非空（不属于任何对象），为避免误删其中文件已拒绝导入：{dir}"
+                    ));
                 }
-            }
+                let dir_existed = Path::new(&dir).is_dir();
+                created_dir = !dir_existed;
+                fs::create_dir_all(&dir)
+                    .map_err(|e| format!("创建存储目录失败: {e}"))?;
 
-            if let Some((filename, dest, used_seq)) =
-                copy_image_with_seq_name(src, &storage_obj_dir, seq)
-            {
-                let img_id = new_uuid();
-                db.add_image(&img_id, obj_id, &filename, &dest, sort_start + i as i64)?;
-                created_images.push((img_id, dest));
-                seq = used_seq + 1;
-                ok += 1;
+                if !db.create_object(obj_id, "directory", name, source_dir, &dir)? {
+                    // ID 冲突：目录是我们刚建的，直接清理并复位标记
+                    if created_dir {
+                        let _ = fs::remove_dir_all(&dir);
+                        created_dir = false;
+                    }
+                    return Err(format!("对象 ID 冲突，创建失败：{obj_id}"));
+                }
+                created_object = true;
+                db.set_tags(obj_id, tags)?;
+                storage_obj_dir = dir;
             } else {
-                fail += 1;
+                let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+                storage_obj_dir =
+                    Self::resolve_append_target_dir(&db, obj_id, name, storage_root)?;
             }
 
-            if let Some(cb) = progress_cb {
-                cb(i + 1, total);
-            }
-        }
+            // ── ② 无锁：复制文件（慢 IO），支持取消/进度 ──
+            let images = collect_images(source_dir);
+            let total = images.len();
+            let mut seq = next_seq_number(&storage_obj_dir);
+            let sort_start = {
+                let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+                db.get_image_count(obj_id).unwrap_or(0)
+            };
 
-        // 新建对象默认用第一张图作为封面
-        if is_new {
-            let images = db.get_images(obj_id)?;
-            let obj = db.get_object_opt(obj_id)?;
-            if let (Some(images), Some(obj)) = (images.first(), obj) {
-                if obj.cover_image.is_none() {
-                    db.update_object_cover(obj_id, &images.filepath)?;
+            let mut rows: Vec<(String, String, i64)> = Vec::new(); // (filename, dest, sort_order)
+            let mut ok: i64 = 0;
+            let mut fail: i64 = 0;
+
+            for (i, src) in images.iter().enumerate() {
+                // 检查取消（已复制文件由外层统一回滚清理）
+                if let Some(cancel) = cancel_check {
+                    if cancel() {
+                        return Err("导入已取消".to_string());
+                    }
+                }
+
+                if let Some((filename, dest, used_seq)) =
+                    copy_image_with_seq_name(src, &storage_obj_dir, seq)
+                {
+                    copied_files.push(dest.clone());
+                    rows.push((filename, dest, sort_start + i as i64));
+                    seq = used_seq + 1;
+                    ok += 1;
+                } else {
+                    fail += 1;
+                }
+
+                if let Some(cb) = progress_cb {
+                    cb(i + 1, total);
                 }
             }
-        }
 
-        Ok((ok, fail))
+            // ── ③ 短锁：入库 + 封面 ──
+            let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+            for (filename, dest, sort_order) in &rows {
+                let img_id = new_uuid();
+                db.add_image(&img_id, obj_id, filename, dest, *sort_order)?;
+                created_images.push((img_id, dest.clone()));
+            }
+
+            // 新建对象默认用第一张图作为封面
+            if is_new {
+                let images = db.get_images(obj_id)?;
+                let obj = db.get_object_opt(obj_id)?;
+                if let (Some(images), Some(obj)) = (images.first(), obj) {
+                    if obj.cover_image.is_none() {
+                        db.update_object_cover(obj_id, &images.filepath)?;
+                    }
+                }
+            }
+
+            Ok((ok, fail))
+        })();
+
+        match result {
+            Ok(r) => Ok(r),
+            Err(e) => {
+                self.rollback_import(
+                    obj_id,
+                    created_object,
+                    created_dir,
+                    &storage_obj_dir,
+                    &created_images,
+                    &copied_files,
+                )?;
+                Err(e)
+            }
+        }
     }
 
+    /// 导入回滚：撤销一次 import 产生的全部副作用。
+    /// created_images 为已入库的 (img_id, dest)；copied_files 为已落盘的全部文件
+    /// （含未入库的，入库失败/取消时也存在）。
     fn rollback_import(
         &self,
         obj_id: &str,
@@ -377,65 +413,99 @@ impl LibraryService {
         created_dir: bool,
         storage_obj_dir: &str,
         created_images: &[(String, String)],
+        copied_files: &[String],
     ) -> Result<(), String> {
-        let db = self.db.lock().unwrap();
-        if created_object {
-            db.delete_object(obj_id)?;
-            if created_dir && Path::new(storage_obj_dir).is_dir() {
-                let _ = fs::remove_dir_all(storage_obj_dir);
+        {
+            let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+            if created_object {
+                db.delete_object(obj_id)?;
+            } else {
+                for (img_id, _) in created_images {
+                    db.delete_image(img_id)?;
+                }
             }
-        } else {
-            for (img_id, dest) in created_images {
-                db.delete_image(img_id)?;
-                let _ = fs::remove_file(dest);
-            }
+        }
+        if created_object && created_dir && Path::new(storage_obj_dir).is_dir() {
+            let _ = fs::remove_dir_all(storage_obj_dir);
+        }
+        // 已复制文件逐个清理（目录整体已删时为无害空操作）
+        for dest in copied_files {
+            let _ = fs::remove_file(dest);
         }
         Ok(())
     }
 
     /// 导入单张/多张图片到已有对象。返回 (成功数, 失败数)。
+    /// 与目录导入相同：复制阶段不持 db 锁，失败统一回滚本次新增。
     pub fn import_single_files(
         &self,
         obj_id: &str,
         paths: &[String],
         storage_root: &str,
     ) -> Result<(i64, i64), String> {
-        let storage_obj_dir = self.resolve_append_target_dir(obj_id, "unnamed", storage_root)?;
+        let mut created_images: Vec<(String, String)> = Vec::new();
+        let mut copied_files: Vec<String> = Vec::new();
 
-        let db = self.db.lock().unwrap();
-        let mut ok: i64 = 0;
-        let mut fail: i64 = 0;
-        let cur_count = db.get_image_count(obj_id).unwrap_or(0);
-        let mut seq = next_seq_number(&storage_obj_dir);
+        let result: Result<(i64, i64), String> = (|| {
+            // ── 短锁：解析目标目录 ──
+            let (storage_obj_dir, cur_count) = {
+                let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+                let dir = Self::resolve_append_target_dir(&db, obj_id, "unnamed", storage_root)?;
+                let count = db.get_image_count(obj_id).unwrap_or(0);
+                (dir, count)
+            };
 
-        let mut sorted: Vec<String> = paths
-            .iter()
-            .filter(|p| !Path::new(p)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .map(|n| n.starts_with('.'))
-                .unwrap_or(true)).cloned()
-            .collect();
-        sorted.sort_by_key(|p| {
-            Path::new(p)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default()
-        });
+            // ── 无锁：复制文件 ──
+            let mut sorted: Vec<String> = paths
+                .iter()
+                .filter(|p| !Path::new(p)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.starts_with('.'))
+                    .unwrap_or(true)).cloned()
+                .collect();
+            sorted.sort_by_key(|p| {
+                Path::new(p)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            });
 
-        for src in &sorted {
-            if let Some((filename, dest, used_seq)) =
-                copy_image_with_seq_name(src, &storage_obj_dir, seq)
-            {
+            let mut seq = next_seq_number(&storage_obj_dir);
+            let mut rows: Vec<(String, String, i64)> = Vec::new(); // (filename, dest, sort_order)
+            let mut ok: i64 = 0;
+            let mut fail: i64 = 0;
+
+            for src in &sorted {
+                if let Some((filename, dest, used_seq)) =
+                    copy_image_with_seq_name(src, &storage_obj_dir, seq)
+                {
+                    copied_files.push(dest.clone());
+                    rows.push((filename, dest, cur_count + ok));
+                    ok += 1;
+                    seq = used_seq + 1;
+                } else {
+                    fail += 1;
+                }
+            }
+
+            // ── 短锁：入库 ──
+            let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+            for (filename, dest, sort_order) in &rows {
                 let img_id = new_uuid();
-                db.add_image(&img_id, obj_id, &filename, &dest, cur_count + ok)?;
-                ok += 1;
-                seq = used_seq + 1;
-            } else {
-                fail += 1;
+                db.add_image(&img_id, obj_id, filename, dest, *sort_order)?;
+                created_images.push((img_id, dest.clone()));
+            }
+            Ok((ok, fail))
+        })();
+
+        match result {
+            Ok(r) => Ok(r),
+            Err(e) => {
+                self.rollback_import(obj_id, false, false, "", &created_images, &copied_files)?;
+                Err(e)
             }
         }
-        Ok((ok, fail))
     }
 
     // ── 库迁移 ──────────────────────────────────────────────────────────────
@@ -684,6 +754,31 @@ mod tests {
         ], &root).unwrap();
         assert_eq!((ok, fail), (2, 1), "缺失文件计入失败");
         assert_eq!(svc.get_object(&oid).unwrap().unwrap().image_count, 4);
+    }
+
+    #[test]
+    fn import_cancel_rolls_back_partial_work() {
+        use std::cell::Cell;
+        let (svc, d) = new_svc("cancel");
+        let src = d.join("src");
+        fs::create_dir_all(&src).unwrap();
+        mk_img(&src, "a.png");
+        mk_img(&src, "b.png");
+        mk_img(&src, "c.png");
+        let root = d.join("storage");
+        fs::create_dir_all(&root).unwrap();
+        let oid = uuid::Uuid::new_v4().to_string();
+        let calls = Cell::new(0i32);
+        // 第一次取消检查放行（复制完第一张后），第二次取消 → 应整体回滚
+        let res = svc.import_directory(
+            &oid, "取消对象", &tags(vec![]),
+            src.to_str().unwrap(), root.to_str().unwrap(), true,
+            Some(&|_, _| {}),
+            Some(&|| { calls.set(calls.get() + 1); calls.get() > 1 }),
+        );
+        assert!(res.is_err(), "应以取消失败: {res:?}");
+        assert!(svc.get_object(&oid).unwrap().is_none(), "半成品对象应被回滚");
+        assert!(!root.join("取消对象").exists(), "新建存储目录应被回滚删除");
     }
 
     #[test]

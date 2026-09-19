@@ -397,7 +397,9 @@ pub fn delete_object(
     Ok(SimpleResult { ok: true, error: None })
 }
 
-#[tauri::command]
+/// 重活命令标记 async：在独立线程执行而非 UI 主线程，
+/// 避免大库导入/迁移期间窗口冻结（配合服务层"复制阶段不持锁"保证并发命令可用）
+#[tauri::command(async)]
 pub fn import_directory(
     svc: State<'_, LibraryService>,
     body: ImportDirectoryBody,
@@ -427,7 +429,7 @@ pub fn import_directory(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn import_files(
     svc: State<'_, LibraryService>,
     body: ImportFilesBody,
@@ -447,7 +449,7 @@ pub fn import_files(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn migrate(
     svc: State<'_, LibraryService>,
     body: MigrateBody,
