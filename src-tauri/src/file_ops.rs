@@ -33,62 +33,33 @@ pub fn collect_images(directory: &str) -> Vec<String> {
 
 /// 扫描存储目录，返回下一个可用序号（已有文件最大序号 + 1，从 1 开始）。
 /// 只识别形如 000001.ext 的文件名（纯数字部分）。
-pub fn next_seq_number(storage_obj_dir: &str) -> i64 {
-    let mut max_seq: i64 = 0;
-    let entries = match fs::read_dir(storage_obj_dir) {
-        Ok(e) => e,
-        Err(_) => return 1,
-    };
-    for entry in entries.flatten() {
-        let fname = entry.file_name();
-        let fname = match fname.to_str() {
-            Some(s) => s,
-            None => continue,
-        };
-        if fname.starts_with('.') {
-            continue;
-        }
-        let path = entry.path();
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        let ext_lower = format!(".{}", ext.to_lowercase());
-        if !is_supported_image(&format!("x{ext_lower}")) {
-            continue;
-        }
-        let stem = Path::new(fname).file_stem().and_then(|s| s.to_str()).unwrap_or("");
-        if let Ok(n) = stem.parse::<i64>() {
-            max_seq = max_seq.max(n);
-        }
-    }
-    max_seq + 1
-}
-
-/// 将图片复制到存储目录，以 7 位序号重命名（如 000001.jpg）。
-/// 返回 (filename, dest_path, used_seq)，失败返回 None。
-pub fn copy_image_with_seq_name(
-    src_path: &str,
-    storage_obj_dir: &str,
-    seq: i64,
-) -> Option<(String, String, i64)> {
+/// 将图片复制到存储目录，保留原文件名；目标已存在时在扩展名前加 (1)、(2)… 递增。
+/// 返回 (filename, dest_path)，失败返回 None。
+pub fn copy_image_keep_name(src_path: &str, storage_obj_dir: &str) -> Option<(String, String)> {
     let _ = fs::create_dir_all(storage_obj_dir);
     let src = Path::new(src_path);
-    let ext = src
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| format!(".{}", e.to_lowercase()))
-        .unwrap_or_default();
+    let orig = src.file_name()?.to_str()?.to_string();
+    let (stem, ext) = match src.extension().and_then(|e| e.to_str()) {
+        Some(e) => (orig.trim_end_matches(e).trim_end_matches('.'), format!(".{e}")),
+        None => (orig.as_str(), String::new()),
+    };
 
-    let mut seq = seq;
+    let mut n: i64 = 0;
     let (filename, dest) = loop {
-        let fname = format!("{seq:07}{ext}");
+        let fname = if n == 0 {
+            orig.clone()
+        } else {
+            format!("{stem}({n}){ext}")
+        };
         let dest = Path::new(storage_obj_dir).join(&fname);
         if !dest.exists() {
             break (fname, dest.to_string_lossy().to_string());
         }
-        seq += 1;
+        n += 1;
     };
 
     match fs::copy(src_path, &dest) {
-        Ok(_) => Some((filename, dest, seq)),
+        Ok(_) => Some((filename, dest)),
         Err(e) => {
             log::warn!("图片复制失败: {e} | {src_path}");
             None
@@ -172,24 +143,43 @@ mod tests {
     }
 
     #[test]
-    fn next_seq_number_from_empty_and_existing() {
-        let d = tmp("seq");
-        // 空/不存在的目录 → 起始 1
-        assert_eq!(next_seq_number(d.join("none").to_str().unwrap()), 1);
-        mk_img(&d, "0000001.png");
-        assert_eq!(next_seq_number(d.to_str().unwrap()), 2);
+    fn copy_keeps_original_name() {
+        let src_dir = tmp("cpkeep");
+        let dst_dir = tmp("cpkeep2");
+        let src = mk_img(&src_dir, "我的照片.png");
+        let (fname, dest) = copy_image_keep_name(&src, dst_dir.to_str().unwrap()).unwrap();
+        assert_eq!(fname, "我的照片.png");
+        assert!(dst_dir.join("我的照片.png").is_file());
+        assert_eq!(dest, dst_dir.join("我的照片.png").to_string_lossy().to_string());
     }
 
     #[test]
-    fn copy_image_with_seq_name_creates_sequenced_file() {
-        let src_dir = tmp("cpsrc");
-        let dst_dir = tmp("cpdst");
-        let src = mk_img(&src_dir, "whatever.png");
-        let (fname, dest, used) = copy_image_with_seq_name(&src, dst_dir.to_str().unwrap(), 1).unwrap();
-        assert_eq!(fname, "0000001.png");
-        assert_eq!(used, 1);
-        assert!(PathBuf::from(&dest).is_file());
-        assert_eq!(next_seq_number(dst_dir.to_str().unwrap()), 2);
+    fn copy_appends_counter_on_collision() {
+        let src_dir = tmp("cpcoll");
+        let dst_dir = tmp("cpcoll2");
+        let src = mk_img(&src_dir, "dup.jpg");
+        // 第一次 → 原名；第二、三次 → (1)、(2)
+        let (f1, _) = copy_image_keep_name(&src, dst_dir.to_str().unwrap()).unwrap();
+        let (f2, _) = copy_image_keep_name(&src, dst_dir.to_str().unwrap()).unwrap();
+        let (f3, _) = copy_image_keep_name(&src, dst_dir.to_str().unwrap()).unwrap();
+        assert_eq!(f1, "dup.jpg");
+        assert_eq!(f2, "dup(1).jpg");
+        assert_eq!(f3, "dup(2).jpg");
+        assert!(dst_dir.join("dup.jpg").is_file());
+        assert!(dst_dir.join("dup(1).jpg").is_file());
+        assert!(dst_dir.join("dup(2).jpg").is_file());
+    }
+
+    #[test]
+    fn copy_collision_preserves_extensionless_and_multi_dot() {
+        let src_dir = tmp("cpext");
+        let dst_dir = tmp("cpext2");
+        let p = src_dir.join("archive.tar.gz");
+        std::fs::write(&p, "x").unwrap();
+        let (f1, _) = copy_image_keep_name(p.to_str().unwrap(), dst_dir.to_str().unwrap()).unwrap();
+        let (f2, _) = copy_image_keep_name(p.to_str().unwrap(), dst_dir.to_str().unwrap()).unwrap();
+        assert_eq!(f1, "archive.tar.gz");
+        assert_eq!(f2, "archive.tar(1).gz", "多扩展名只按最后一段处理");
     }
 
     #[test]
