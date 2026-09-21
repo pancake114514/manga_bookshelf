@@ -88,6 +88,7 @@ pub fn run() {
             commands::delete_object,
             commands::import_directory,
             commands::import_files,
+            commands::count_images,
             commands::migrate,
             commands::get_config_value,
             commands::set_config_value,

@@ -29,6 +29,7 @@ export const api = {
   // 导入
   importDirectory: (body) => invoke('import_directory', { body }),
   importFiles: (body) => invoke('import_files', { body }),
+  countImages: (dir) => invoke('count_images', { dir }),
 
   // 库管理
   migrate: (newRoot) => invoke('migrate', { body: { newRoot } }),
@@ -85,6 +86,12 @@ export const dialog = {
   async pickDir(title = '选择目录') {
     const result = await openDialog({ directory: true, title })
     return result || null
+  },
+  // 多选文件夹（每选中的一个即为一个漫画文件夹，下一级直接是内容图片）
+  async pickDirs(title = '选择文件夹') {
+    const result = await openDialog({ directory: true, multiple: true, title })
+    if (!result) return []
+    return Array.isArray(result) ? result : [result]
   },
   async pickFiles(title = '选择文件') {
     const result = await openDialog({

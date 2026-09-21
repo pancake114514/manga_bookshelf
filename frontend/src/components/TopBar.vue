@@ -13,7 +13,7 @@
         <template #prefix><IconSearch :size="15" /></template>
       </n-input>
       <div class="spacer" />
-      <n-switch :value="store.theme === 'dark'" size="small" @mousedown.stop @update:value="toggleTheme">
+      <n-switch class="theme-switch" :value="store.theme === 'dark'" size="small" @mousedown.stop @update:value="toggleTheme">
         <template #checked><IconMoon :size="12" /></template>
         <template #unchecked><IconSun :size="12" /></template>
       </n-switch>
@@ -77,7 +77,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   padding-left: var(--content-pad);
 }
 .logo { font-family: Georgia, serif; font-size: 17px; font-weight: 700; letter-spacing: .5px; }
-.search { max-width: 380px; }
+/* 搜索框：限制最宽 380，同时保底 200——窗口压到最小宽度时被压缩到不可用的程度 */
+.search { max-width: 380px; min-width: 200px; }
+/* 明暗切换开关：不可压缩，避免窄窗口时被挤压变形 */
+.theme-switch { flex: none; }
 .spacer { flex: 1; user-select: none; }
 .tb-win-controls { margin-left: 12px; }
 </style>

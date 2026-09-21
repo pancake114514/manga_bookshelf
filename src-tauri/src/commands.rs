@@ -15,7 +15,7 @@ use crate::db::{AssembledObject, ImageRow, TagValue, Tags, new_uuid};
 use crate::library_manager;
 use crate::service::LibraryService;
 use crate::thumbnail::generate_thumbnail;
-use crate::file_ops::validate_windows_path_name;
+use crate::file_ops::{validate_windows_path_name, collect_images};
 // ── 请求体 ────────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -128,6 +128,15 @@ pub struct ImportResult {
     pub obj_id: Option<String>,
     pub success: i64,
     pub failed: i64,
+}
+
+/// 批量导入：统计单个文件夹中受支持图片的数量。
+#[tauri::command(async)]
+pub fn count_images(dir: String) -> Result<i64, String> {
+    if !Path::new(&dir).is_dir() {
+        return Err(format!("目录不存在：{dir}"));
+    }
+    Ok(collect_images(&dir).len() as i64)
 }
 
 #[derive(Serialize)]
@@ -509,8 +518,18 @@ pub fn resolve_image_url(svc: &LibraryService, url: &str) -> Result<(String, Opt
                 .get_object(oid)?
                 .ok_or("对象不存在")?;
             let cover = svc.resolve_cover(&obj).ok_or("无封面")?;
-            // kind 从 query 参数获取，这里简化为返回 cover 尺寸
-            Ok((cover, Some(COVER_THUMB_SIZE)))
+            // .thumb 封面（源目录自带的封面缩略图）本身就是缩放好的小图，
+            // 直出原图，跳过缩略图生成；其余封面正常走缩略图管线
+            let is_thumb = Path::new(&cover)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.to_lowercase().starts_with(".thumb"))
+                .unwrap_or(false);
+            if is_thumb {
+                Ok((cover, None))
+            } else {
+                Ok((cover, Some(COVER_THUMB_SIZE)))
+            }
         }
         "image" | "thumb" => {
             if parts.len() < 4 {
@@ -573,4 +592,36 @@ pub fn open_in_explorer(
     app.opener()
         .reveal_item_in_dir(path)
         .map_err(|e| format!("打开资源管理器失败: {e}"))
+}
+
+
+// ── 单元测试 ────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn count_images_counts_supported_only() {
+        let d = std::env::temp_dir().join(format!("ms_count_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&d).unwrap();
+        for name in ["a.png", "b.jpg", "c.txt", ".thumb.jpg", "d.webp"] {
+            if name.ends_with(".txt") {
+                fs::write(d.join(name), "x").unwrap();
+            } else {
+                let p = d.join(name);
+                image::RgbImage::from_pixel(20, 30, image::Rgb([9, 9, 9]))
+                    .save(&p)
+                    .unwrap();
+            }
+        }
+        // a/b/d 三张受支持图片；.thumb.jpg 是隐藏文件不计数，c.txt 非图片
+        assert_eq!(count_images(d.to_str().unwrap().to_string()).unwrap(), 3);
+    }
+
+    #[test]
+    fn count_images_rejects_missing_dir() {
+        let d = std::env::temp_dir().join(format!("ms_count_none_{}", uuid::Uuid::new_v4()));
+        assert!(count_images(d.to_str().unwrap().to_string()).is_err());
+    }
 }

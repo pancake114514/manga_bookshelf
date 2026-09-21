@@ -6,7 +6,7 @@ use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
-use image::{DynamicImage, ImageFormat};
+use image::{DynamicImage, ImageDecoder, ImageFormat};
 use sha2::{Digest, Sha256};
 
 use crate::config::{COVER_THUMB_SIZE, GRID_THUMB_SIZE, THUMBNAIL_SIZE, is_supported_image};
@@ -70,12 +70,16 @@ pub fn generate_thumbnail(
         return Some(thumb_path.to_string_lossy().to_string());
     }
 
-    // 读取图片
-    let img = image::open(source_path).ok()?;
-
-    // 处理 EXIF 旋转 — image crate 自动应用
-    let img = img.into_rgb8();
-    let img = DynamicImage::ImageRgb8(img);
+    // 读取图片：image::open 不会应用 EXIF 方向，需显式读取并应用，
+    // 否则带旋转标记的照片（常见于手机拍摄）缩略图方向错误
+    let reader = image::ImageReader::open(source_path).ok()?;
+    let mut decoder = reader.into_decoder().ok()?;
+    let orientation = decoder
+        .orientation()
+        .unwrap_or(image::metadata::Orientation::NoTransforms);
+    let mut img = DynamicImage::from_decoder(decoder).ok()?;
+    img.apply_orientation(orientation);
+    let img = DynamicImage::ImageRgb8(img.into_rgb8());
 
     let (target_w, target_h) = size;
     let (src_w, src_h) = (img.width(), img.height());
