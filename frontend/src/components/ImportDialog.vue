@@ -198,10 +198,10 @@ async function pickSource() {
   if (dir) {
     sourceDir.value = dir
     if (mode.value === 'new') {
-      // 按命名规则解析文件夹名：自动预填对象名与 cm/author 标签
+      // 按命名规则解析文件夹名：对象名预填全名（去数字编号），cm/author 进标签
       const folder = dir.split(/[\\/]/).filter(Boolean).pop() || ''
       const parsed = parseMangaName(folder)
-      name.value = parsed.name || folder
+      name.value = parsed.full || folder
       newTags.value = applyParsedTags(newTags.value, parsed)
     }
   }
@@ -234,11 +234,12 @@ async function addEntries(paths) {
     let count = 0
     try { count = await api.countImages(p) } catch { /* 目录读不了按 0 处理 */ }
     const folder = p.split(/[\\/]/).filter(Boolean).pop() || p
+    const parsed = parseMangaName(folder)
     added.push({
       path: p,
       folder,
       image_count: count,
-      name: parseMangaName(folder).name || folder,  // 命名规则解析预填
+      name: parsed.full || folder,  // 对象名 = 全名（去数字编号），命名规则解析预填
       checked: count > 0,
     })
   }

@@ -6,16 +6,19 @@
 /**
  * 解析漫画文件夹名。
  * @param {string} raw 文件夹名（或用户输入的对象名）
- * @returns {{name: string, cm: string|null, author: string|null}} 解析结果；
- *   不符合规则时 name 为去掉首尾空白的原值，cm/author 为 null。
+ * @returns {{full: string, name: string, cm: string|null, author: string|null}}
+ *   full = 仅去掉数字编号前缀的全名（含 CM号/作者名，作为对象名展示）；
+ *   name = 本名（不含 CM号/作者名）；cm/author 为提取的标签；
+ *   不符合规则时 full 为原值，name 为去掉前缀后的剩余文本，cm/author 为 null。
  */
 export function parseMangaName(raw) {
   let s = (raw || '').trim()
-  if (!s) return { name: '', cm: null, author: null }
+  if (!s) return { full: '', name: '', cm: null, author: null }
 
   // ① 可选的数字编号前缀（后跟 '-'）：如 "1762328-"
   const idMatch = s.match(/^(\d+)\s*-\s*/)
-  if (idMatch) s = s.slice(idMatch[0].length).trim()
+  const full = idMatch ? s.slice(idMatch[0].length).trim() : s  // 全名（对象名用）
+  if (idMatch) s = full
 
   // ② CM 号：第一个圆括号段（如 "(COMIC1☆17)"），且内容非纯数字
   //    （避免把本名里的 "(FateGrand Order)" 之类误当 CM：CM 段必须出现在
@@ -36,7 +39,7 @@ export function parseMangaName(raw) {
   }
 
   // ④ 剩余部分即本名（含尾部 [Chinese] [汉化组] 等）
-  return { name: s.trim(), cm, author }
+  return { full, name: s.trim(), cm, author }
 }
 
 /**
