@@ -5,7 +5,6 @@
 //! 图片/缩略图通过 convert_file_src 以前端可访问的 URL 返回。
 
 use std::collections::HashMap;
-use std::fs;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -600,6 +599,7 @@ pub fn open_in_explorer(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn count_images_counts_supported_only() {
