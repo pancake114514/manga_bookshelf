@@ -12,7 +12,7 @@ use std::sync::Mutex;
 
 use crate::db::{AssembledObject, Database, ImageRow, Tags, new_uuid};
 use crate::file_ops::{
-    collect_images, copy_image_keep_name,
+    collect_images, copy_image_keep_name, find_thumb_cover,
 };
 use crate::thumbnail::{clear_cached_thumbs, get_thumb_cache_dir};
 
@@ -336,6 +336,22 @@ impl LibraryService {
                 db.get_image_count(obj_id).unwrap_or(0)
             };
 
+            // .thumb 封面：源目录存在 .thumb 文件时，复制进存储目录（保持
+            // dot 前缀命名，collect_images 的隐藏过滤保证它不进正文），
+            // 并记为该对象封面。复制失败仅记录警告，不影响导入。
+            let mut thumb_cover: Option<String> = None;
+            if is_new {
+                if let Some(src_thumb) = find_thumb_cover(source_dir) {
+                    match copy_image_keep_name(&src_thumb, &storage_obj_dir) {
+                        Some((_, dest)) => {
+                            copied_files.push(dest.clone());
+                            thumb_cover = Some(dest);
+                        }
+                        None => log::warn!(".thumb 封面复制失败: {src_thumb}"),
+                    }
+                }
+            }
+
             let mut rows: Vec<(String, String, i64)> = Vec::new(); // (filename, dest, sort_order)
             let mut ok: i64 = 0;
             let mut fail: i64 = 0;
@@ -369,13 +385,17 @@ impl LibraryService {
                 created_images.push((img_id, dest.clone()));
             }
 
-            // 新建对象默认用第一张图作为封面
+            // 新建对象默认用第一张图作为封面；若导入了 .thumb 文件则优先用它
             if is_new {
                 let images = db.get_images(obj_id)?;
                 let obj = db.get_object_opt(obj_id)?;
                 if let (Some(images), Some(obj)) = (images.first(), obj) {
                     if obj.cover_image.is_none() {
-                        db.update_object_cover(obj_id, &images.filepath)?;
+                        let cover = thumb_cover
+                            .as_deref()
+                            .filter(|p| Path::new(p).is_file())
+                            .unwrap_or(&images.filepath);
+                        db.update_object_cover(obj_id, cover)?;
                     }
                 }
             }
@@ -599,6 +619,79 @@ mod tests {
         assert!(dir.join("a.png").is_file(), "保留原文件名");
         assert!(dir.join("b.png").is_file());
         assert!(obj.first_image.as_deref().is_some());
+    }
+
+    #[test]
+    fn thumb_cover_imported_as_cover_not_content() {
+        // 源目录带 .thumb.jpg：导入后封面指向库内 .thumb 文件，且不进正文
+        let (svc, d) = new_svc("thumbc");
+        let src = d.join("src");
+        fs::create_dir_all(&src).unwrap();
+        mk_img(&src, "a.png");
+        mk_img(&src, "b.png");
+        mk_img(&src, ".thumb.jpg");
+        let root = d.join("storage");
+        fs::create_dir_all(&root).unwrap();
+        let oid = uuid::Uuid::new_v4().to_string();
+        let (ok, fail) = svc.import_directory(&oid, "带thumb本", &tags(vec![]),
+            src.to_str().unwrap(), root.to_str().unwrap(), true, None, None).unwrap();
+        assert_eq!((ok, fail), (2, 0), ".thumb 不应计入正文图片");
+        let obj = svc.get_object(&oid).unwrap().unwrap();
+        assert_eq!(obj.image_count, 2, "正文不应包含 .thumb");
+        let cover = obj.cover_image.clone().expect("应设置封面");
+        let cover_name = Path::new(&cover).file_name().unwrap().to_string_lossy().to_string();
+        assert!(cover_name.to_lowercase().starts_with(".thumb"), "封面应是 .thumb 文件: {cover_name}");
+        // .thumb 已复制进存储目录
+        let sp = PathBuf::from(obj.storage_path.clone().unwrap());
+        assert!(sp.join(".thumb.jpg").is_file(), ".thumb 应复制到存储目录");
+        // resolve_cover 优先显式封面
+        assert_eq!(svc.resolve_cover(&obj).as_deref(), Some(cover.as_str()));
+    }
+
+    #[test]
+    fn thumb_cover_rolls_back_with_import() {
+        // 导入失败（目标目录被占用）时 .thumb 复制品随回滚清理
+        let (svc, d) = new_svc("thumbrb");
+        let src = d.join("src");
+        fs::create_dir_all(&src).unwrap();
+        mk_img(&src, "a.png");
+        mk_img(&src, ".thumb.jpg");
+        let root = d.join("storage");
+        fs::create_dir_all(root.join("占用名")).unwrap();
+        fs::write(root.join("占用名").join("keep.txt"), "x").unwrap();
+        let oid = uuid::Uuid::new_v4().to_string();
+        let res = svc.import_directory(&oid, "占用名", &tags(vec![]),
+            src.to_str().unwrap(), root.to_str().unwrap(), true, None, None);
+        assert!(res.is_err(), "应因目录占用失败");
+        // .thumb 不应残留在被回滚的目录中（目录本身可能保留——占用检查在复制前拒绝，
+        // 但防御性验证：存储目录内无新增 .thumb）
+        let leftovers: Vec<_> = fs::read_dir(root.join("占用名")).unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert!(!leftovers.iter().any(|n| n.to_lowercase().starts_with(".thumb")),
+            "回滚后不应残留 .thumb: {leftovers:?}");
+    }
+
+    #[test]
+    fn fake_thumb_ignored_and_falls_back_to_first_image() {
+        // 伪 .thumb（非图片）：忽略，封面回退首图
+        let (svc, d) = new_svc("fakethumb");
+        let src = d.join("src");
+        fs::create_dir_all(&src).unwrap();
+        mk_img(&src, "a.png");
+        fs::write(src.join(".thumb"), "definitely not an image").unwrap();
+        let root = d.join("storage");
+        fs::create_dir_all(&root).unwrap();
+        let oid = uuid::Uuid::new_v4().to_string();
+        let (ok, _) = svc.import_directory(&oid, "伪thumb本", &tags(vec![]),
+            src.to_str().unwrap(), root.to_str().unwrap(), true, None, None).unwrap();
+        assert_eq!(ok, 1);
+        let obj = svc.get_object(&oid).unwrap().unwrap();
+        let cover = obj.cover_image.expect("应回退首图为封面");
+        assert!(cover.ends_with("a.png"), "伪 .thumb 应回退首图: {cover}");
+        let sp = PathBuf::from(obj.storage_path.clone().unwrap());
+        assert!(!sp.join(".thumb").exists(), "伪 .thumb 不应被复制");
     }
 
     #[test]

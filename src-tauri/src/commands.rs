@@ -509,8 +509,18 @@ pub fn resolve_image_url(svc: &LibraryService, url: &str) -> Result<(String, Opt
                 .get_object(oid)?
                 .ok_or("对象不存在")?;
             let cover = svc.resolve_cover(&obj).ok_or("无封面")?;
-            // kind 从 query 参数获取，这里简化为返回 cover 尺寸
-            Ok((cover, Some(COVER_THUMB_SIZE)))
+            // .thumb 封面（源目录自带的封面缩略图）本身就是缩放好的小图，
+            // 直出原图，跳过缩略图生成；其余封面正常走缩略图管线
+            let is_thumb = Path::new(&cover)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.to_lowercase().starts_with(".thumb"))
+                .unwrap_or(false);
+            if is_thumb {
+                Ok((cover, None))
+            } else {
+                Ok((cover, Some(COVER_THUMB_SIZE)))
+            }
         }
         "image" | "thumb" => {
             if parts.len() < 4 {

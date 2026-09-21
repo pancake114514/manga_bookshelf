@@ -78,6 +78,7 @@ import { api, dialog } from '../api'
 import { store, refreshTagValues } from '../store'
 import TagFields from './TagFields.vue'
 import { IconFolder, IconLibrary, IconImage } from './icons'
+import { parseMangaName, applyParsedTags } from '../naming'
 
 const props = defineProps({ show: Boolean })
 const emit = defineEmits(['update:show', 'done'])
@@ -126,8 +127,12 @@ async function pickSource() {
   const dir = await dialog.pickDir('选择要导入的文件夹')
   if (dir) {
     sourceDir.value = dir
-    if (mode.value === 'new' && !name.value) {
-      name.value = dir.split(/[\\/]/).filter(Boolean).pop() || ''
+    if (mode.value === 'new') {
+      // 按命名规则解析文件夹名：自动预填对象名与 cm/author 标签
+      const folder = dir.split(/[\\/]/).filter(Boolean).pop() || ''
+      const parsed = parseMangaName(folder)
+      name.value = parsed.name || folder
+      newTags.value = applyParsedTags(newTags.value, parsed)
     }
   }
 }
