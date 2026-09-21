@@ -5,6 +5,7 @@
 //! 图片/缩略图通过 convert_file_src 以前端可访问的 URL 返回。
 
 use std::collections::HashMap;
+use std::fs;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -15,7 +16,7 @@ use crate::db::{AssembledObject, ImageRow, TagValue, Tags, new_uuid};
 use crate::library_manager;
 use crate::service::LibraryService;
 use crate::thumbnail::generate_thumbnail;
-use crate::file_ops::validate_windows_path_name;
+use crate::file_ops::{validate_windows_path_name, collect_images};
 // ── 请求体 ────────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -128,6 +129,15 @@ pub struct ImportResult {
     pub obj_id: Option<String>,
     pub success: i64,
     pub failed: i64,
+}
+
+/// 批量导入：统计单个文件夹中受支持图片的数量。
+#[tauri::command(async)]
+pub fn count_images(dir: String) -> Result<i64, String> {
+    if !Path::new(&dir).is_dir() {
+        return Err(format!("目录不存在：{dir}"));
+    }
+    Ok(collect_images(&dir).len() as i64)
 }
 
 #[derive(Serialize)]
@@ -583,4 +593,35 @@ pub fn open_in_explorer(
     app.opener()
         .reveal_item_in_dir(path)
         .map_err(|e| format!("打开资源管理器失败: {e}"))
+}
+
+
+// ── 单元测试 ────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn count_images_counts_supported_only() {
+        let d = std::env::temp_dir().join(format!("ms_count_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&d).unwrap();
+        for name in ["a.png", "b.jpg", "c.txt", ".thumb.jpg", "d.webp"] {
+            if name.ends_with(".txt") {
+                fs::write(d.join(name), "x").unwrap();
+            } else {
+                let p = d.join(name);
+                image::RgbImage::from_pixel(20, 30, image::Rgb([9, 9, 9]))
+                    .save(&p)
+                    .unwrap();
+            }
+        }
+        // a/b/d 三张受支持图片；.thumb.jpg 是隐藏文件不计数，c.txt 非图片
+        assert_eq!(count_images(d.to_str().unwrap().to_string()).unwrap(), 3);
+    }
+
+    #[test]
+    fn count_images_rejects_missing_dir() {
+        let d = std::env::temp_dir().join(format!("ms_count_none_{}", uuid::Uuid::new_v4()));
+        assert!(count_images(d.to_str().unwrap().to_string()).is_err());
+    }
 }

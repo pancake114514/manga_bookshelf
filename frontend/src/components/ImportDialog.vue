@@ -10,6 +10,9 @@
       <n-button block size="large" class="mode-btn" @click="setMode('files')">
         <IconImage /> 导入图片文件到已有目录
       </n-button>
+      <n-button block size="large" class="mode-btn" @click="setMode('batch')">
+        <IconLibrary /> 批量导入（按子文件夹建目录）
+      </n-button>
     </div>
 
     <!-- 新建目录 -->
@@ -54,15 +57,47 @@
       </div>
     </template>
 
+    <!-- 批量导入：直接多选漫画文件夹，每个文件夹各建一个目录对象 -->
+    <template v-if="mode === 'batch'">
+      <div class="batch-summary">
+        共 {{ batchEntries.length }} 个文件夹，已选 {{ checkedCount }} 个
+        <n-button quaternary size="tiny" @click="resetBatchScan(); openBatchPicker()">重选</n-button>
+      </div>
+      <div class="batch-list">
+        <div v-for="(e, i) in batchEntries" :key="e.path" class="batch-item">
+          <n-checkbox v-model:checked="e.checked" :disabled="batchRunning" />
+          <div class="batch-item-main">
+            <n-input v-model:value="e.name" size="small" placeholder="对象名称" :disabled="batchRunning" />
+            <span class="batch-sub">{{ e.folder }} · {{ e.image_count }} 张{{ e.image_count === 0 ? '（无图片，不建议导入）' : '' }}</span>
+          </div>
+        </div>
+      </div>
+      <div class="field-label">统一标签（应用到所有勾选项，可留空）</div>
+      <TagFields v-model:tags="newTags" />
+      <div class="field-label">评分</div>
+      <n-rate v-model:value="rating" :disabled="batchRunning" />
+
+      <!-- 进度与逐项结果 -->
+      <template v-if="batchRunning || batchResults.length">
+        <n-progress type="line" :percentage="batchProgress" :show-indicator="false" processing />
+        <div class="batch-results">
+          <div v-for="(r, i) in batchResults" :key="i"
+               class="batch-result" :class="r.ok ? 'ok' : 'err'">
+            {{ r.ok ? '✓' : '✗' }} {{ r.folder }}{{ r.error ? '：' + r.error : '' }}
+          </div>
+        </div>
+      </template>
+    </template>
+
     <n-alert v-if="errMsg" type="error" class="alert">{{ errMsg }}</n-alert>
     <n-progress v-if="busy" type="line" :show-indicator="false" processing />
 
     <template #footer>
       <div class="footer">
-        <!-- 返回：仅清模式/错误/已选文件，有意保留 targetId 便于重新选择目标 -->
-        <n-button v-if="mode" @click="mode = null; errMsg = ''; selectedFiles = []">返回</n-button>
-        <n-button type="primary" :disabled="!mode" :loading="busy" @click="run">
-          开始导入
+        <n-button v-if="batchRunning" @click="batchCancelled = true">停止剩余</n-button>
+        <n-button v-else-if="mode" @click="mode = null; errMsg = ''; selectedFiles = []">返回</n-button>
+        <n-button type="primary" :disabled="!mode" :loading="busy || batchRunning" @click="run">
+          {{ mode === 'batch' && batchRunning ? '导入中…' : '开始导入' }}
         </n-button>
       </div>
     </template>
@@ -72,13 +107,15 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import {
-  NModal, NButton, NInput, NInputGroup, NSelect, NAlert, NProgress, NRate, NTag, useMessage,
+  NModal, NButton, NInput, NInputGroup, NSelect, NAlert, NProgress, NRate, NTag, NCheckbox, useMessage,
 } from 'naive-ui'
 import { api, dialog } from '../api'
 import { store, refreshTagValues } from '../store'
 import TagFields from './TagFields.vue'
 import { IconFolder, IconLibrary, IconImage } from './icons'
 import { parseMangaName, applyParsedTags } from '../naming'
+
+const TAG_MERGE_CATS = ['work', 'author', 'character', 'cm', 'censored']
 
 const props = defineProps({ show: Boolean })
 const emit = defineEmits(['update:show', 'done'])
@@ -99,6 +136,18 @@ const selectedFiles = ref([])
 const errMsg = ref('')
 const busy = ref(false)
 
+// 批量导入状态
+const batchEntries = ref([])      // { folder, path, image_count, name, checked }
+const batchRunning = ref(false)
+const batchCancelled = ref(false)
+const batchResults = ref([])      // { folder, ok, error? }
+const batchIndex = ref(0)
+const batchTotal = ref(0)
+
+const checkedCount = computed(() => batchEntries.value.filter(e => e.checked).length)
+const batchProgress = computed(() =>
+  batchTotal.value ? Math.round((batchIndex.value / batchTotal.value) * 100) : 0)
+
 const objectOptions = computed(() =>
   store.objects.map(o => ({ label: o.name, value: o.id })))
 
@@ -112,12 +161,33 @@ function resetAll() {
   targetId.value = null
   selectedFiles.value = []
   errMsg.value = ''
+  resetBatchScan()
+  batchRunning.value = false
+  batchCancelled.value = false
+  batchResults.value = []
+  batchIndex.value = 0
+  batchTotal.value = 0
 }
 
-// 切换导入模式，同时清空上一步残留的错误提示
+function resetBatchScan() {
+  batchEntries.value = []
+}
+
+// 切换导入模式，同时清空上一步残留的错误提示；
+// 批量模式不做任何停留，直接弹出多选文件夹对话框（取消则回到方式列表）
 function setMode(m) {
   mode.value = m
   errMsg.value = ''
+  if (m === 'batch') openBatchPicker()
+}
+
+async function openBatchPicker() {
+  const dirs = await dialog.pickDirs('选择多个漫画文件夹（可按住 Ctrl 多选）')
+  if (!dirs.length) {
+    if (mode.value === 'batch') mode.value = null   // 取消选择 → 回到方式列表
+    return
+  }
+  await addEntries(dirs)
 }
 
 // 弹窗关闭（点 X / 遮罩，未点「返回」）时也全部重置
@@ -154,8 +224,87 @@ function removeFile(i) {
   selectedFiles.value.splice(i, 1)
 }
 
+// ── 批量导入 ──
+async function addEntries(paths) {
+  const existing = new Set(batchEntries.value.map(e => e.path))
+  const added = []
+  for (const p of paths) {
+    if (existing.has(p)) continue
+    existing.add(p)
+    let count = 0
+    try { count = await api.countImages(p) } catch { /* 目录读不了按 0 处理 */ }
+    const folder = p.split(/[\\/]/).filter(Boolean).pop() || p
+    added.push({
+      path: p,
+      folder,
+      image_count: count,
+      name: parseMangaName(folder).name || folder,  // 命名规则解析预填
+      checked: count > 0,
+    })
+  }
+  if (!added.length) { errMsg.value = '所选文件夹已在清单中'; return }
+  batchEntries.value = [...batchEntries.value, ...added]
+}
+
+// 单个子项的最终标签 = 命名规则解析值 + 统一标签（合并去重，解析值在前）
+function mergeBatchTags(entry) {
+  const parsed = parseMangaName(entry.folder)
+  const tags = {}
+  for (const cat of TAG_MERGE_CATS) {
+    const merged = new Set()
+    if (parsed[cat]) merged.add(parsed[cat])
+    for (const v of newTags.value[cat] || []) merged.add(v)
+    if (merged.size) tags[cat] = [...merged]
+  }
+  if (newTags.value.r18 === true) tags.r18 = true
+  if (rating.value) tags.rating = [String(rating.value)]
+  return tags
+}
+
+async function runBatch() {
+  const items = batchEntries.value.filter(e => e.checked)
+  if (!items.length) { errMsg.value = '请至少勾选一个子文件夹'; return }
+  batchRunning.value = true
+  batchCancelled.value = false
+  batchResults.value = []
+  batchIndex.value = 0
+  batchTotal.value = items.length
+  for (const e of items) {
+    if (batchCancelled.value || !show.value) break   // 手动停止 / 关闭弹窗
+    const displayName = e.name.trim() || e.folder
+    try {
+      await api.importDirectory({
+        source_dir: e.path,
+        name: displayName,
+        tags: mergeBatchTags(e),
+        is_new: true,
+      })
+      batchResults.value.push({ folder: displayName, ok: true })
+    } catch (err) {
+      batchResults.value.push({ folder: displayName, ok: false, error: err.message })
+    }
+    batchIndex.value++
+  }
+  batchRunning.value = false
+  refreshTagValues()
+  emit('done')
+  const okN = batchResults.value.filter(r => r.ok).length
+  const failN = batchResults.value.length - okN
+  if (batchCancelled.value) {
+    message.info(`已停止：成功 ${okN}，失败 ${failN}，剩余未导入`)
+  } else if (failN === 0) {
+    message.success(`批量导入完成：${okN} 个全部成功`)
+  } else {
+    message.warning(`批量导入结束：成功 ${okN}，失败 ${failN}（详见列表）`)
+  }
+}
+
 async function run() {
   errMsg.value = ''
+  if (mode.value === 'batch') {
+    await runBatch()
+    return
+  }
   if (mode.value === 'files') {
     if (!targetId.value) { errMsg.value = '请选择目标目录'; return }
     if (!selectedFiles.value.length) { errMsg.value = '请先选择图片文件'; return }
@@ -223,4 +372,21 @@ async function run() {
   padding: 6px; border: 1px solid var(--border); border-radius: 6px;
   background: var(--chip-bg);
 }
+.batch-summary { font-size: 12px; font-weight: 700; opacity: .7; margin-top: 12px; display: flex; align-items: center; gap: 8px; }
+.batch-list {
+  max-height: 220px; overflow-y: auto; margin-top: 10px;
+  padding: 6px; border: 1px solid var(--border); border-radius: 6px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.batch-item { display: flex; align-items: center; gap: 10px; }
+.batch-item-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.batch-sub { font-size: 11px; opacity: .55; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.batch-results {
+  margin-top: 10px; max-height: 180px; overflow-y: auto;
+  padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 12px;
+}
+.batch-result.ok { color: var(--ms-primary, #18a058); }
+.batch-result.err { color: #d03050; word-break: break-all; }
 </style>
