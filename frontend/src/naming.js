@@ -45,7 +45,7 @@ export function parseMangaName(raw) {
 /**
  * 应用解析结果到标签草稿：仅填充为空的类别，不覆盖已有值。
  * @param {object} tags 标签草稿 { cm: [], author: [], ... }
- * @param {{name: string, cm: string|null, author: string|null}} parsed
+ * @param {{full: string, name: string, cm: string|null, author: string|null}} parsed
  * @returns {object} 新的标签对象
  */
 export function applyParsedTags(tags, parsed) {

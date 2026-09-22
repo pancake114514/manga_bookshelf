@@ -274,6 +274,8 @@ async function runBatch() {
     if (batchCancelled.value || !show.value) break   // 手动停止 / 关闭弹窗
     const displayName = e.name.trim() || e.folder
     try {
+      const check = await api.validateName(displayName)
+      if (!check.ok) throw new Error(check.error)
       await api.importDirectory({
         source_dir: e.path,
         name: displayName,
