@@ -29,7 +29,7 @@
         :anim-delay="phase ? Math.min(i * (phase === 'leaving' ? 12 : 26), 420) : 0"
         :revealed="revealedSet.has(o.id)"
         :select-mode="selectMode" :selected="selected.has(o.id)"
-        @open="openDir" @edit="editObj" @cover="changeCover" @del="delObj"
+        @open="openDir" @read="openReader" @edit="editObj" @cover="changeCover" @del="delObj"
         @rate="rateObj" @toggle-select="toggleSelect" />
     </div>
     <n-empty v-if="!shown.length && !phase" class="empty" size="large"
@@ -270,6 +270,22 @@ async function openDir(obj) {
   const detail = await api.object(obj.id)
   store.directory = { obj: detail }
   store.view = { name: 'directory' }
+}
+
+// 卡片「继续阅读」：取详情后直达阅读器，恢复上次进度（省去进详情页一跳）
+async function openReader(obj) {
+  try {
+    const detail = await api.object(obj.id)
+    if (!detail.images?.length) {
+      message.warning('该对象没有图片')
+      return
+    }
+    const idx = Math.min(obj.last_read_idx || 0, detail.images.length - 1)
+    store.reader = { obj: detail, images: detail.images, index: idx, from: 'shelf' }
+    store.view = { name: 'reader' }
+  } catch (e) {
+    message.error(e.message || String(e))
+  }
 }
 
 function editObj(obj) {

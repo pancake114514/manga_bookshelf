@@ -85,7 +85,7 @@ function filterTag(cat, val) {
 
 function back() { store.view = { name: 'shelf' } }
 function openAt(idx) {
-  store.reader = { obj: props.obj, images: props.obj.images, index: idx }
+  store.reader = { obj: props.obj, images: props.obj.images, index: idx, from: 'directory' }
   store.view = { name: 'reader' }
 }
 function continueRead() {

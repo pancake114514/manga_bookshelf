@@ -267,7 +267,10 @@ function back() {
   clearTimeout(saveTimer)
   win.exitFullscreen()
   api.lastRead(reader.obj.id, index.value).catch(() => {})
-  store.view = { name: 'directory' }
+  // 回到来处：详情页进入则回详情页，书架直达则回书架
+  // （直达时 store.directory 未设置，固定跳 directory 会因渲染空数据而卡死）
+  const to = reader.from === 'directory' && store.directory ? 'directory' : 'shelf'
+  store.view = { name: to }
 }
 
 // 真全屏走 Win32 窗口层（WebView2 不响应 HTML requestFullscreen）
