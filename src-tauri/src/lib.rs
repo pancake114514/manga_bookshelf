@@ -73,6 +73,15 @@ pub fn run() {
     };
 
     tauri::Builder::default()
+        // 单实例：二次启动时唤起已有主窗口，随后新进程立即退出
+        // （须注册为第一个插件；避免多进程并发写同一 SQLite 库）
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.unminimize();
+                let _ = win.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
