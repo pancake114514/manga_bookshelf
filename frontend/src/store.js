@@ -34,6 +34,8 @@ export const store = reactive({
   reloadTick: 0,
   view: { name: 'shelf' }, // shelf | directory | reader
 
+  deleting: 0,   // 正在执行中的删除任务数（顶栏提示/退出确认依据）
+
   ui: { import: false, library: false },
 
   reader: null,

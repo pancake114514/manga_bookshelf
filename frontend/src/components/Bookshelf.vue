@@ -250,11 +250,25 @@ function confirmBatchDelete() {
 async function runBatchDelete(deleteFiles) {
   const objs = shown.value.filter(o => selected.value.has(o.id))
   let ok = 0, fail = 0
-  for (const o of objs) {
-    try { await api.deleteObject(o.id, deleteFiles); ok++ } catch { fail++ }
+  const warns = []
+  store.deleting++
+  try {
+    for (const o of objs) {
+      try {
+        const res = await api.deleteObject(o.id, deleteFiles)
+        if (res?.warnings?.length) warns.push(...res.warnings)
+        ok++
+      } catch { fail++ }
+    }
+  } finally {
+    store.deleting--
   }
   if (fail) message.warning(`已删除 ${ok} 个，失败 ${fail} 个`)
   else message.success(`已删除 ${ok} 个`)
+  if (warns.length) {
+    const head = warns.slice(0, 3).join('；')
+    message.warning(warns.length > 3 ? `${head} 等 ${warns.length} 条提示` : head)
+  }
   exitSelect()
   silentReload()
 }
@@ -337,11 +351,14 @@ function delObj(obj) {
 }
 
 async function doDelete(obj, deleteFiles) {
+  store.deleting++
   try {
-    await api.deleteObject(obj.id, deleteFiles)
-    message.success('已删除')
+    const res = await api.deleteObject(obj.id, deleteFiles)
+    if (res?.warnings?.length) message.warning(res.warnings.join('；'))
+    else message.success('已删除')
     silentReload()
   } catch (e) { message.error(e.message) }
+  finally { store.deleting-- }
 }
 </script>
 

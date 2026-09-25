@@ -152,6 +152,42 @@ pub fn run() {
             commands::set_config_value,
             commands::open_in_explorer,
         ])
+        // 关闭拦截：删除进行中时阻止直接退出，确认后才放行（防文件删到一半被杀进程）
+        .on_window_event({
+            use std::sync::atomic::{AtomicBool, Ordering};
+            let exiting = std::sync::Arc::new(AtomicBool::new(false));
+            move |window, event| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    // 已确认退出（或无任务在跑）：放行
+                    if exiting.load(Ordering::SeqCst)
+                        || commands::deletions_in_progress() == 0
+                    {
+                        return;
+                    }
+                    api.prevent_close();
+                    let win = window.clone();
+                    let exiting = exiting.clone();
+                    // 原生模态框会阻塞，放独立线程跑，避免卡死主线程事件循环
+                    std::thread::spawn(move || {
+                        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+                        let confirmed = win
+                            .app_handle()
+                            .dialog()
+                            .message("正在删除，确定退出吗？")
+                            .title("MangaShelf")
+                            .buttons(MessageDialogButtons::OkCancelCustom(
+                                "退出".into(),
+                                "取消".into(),
+                            ))
+                            .blocking_show();
+                        if confirmed {
+                            exiting.store(true, Ordering::SeqCst);
+                            let _ = win.close();
+                        }
+                    });
+                }
+            }
+        })
         .run(tauri::generate_context!())
         .expect("启动 MangaShelf 失败");
 }

@@ -5,6 +5,10 @@
     <!-- 虚拟框一：与左侧栏等宽，logo 保持左对齐（与侧栏分隔线位置分割，不画线） -->
     <div class="tb-logo-box">
       <span class="logo">MangaShelf</span>
+      <!-- 删除进行中提示：字号与搜索框文字一致（14px） -->
+      <span v-if="store.deleting" class="del-busy">
+        <n-spin :size="13" /> 正在删除
+      </span>
     </div>
     <!-- 虚拟框二：内容区，搜索框左缘对齐第一列卡片左缘 -->
     <div class="tb-search-box">
@@ -33,7 +37,7 @@
 
 <script setup>
 import { ref, watch, onMounted, onUnmounted } from 'vue'
-import { NInput, NButton, NSwitch } from 'naive-ui'
+import { NInput, NButton, NSwitch, NSpin } from 'naive-ui'
 import { store, toggleTheme } from '../store'
 import { debounce } from '../utils'
 import { barMouseDown } from '../windowState'
@@ -77,6 +81,12 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   padding-left: var(--content-pad);
 }
 .logo { font-family: Georgia, serif; font-size: 17px; font-weight: 700; letter-spacing: .5px; }
+/* 删除中提示：14px 与搜索框文字一致 */
+.del-busy {
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-left: 12px; font-size: 14px; color: var(--text2);
+  user-select: none;
+}
 /* 搜索框：限制最宽 380，同时保底 200——窗口压到最小宽度时被压缩到不可用的程度 */
 .search { max-width: 380px; min-width: 200px; }
 /* 明暗切换开关：不可压缩，避免窄窗口时被挤压变形 */

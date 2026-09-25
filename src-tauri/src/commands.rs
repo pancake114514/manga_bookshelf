@@ -152,6 +152,14 @@ pub struct SimpleResult {
     pub error: Option<String>,
 }
 
+/// 删除结果：ok 表示 DB 记录已删除；warnings 为不阻断删除的提示
+/// （文件被占用删除失败、共享目录跳过等），由前端展示
+#[derive(Serialize)]
+pub struct DeleteResult {
+    pub ok: bool,
+    pub warnings: Vec<String>,
+}
+
 #[derive(Serialize)]
 pub struct ConfigResponse {
     pub key: String,
@@ -394,16 +402,32 @@ pub fn set_last_read(
     Ok(SimpleResult { ok: true, error: None })
 }
 
-#[tauri::command]
+/// 正在执行中的删除任务数（含文件删除阶段）。
+/// 窗口关闭事件读取此计数决定是否弹退出确认。
+static DELETING_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+pub fn deletions_in_progress() -> usize {
+    DELETING_COUNT.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// async：文件删除可能持续数秒（大目录/机械盘），跑独立线程保证
+/// 主线程可继续处理窗口事件（含关闭确认），并维持 DELETING_COUNT 计数
+#[tauri::command(async)]
 pub fn delete_object(
     svc: State<'_, LibraryService>,
     oid: String,
     delete_files: Option<bool>,
-) -> Result<SimpleResult, String> {
-    let delete_files = delete_files.unwrap_or(false);
-    let root = storage_root_of(&svc);
-    svc.delete_object(&oid, delete_files, root.as_deref())?;
-    Ok(SimpleResult { ok: true, error: None })
+) -> Result<DeleteResult, String> {
+    use std::sync::atomic::Ordering;
+    DELETING_COUNT.fetch_add(1, Ordering::SeqCst);
+    let result = (|| {
+        let delete_files = delete_files.unwrap_or(false);
+        let root = storage_root_of(&svc);
+        let warnings = svc.delete_object(&oid, delete_files, root.as_deref())?;
+        Ok(DeleteResult { ok: true, warnings })
+    })();
+    DELETING_COUNT.fetch_sub(1, Ordering::SeqCst);
+    result
 }
 
 /// 重活命令标记 async：在独立线程执行而非 UI 主线程，

@@ -173,13 +173,15 @@ impl LibraryService {
         false
     }
 
-    /// 删除对象（DB + 可选本地文件 + 缩略图缓存）
+    /// 删除对象（DB + 可选本地文件 + 缩略图缓存）。
+    /// 返回警告列表：文件删除失败、共享目录跳过等不阻断删除（DB 记录已删干净），
+    /// 仅作为提示透出给前端。
     pub fn delete_object(
         &self,
         obj_id: &str,
         delete_files: bool,
         storage_root: Option<&str>,
-    ) -> Result<(), String> {
+    ) -> Result<Vec<String>, String> {
         let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
         let obj = db.get_object_opt(obj_id)?;
 
@@ -206,22 +208,29 @@ impl LibraryService {
         // 删除对象（tags / images 通过外键 CASCADE 一并删除）
         db.delete_object(obj_id)?;
 
-        // 物理删除文件
+        // 物理删除文件（失败/跳过不回滚：DB 已删干净，仅向用户提示残留）
+        let mut warnings: Vec<String> = Vec::new();
         if delete_files {
             if let Some(obj) = &obj {
                 if let Some(sp) = &obj.storage_path {
                     if Path::new(sp).is_dir() {
                         // 防御：历史数据可能存在多对象共享同一存储目录
                         if !Self::storage_path_taken(&db, sp, None) {
-            let _ = fs::remove_dir_all(sp);
+                            if let Err(e) = fs::remove_dir_all(sp) {
+                                log::warn!("对象 {} 的本地文件删除失败: {sp}: {e}", obj_id);
+                                warnings.push(format!(
+                                    "本地文件删除失败（可能被其他程序占用）：{sp}"
+                                ));
+                            }
                         } else {
                             log::warn!("对象 {} 的存储目录与其他对象共享，跳过物理删除: {}", obj_id, sp);
+                            warnings.push(format!("存储目录与其他对象共享，已跳过物理删除：{sp}"));
                         }
                     }
                 }
             }
         }
-        Ok(())
+        Ok(warnings)
     }
 
     // ── 导入 ───────────────────────────────────────────────────────────────
@@ -821,9 +830,32 @@ mod tests {
         let (svc2, _d2, oid2) = seeded("del2", "连文件删", tags(vec![]));
         let sp = PathBuf::from(svc2.get_object(&oid2).unwrap().unwrap().storage_path.clone().unwrap());
         let root2 = sp.parent().unwrap();
-        svc2.delete_object(&oid2, true, Some(root2.to_str().unwrap())).unwrap();
+        let warnings = svc2.delete_object(&oid2, true, Some(root2.to_str().unwrap())).unwrap();
+        assert!(warnings.is_empty(), "正常删除不应有警告: {warnings:?}");
         assert!(svc2.get_object(&oid2).unwrap().is_none());
         assert!(!sp.exists(), "存储目录应被删除");
+    }
+
+    #[test]
+    fn delete_object_warns_on_shared_storage_dir() {
+        // 两对象人为共享存储目录：删除其一应产生警告、不物理删目录、DB 记录删干净
+        let (svc, d) = new_svc("delshared");
+        let root = d.join("storage");
+        fs::create_dir_all(&root).unwrap();
+        let src = d.join("src");
+        fs::create_dir_all(&src).unwrap();
+        mk_img(&src, "a.png");
+        let oid1 = uuid::Uuid::new_v4().to_string();
+        let oid2 = uuid::Uuid::new_v4().to_string();
+        svc.import_directory(&oid1, "甲", &tags(vec![]), src.to_str().unwrap(), root.to_str().unwrap(), true, None, None).unwrap();
+        svc.import_directory(&oid2, "乙", &tags(vec![]), src.to_str().unwrap(), root.to_str().unwrap(), true, None, None).unwrap();
+        let sp1 = svc.get_object(&oid1).unwrap().unwrap().storage_path.clone().unwrap();
+        svc.db.lock().unwrap().update_object_storage_path(&oid2, &sp1).unwrap();
+        let warnings = svc.delete_object(&oid1, true, Some(root.to_str().unwrap())).unwrap();
+        assert_eq!(warnings.len(), 1, "共享目录应产生警告: {warnings:?}");
+        assert!(Path::new(&sp1).is_dir(), "共享目录不应被物理删除");
+        assert!(svc.get_object(&oid1).unwrap().is_none(), "DB 记录应已删除");
+        assert!(svc.get_object(&oid2).unwrap().is_some(), "另一对象不受影响");
     }
 
     #[test]
