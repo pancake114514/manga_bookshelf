@@ -32,7 +32,9 @@
     </div>
 
     <div class="reader-stage" :class="[`zoom-${zoom}`]" @click="onStageClick">
-      <template v-if="double">
+      <!-- 空对象兜底：0 图时给出明确空态而非无限转圈（正常入口已拦截，此处防御外部删图等异常数据） -->
+      <div v-if="!total" class="empty-page">该对象没有内容</div>
+      <template v-else-if="double">
         <div class="spread">
           <img v-if="shownLeft" :src="shownLeft" alt="">
           <img v-if="shownRight" :src="shownRight" alt="">
@@ -45,7 +47,7 @@
       </template>
     </div>
 
-    <div class="bottom">
+    <div v-if="total" class="bottom">
       <div ref="barEl" class="progress" @pointerdown="onBarDown" @pointermove="onBarMove"
            @pointerup="onBarUp" @pointercancel="onBarUp">
         <div class="track" />
@@ -354,6 +356,10 @@ function onBarUp() {
   user-select: none; -webkit-user-drag: none;
 }
 .stage-spin, .spread-spin { position: absolute; }
+.empty-page {
+  color: var(--text2); font-size: 14px;
+  user-select: none; cursor: default;
+}
 
 /* 适应宽度：纵向滚动 */
 .reader-stage.zoom-width { flex-direction: column; align-items: center; overflow-y: auto; }

@@ -277,7 +277,7 @@ async function openReader(obj) {
   try {
     const detail = await api.object(obj.id)
     if (!detail.images?.length) {
-      message.warning('该对象没有图片')
+      message.warning('该对象没有内容')
       return
     }
     const idx = Math.min(obj.last_read_idx || 0, detail.images.length - 1)

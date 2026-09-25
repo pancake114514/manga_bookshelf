@@ -7,7 +7,7 @@
         <div class="meta">
           <div class="title-row">
             <h2 class="title">{{ detail.name }}</h2>
-            <n-button type="primary" @click="continueRead"><IconPlay :size="13" /> 继续阅读</n-button>
+            <n-button v-if="detail.images?.length" type="primary" @click="continueRead"><IconPlay :size="13" /> 继续阅读</n-button>
           </div>
           <div class="rate-row">
             <n-rate size="small" :value="rating" @update:value="rate" />
