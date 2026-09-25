@@ -13,6 +13,16 @@
       <n-button @click="browse">浏览…</n-button>
     </n-input-group>
 
+    <div class="field-label">缩略图缓存</div>
+    <div class="cache-row">
+      <span class="hint-inline">
+        清理失效缓存（已删除对象/被替换源文件的残留），总量超过 2GB 时按最旧优先删除
+      </span>
+      <n-button size="small" :loading="pruneBusy" :disabled="!store.storageRoot" @click="runPrune">
+        清理缓存
+      </n-button>
+    </div>
+
     <n-alert v-if="errMsg" type="error" class="alert">{{ errMsg }}</n-alert>
     <n-progress v-if="busy" type="line" :show-indicator="false" processing />
     <p class="hint">
@@ -49,6 +59,25 @@ const message = useMessage()
 const newRoot = ref('')
 const errMsg = ref('')
 const busy = ref(false)
+const pruneBusy = ref(false)
+
+// 清理缩略图缓存：删除失效条目与超限旧文件，报告删除数量与释放空间
+async function runPrune() {
+  pruneBusy.value = true
+  try {
+    const r = await api.pruneThumbCache()
+    if (!r.removed) {
+      message.success('缓存已是最新，无需清理')
+    } else {
+      const mb = (r.freed_bytes / 1024 / 1024).toFixed(1)
+      message.success(`已清理 ${r.removed} 个缓存文件，释放 ${mb} MB`)
+    }
+  } catch (e) {
+    message.error(e.message || String(e))
+  } finally {
+    pruneBusy.value = false
+  }
+}
 
 async function browse() {
   const dir = await dialog.pickDir('选择新的图库目录')
@@ -83,4 +112,6 @@ async function run() {
 .alert { margin-top: 12px; }
 .hint { font-size: 12px; opacity: .55; line-height: 1.7; margin-top: 12px; }
 .footer { display: flex; justify-content: flex-end; }
+.cache-row { display: flex; align-items: center; gap: 12px; }
+.hint-inline { flex: 1; font-size: 12px; opacity: .55; line-height: 1.5; }
 </style>

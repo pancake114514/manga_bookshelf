@@ -150,6 +150,7 @@ pub fn run() {
             commands::migrate,
             commands::get_config_value,
             commands::set_config_value,
+            commands::prune_thumb_cache,
             commands::open_in_explorer,
         ])
         // 关闭拦截：删除进行中时阻止直接退出，确认后才放行（防文件删到一半被杀进程）

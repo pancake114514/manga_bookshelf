@@ -10,6 +10,9 @@ pub const COVER_THUMB_SIZE: (u32, u32) = (180, 240);
 
 pub const THUMB_CACHE_DIR: &str = ".thumbcache";
 
+/// 缩略图缓存总量上限（正确性清理后仍超此值则按最旧优先删除，删除后可按需重新生成）
+pub const THUMB_CACHE_MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2 GB
+
 pub fn tag_category_order() -> Vec<&'static str> {
     vec!["work", "author", "character", "cm", "censored", "r18"]
 }

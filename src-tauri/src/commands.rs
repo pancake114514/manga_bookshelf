@@ -160,6 +160,14 @@ pub struct DeleteResult {
     pub warnings: Vec<String>,
 }
 
+/// 缩略图缓存清理结果
+#[derive(Serialize)]
+pub struct PruneResult {
+    pub ok: bool,
+    pub removed: usize,
+    pub freed_bytes: u64,
+}
+
 #[derive(Serialize)]
 pub struct ConfigResponse {
     pub key: String,
@@ -613,6 +621,15 @@ pub fn cached_thumb_path(
 }
 
 // ── 系统集成 ──────────────────────────────────────────────────────────────────
+
+/// 清理缩略图缓存（正确性清理 + 总量上限）。磁盘遍历可能耗时，标记 async。
+#[tauri::command(async)]
+pub fn prune_thumb_cache(
+    svc: State<'_, LibraryService>,
+) -> Result<PruneResult, String> {
+    let (removed, freed) = svc.prune_thumbnail_cache()?;
+    Ok(PruneResult { ok: true, removed, freed_bytes: freed })
+}
 
 /// 在系统资源管理器中打开对象的存储目录（Windows: explorer 选中该文件夹）
 #[tauri::command]

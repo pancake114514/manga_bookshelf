@@ -628,6 +628,34 @@ impl Database {
             .map_err(|e| format!("查询图片数量失败: {e}"))
     }
 
+    /// 全部对象的封面路径（缓存维护用）
+    pub fn get_all_cover_paths(&self) -> Result<Vec<String>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT cover_image FROM objects WHERE cover_image IS NOT NULL AND cover_image != ''")
+            .map_err(|e| format!("查询封面失败: {e}"))?;
+        let vals: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| format!("查询封面失败: {e}"))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(vals)
+    }
+
+    /// 全部图片的文件路径（缓存维护用）
+    pub fn get_all_image_filepaths(&self) -> Result<Vec<String>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT filepath FROM images")
+            .map_err(|e| format!("查询图片路径失败: {e}"))?;
+        let vals: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| format!("查询图片路径失败: {e}"))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(vals)
+    }
+
 }
 
 // ── Row 映射 trait ────────────────────────────────────────────────────────────

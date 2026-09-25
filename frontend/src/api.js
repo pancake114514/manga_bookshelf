@@ -33,6 +33,7 @@ export const api = {
 
   // 库管理
   migrate: (newRoot) => invoke('migrate', { body: { newRoot } }),
+  pruneThumbCache: () => invoke('prune_thumb_cache'),
 
   // 系统集成
   openInExplorer: (id) => invoke('open_in_explorer', { oid: id }),

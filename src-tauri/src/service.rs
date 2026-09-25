@@ -94,6 +94,23 @@ impl LibraryService {
         self.db.lock().unwrap_or_else(|p| p.into_inner()).get_image_by_id(obj_id, img_id)
     }
 
+    /// 清理缩略图缓存（正确性清理 + 总量上限），返回 (删除文件数, 释放字节数)
+    pub fn prune_thumbnail_cache(&self) -> Result<(usize, u64), String> {
+        let root = self.get_config("storage_root")?.ok_or("图库未配置")?;
+        let mut keep: Vec<String> = Vec::new();
+        {
+            let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+            keep.extend(db.get_all_cover_paths()?);
+            keep.extend(db.get_all_image_filepaths()?);
+        }
+        let cache_dir = get_thumb_cache_dir(&root);
+        Ok(crate::thumbnail::prune_thumb_cache(
+            &cache_dir,
+            &keep,
+            crate::config::THUMB_CACHE_MAX_BYTES,
+        ))
+    }
+
     pub fn get_tag_values(&self, category: &str) -> Result<Vec<String>, String> {
         self.db.lock().unwrap_or_else(|p| p.into_inner()).get_all_tag_values(category)
     }
