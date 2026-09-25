@@ -1,5 +1,5 @@
 <template>
-  <main class="shelf">
+  <main class="shelf" @scroll="onShelfScroll">
     <div class="toolbar">
       <div class="result-hint">
         共 {{ shown.length }} 个对象{{ store.r18 ? '' : '（R-18 已隐藏）' }}{{ store.keyword ? ` · 搜索「${store.keyword}」` : '' }}
@@ -25,7 +25,7 @@
     </div>
 
     <div ref="gridEl" class="shelf-grid" :class="[phase, `density-${store.density}`]">
-      <ObjectCard v-for="(o, i) in shown" :key="o.id" :obj="o"
+      <ObjectCard v-for="(o, i) in visible" :key="o.id" :obj="o"
         :anim-delay="phase ? Math.min(i * (phase === 'leaving' ? 12 : 26), 420) : 0"
         :revealed="revealedSet.has(o.id)"
         :select-mode="selectMode" :selected="selected.has(o.id)"
@@ -64,7 +64,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted, h } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, h } from 'vue'
 import { useMessage, useDialog, NCheckbox, NSelect, NButton, NButtonGroup, NModal, NEmpty } from 'naive-ui'
 import { api, dialog as fileDialog } from '../api'
 import { store, refreshTagValues, setSort, setDensity } from '../store'
@@ -78,6 +78,29 @@ const message = useMessage()
 const dialog = useDialog()
 
 const shown = ref([])
+
+// ── 渐进渲染：大库不全量挂载 DOM ──
+// 首屏只渲染 INITIAL 张，滚动接近底部再按 BATCH 追加；DOM 数量随滚动增长
+// 而非随库规模一次性全量挂载（几千张卡片的首屏挂载/筛选切换卡顿主因）。
+// 数据操作（多选/批量删除等）仍基于 shown 全集，不受渲染截断影响。
+const RENDER_INITIAL = 80
+const RENDER_BATCH = 100
+const renderCount = ref(RENDER_INITIAL)
+const visible = computed(() => shown.value.slice(0, renderCount.value))
+
+// 结果集变化（筛选/搜索/排序/刷新）时重置已渲染量
+watch(shown, () => { renderCount.value = RENDER_INITIAL })
+
+function onShelfScroll(e) {
+  if (renderCount.value >= shown.value.length) return
+  const el = e.currentTarget
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 600) {
+    renderCount.value += RENDER_BATCH
+  }
+}
+
+// 超过此数量跳过整批右出左入过渡（几百张卡片的级联动画本身即卡顿源）
+const ANIM_MAX = 300
 const phase = ref('')            // '' | 'leaving' | 'entering'
 const revealedSet = ref(new Set())
 const editShow = ref(false)
@@ -134,6 +157,11 @@ watch(() => [store.filters, store.keyword, store.r18], async () => {
   exitSelect()
 
   const sorted = applySort(next)
+  if (sorted.length > ANIM_MAX) {      // 大结果集跳过整批过渡动画
+    shown.value = sorted
+    phase.value = ''
+    return
+  }
   if (!shown.value.length) {           // 首次或从空态恢复：直接入场动画
     shown.value = sorted
     phase.value = 'entering'
@@ -169,6 +197,7 @@ watch(() => store.reloadTick, () => { silentReload() })
 
 onMounted(async () => {
   shown.value = applySort(await fetchObjects().catch(() => []))
+  if (shown.value.length > ANIM_MAX) return   // 大库首屏不做入场动画
   phase.value = 'entering'
   setTimeout(() => { phase.value = '' }, 900)
 })
