@@ -4,7 +4,8 @@
        @dblclick.stop="!selectMode && $emit('open', obj)"
        @contextmenu.prevent="onContextMenu">
     <div class="cover-box">
-      <img :src="coverUrl" loading="lazy" alt="">
+      <!-- 封面加载失败（无封面/文件缺失）时隐藏 img，显示容器底色的空白卡片而非破碎图标 -->
+      <img v-if="coverOk" :src="coverUrl" loading="lazy" alt="" @error="coverOk = false">
       <template v-if="isR18 && !revealed">
         <span class="r18-badge">R-18</span>
         <div class="r18-lock">
@@ -53,7 +54,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, h } from 'vue'
+import { computed, reactive, ref, watch, h } from 'vue'
 import { NButton, NRate, NDropdown, useMessage } from 'naive-ui'
 import { api } from '../api'
 import { IconLock, IconPlay, IconEdit, IconImage, IconTrash, IconCheck, IconStarFill, IconFolder } from './icons'
@@ -103,6 +104,9 @@ async function onMenuSelect(key) {
 
 const isR18 = computed(() => !!props.obj.tags?.r18)
 const rating = computed(() => Number(props.obj.tags?.rating?.[0] || 0))
+// 封面可用性：加载失败置 false 隐藏 img；封面 URL 变化（换图/刷新）时复位重试
+const coverOk = ref(true)
+watch(() => props.obj.cover_url, () => { coverOk.value = true })
 // 阅读进度：last_read_idx 为 0 视为未读（无指示）；读至最后一页视为读完
 const progressPct = computed(() => {
   const n = props.obj.image_count || 0

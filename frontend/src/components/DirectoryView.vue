@@ -3,7 +3,8 @@
     <div class="info-bar">
       <n-button size="small" @click="back"><IconBack :size="14" /> 书架</n-button>
       <div class="info-row">
-        <img class="cover" :src="detail.cover_url" alt="">
+        <!-- 封面加载失败（无封面/文件缺失）时隐藏 img，显示底色空白而非破碎图标 -->
+        <img v-if="coverOk" class="cover" :src="detail.cover_url" alt="" @error="coverOk = false">
         <div class="meta">
           <div class="title-row">
             <h2 class="title">{{ detail.name }}</h2>
@@ -37,7 +38,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { NButton, NRate } from 'naive-ui'
 import { api } from '../api'
 import { store } from '../store'
@@ -46,6 +47,10 @@ import { IconBack, IconPlay } from './icons'
 
 const props = defineProps({ obj: { type: Object, required: true } })
 const detail = computed(() => props.obj)
+
+// 封面可用性：加载失败置 false 隐藏 img；封面 URL 变化（换图）时复位重试
+const coverOk = ref(true)
+watch(() => props.obj.cover_url, () => { coverOk.value = true })
 
 const rating = computed(() => Number(props.obj.tags?.rating?.[0] || 0))
 
