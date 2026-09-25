@@ -12,8 +12,50 @@ mod library_manager;
 mod service;
 mod thumbnail;
 
-use commands::{get_thumbnail_path, resolve_image_url};
+use commands::{cached_thumb_path, get_thumbnail_path, resolve_image_url};
 use service::LibraryService;
+
+/// 缩略图生成并发上限。
+/// 首次打开详情页时 WebView 会同时涌入上百个图片请求，若每个都裸开线程
+/// 各自解码+Lanczos 缩放，会瞬间吃满所有核心（风扇狂转）。用计数信号量
+/// 把"重活"（缓存未命中的缩略图生成）限制在少数几个线程，其余排队。
+const THUMB_CONCURRENCY: usize = 2;
+
+struct Semaphore {
+    count: std::sync::Mutex<usize>,
+    cond: std::sync::Condvar,
+}
+
+impl Semaphore {
+    fn new(permits: usize) -> Self {
+        Self {
+            count: std::sync::Mutex::new(permits),
+            cond: std::sync::Condvar::new(),
+        }
+    }
+
+    /// 获取一个许可（无可用时阻塞排队）
+    fn acquire(&self) {
+        let mut n = self.count.lock().unwrap();
+        while *n == 0 {
+            n = self.cond.wait(n).unwrap();
+        }
+        *n -= 1;
+    }
+
+    /// 归还一个许可
+    fn release(&self) {
+        let mut n = self.count.lock().unwrap();
+        *n += 1;
+        self.cond.notify_one();
+    }
+}
+
+static THUMB_SEMAPHORE: std::sync::OnceLock<Semaphore> = std::sync::OnceLock::new();
+
+fn thumb_semaphore() -> &'static Semaphore {
+    THUMB_SEMAPHORE.get_or_init(|| Semaphore::new(THUMB_CONCURRENCY))
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -51,14 +93,21 @@ pub fn run() {
                 let response = match resolve_image_url(&svc, &url) {
                     Ok((path, thumb_size)) => {
                         if let Some(size) = thumb_size {
-                            // 需要缩略图
+                            // 需要缩略图：先无锁探测缓存，命中则直接读文件（轻，
+                            // 不占许可）；未命中则排队生成（重活，受并发上限约束）
+                            let sem = thumb_semaphore();
                             let kind = format!("{}_{}", size.0, size.1);
-                            match get_thumbnail_path(&svc, &path, &kind) {
-                                Ok(thumb_path) => read_file_response(&thumb_path),
-                                Err(_) => {
-                                    // 缩略图失败，返回原图
-                                    read_file_response(&path)
-                                }
+                            if let Some(cached) =
+                                cached_thumb_path(&svc, &path, &kind)
+                            {
+                                read_file_response(&cached)
+                            } else {
+                                sem.acquire();
+                                let resp = get_thumbnail_path(&svc, &path, &kind)
+                                    .map(|p| read_file_response(&p))
+                                    .unwrap_or_else(|_| read_file_response(&path));
+                                sem.release();
+                                resp
                             }
                         } else {
                             read_file_response(&path)

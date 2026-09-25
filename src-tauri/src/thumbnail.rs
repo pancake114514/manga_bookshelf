@@ -45,6 +45,21 @@ fn thumb_path(cache_dir: &str, source_path: &str, size: (u32, u32)) -> PathBuf {
     }
 }
 
+/// 探测缩略图缓存：命中返回缓存路径，未命中返回 None。
+/// 供协议层在排队生成前先查缓存，命中则免占并发许可直接读文件。
+pub fn cached_thumb_path(
+    source_path: &str,
+    cache_dir: &str,
+    size: (u32, u32),
+) -> Option<String> {
+    let path = thumb_path(cache_dir, source_path, size);
+    if path.is_file() {
+        Some(path.to_string_lossy().to_string())
+    } else {
+        None
+    }
+}
+
 /// 生成缩略图，返回缓存路径；失败返回 None。
 /// 策略：等比缩放后居中裁剪到目标尺寸，不填充任何背景色。
 pub fn generate_thumbnail(
@@ -89,11 +104,29 @@ pub fn generate_thumbnail(
     let new_w = (src_w as f64 * scale).round() as u32;
     let new_h = (src_h as f64 * scale).round() as u32;
 
-    let resized = img.resize_exact(new_w, new_h, image::imageops::FilterType::Lanczos3);
+    // 大比率降采样时 Lanczos3 的核宽度随缩放比放大（约 13× 缩小时每输出
+    // 像素需 80+ 采样点），是缩略图生成的最大 CPU 热点；thumbnail() 的
+    // box-filter 单趟降采样在此场景快数倍，160~220px 目标尺寸下画质肉眼
+    // 无差。仅小比率调整（<2×）时保留 Lanczos3。
+    let resized = if src_w >= new_w.saturating_mul(2) || src_h >= new_h.saturating_mul(2) {
+        let t = img.thumbnail(new_w, new_h);
+        // thumbnail 按比例取整可能比目标小 1px，补齐以保证可裁剪
+        if t.width() < target_w || t.height() < target_h {
+            t.resize_exact(
+                target_w.max(t.width()),
+                target_h.max(t.height()),
+                image::imageops::FilterType::Lanczos3,
+            )
+        } else {
+            t
+        }
+    } else {
+        img.resize_exact(new_w, new_h, image::imageops::FilterType::Lanczos3)
+    };
 
     // 居中裁剪
-    let left = (new_w.saturating_sub(target_w)) / 2;
-    let top = (new_h.saturating_sub(target_h)) / 2;
+    let left = (resized.width().saturating_sub(target_w)) / 2;
+    let top = (resized.height().saturating_sub(target_h)) / 2;
     let cropped = resized.crop_imm(left, top, target_w, target_h);
 
     // 先写临时文件再原子替换

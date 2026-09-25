@@ -549,6 +549,17 @@ pub fn resolve_image_url(svc: &LibraryService, url: &str) -> Result<(String, Opt
     }
 }
 
+/// 解析缩略图 kind（"{w}_{h}"）为尺寸
+fn parse_thumb_kind(kind: &str) -> (u32, u32) {
+    kind.split_once('_')
+        .and_then(|(w, h)| {
+            let w: u32 = w.parse().ok()?;
+            let h: u32 = h.parse().ok()?;
+            Some((w, h))
+        })
+        .unwrap_or(THUMBNAIL_SIZE)
+}
+
 /// 生成缩略图并返回路径，供 Tauri 的 asset protocol 使用。
 /// kind 格式为 "{w}_{h}"，直接解析为尺寸。
 pub fn get_thumbnail_path(
@@ -558,18 +569,23 @@ pub fn get_thumbnail_path(
 ) -> Result<String, String> {
     let root = storage_root_of(svc).ok_or("图库未配置")?;
     let cache_dir = crate::thumbnail::get_thumb_cache_dir(&root);
-    // 解析 "w_h" 格式
-    let size = kind
-        .split_once('_')
-        .and_then(|(w, h)| {
-            let w: u32 = w.parse().ok()?;
-            let h: u32 = h.parse().ok()?;
-            Some((w, h))
-        })
-        .unwrap_or(THUMBNAIL_SIZE);
+    let size = parse_thumb_kind(kind);
     let thumb = generate_thumbnail(source_path, &cache_dir, size)
         .ok_or("缩略图生成失败")?;
     Ok(thumb)
+}
+
+/// 探测缩略图缓存（不生成）：命中返回缓存路径，未命中返回 None。
+/// 协议层用它把"读缓存"与"排队生成"分开，缓存命中不占并发许可。
+pub fn cached_thumb_path(
+    svc: &LibraryService,
+    source_path: &str,
+    kind: &str,
+) -> Option<String> {
+    let root = storage_root_of(svc)?;
+    let cache_dir = crate::thumbnail::get_thumb_cache_dir(&root);
+    let size = parse_thumb_kind(kind);
+    crate::thumbnail::cached_thumb_path(source_path, &cache_dir, size)
 }
 
 // ── 系统集成 ──────────────────────────────────────────────────────────────────
