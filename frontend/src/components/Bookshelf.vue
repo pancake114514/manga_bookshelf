@@ -230,7 +230,8 @@ async function runBatchTag() {
 
 function confirmBatchDelete() {
   const n = selected.value.size
-  const checked = { value: false }
+  // 必须用 ref：对话框内容是渲染函数，普通对象无响应式，勾选状态不会回显
+  const checked = ref(false)
   dialog.warning({
     title: '批量删除',
     content: () => h('div', null, [
@@ -318,7 +319,8 @@ async function rateObj(obj, val) {
 }
 
 function delObj(obj) {
-  const checked = { value: false }
+  // 必须用 ref：对话框内容是渲染函数，普通对象无响应式，勾选状态不会回显
+  const checked = ref(false)
   dialog.warning({
     title: '删除对象',
     content: () => h('div', null, [
