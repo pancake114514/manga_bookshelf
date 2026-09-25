@@ -14,6 +14,9 @@
           <n-button :type="zoom === 'width' ? 'primary' : 'default'" :secondary="zoom !== 'width'" @click="setZoom('width')">适应宽度</n-button>
           <n-button :type="zoom === 'original' ? 'primary' : 'default'" :secondary="zoom !== 'original'" @click="setZoom('original')">原始</n-button>
         </n-button-group>
+        <!-- 自由缩放（Ctrl+滚轮）时的当前倍率，点击恢复「适应页面」 -->
+        <n-button v-if="zoom === 'free'" size="small" @mousedown.stop title="点击恢复「适应页面」（或双击页面）"
+                  @click="setZoom('fit')">{{ zoomPct }}%</n-button>
         <n-button size="small" @mousedown.stop :type="rtl ? 'primary' : 'default'" :secondary="!rtl"
                   :title="rtl ? '阅读方向：右→左（日漫）' : '阅读方向：左→右'"
                   @click="toggleDir">{{ rtl ? '右→左' : '左→右' }}</n-button>
@@ -31,18 +34,20 @@
       </div>
     </div>
 
-    <div class="reader-stage" :class="[`zoom-${zoom}`]" @click="onStageClick">
+    <div ref="stageEl" class="reader-stage" :class="[`zoom-${zoom}`, { panning: isPanning }]"
+         @wheel="onWheel" @pointerdown="onStagePointerDown" @pointermove="onStagePointerMove"
+         @pointerup="onStagePointerUp" @pointercancel="onStagePointerUp" @dblclick="onStageDblClick">
       <!-- 空对象兜底：0 图时给出明确空态而非无限转圈（正常入口已拦截，此处防御外部删图等异常数据） -->
       <div v-if="!total" class="empty-page">该对象没有内容</div>
       <template v-else-if="double">
         <div class="spread">
-          <img v-if="shownLeft" :src="shownLeft" alt="">
-          <img v-if="shownRight" :src="shownRight" alt="">
+          <img v-if="shownLeft" :src="shownLeft" alt="" :style="freeStyle">
+          <img v-if="shownRight" :src="shownRight" alt="" :style="freeStyle">
         </div>
         <n-spin v-if="!(rtl ? shownRight : shownLeft)" size="large" class="spread-spin" />
       </template>
       <template v-else>
-        <img v-if="shownSingle" :src="shownSingle" alt="">
+        <img v-if="shownSingle" :src="shownSingle" alt="" :style="freeStyle">
         <n-spin v-else size="large" class="stage-spin" />
       </template>
     </div>
@@ -62,7 +67,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { NButton, NButtonGroup, NSpin } from 'naive-ui'
 import { api, win } from '../api'
 import { store } from '../store'
@@ -81,6 +86,11 @@ const dragging = ref(false)
 const barEl = ref(null)
 const double = ref(false)
 const zoom = ref('fit')
+// 自由缩放（Ctrl+滚轮进入）：zoom === 'free' 时生效，基于原图自然宽的百分比
+const zoomPct = ref(100)
+const naturalW = ref(0)
+const stageEl = ref(null)
+const isPanning = ref(false)
 const rtl = ref(true)
 const chromeVisible = ref(true)
 const fullscreen = ref(false)
@@ -176,7 +186,11 @@ watch(() => current.value?.image_url, v => {
   const g = ++singleGen
   if (!v) { shownSingle.value = ''; return }
   const im = new Image()
-  im.onload = im.onerror = () => { if (g === singleGen) shownSingle.value = v }
+  im.onload = im.onerror = () => {
+    if (g !== singleGen) return
+    shownSingle.value = v
+    naturalW.value = im.naturalWidth || 0
+  }
   im.src = v
 }, { immediate: true })
 
@@ -184,16 +198,19 @@ watch(() => current.value?.image_url, v => {
 watch([spreadLeft, spreadRight], ([l, r]) => {
   const g = ++spreadGen
   if (!l && !r) { shownLeft.value = ''; shownRight.value = ''; return }
-  const wait = src => new Promise(res => {
+  const load = src => new Promise(res => {
     const im = new Image()
-    im.onload = im.onerror = res
+    im.onload = im.onerror = () => res(im.naturalWidth || 0)
     im.src = src
   })
-  Promise.all([l, r].filter(Boolean).map(wait)).then(() => {
-    if (g !== spreadGen) return
-    shownLeft.value = l
-    shownRight.value = r
-  })
+  Promise.all([l ? load(l) : Promise.resolve(0), r ? load(r) : Promise.resolve(0)])
+    .then(([lw, rw]) => {
+      if (g !== spreadGen) return
+      shownLeft.value = l
+      shownRight.value = r
+      // 主位（随阅读方向）图片的自然宽作为自由缩放基准
+      naturalW.value = (rtl.value ? rw : lw) || lw || rw || 0
+    })
 }, { immediate: true })
 
 // 切换双页时按对开基页对齐
@@ -215,6 +232,80 @@ function setZoom(z) {
   api.setConfig(CFG_ZOOM, z).catch(() => {})
 }
 
+// ── 自由缩放（Ctrl+滚轮）与拖拽平移 ──
+// 自由模式的图片宽度 = 原图自然宽 × zoomPct%，stage 溢出滚动 + 指针拖拽平移
+const freeStyle = computed(() =>
+  zoom.value === 'free' && naturalW.value
+    ? { width: `${Math.round((naturalW.value * zoomPct.value) / 100)}px` }
+    : undefined)
+
+function clampPct(p) { return Math.max(20, Math.min(800, p)) }
+
+async function ctrlZoom(e) {
+  e.preventDefault()
+  const stage = stageEl.value
+  if (!stage) return
+  const rect = stage.getBoundingClientRect()
+  const cx = e.clientX - rect.left
+  const cy = e.clientY - rect.top
+  // 光标锚点：保持光标处的内容点缩放前后位置不变
+  const anchor = {
+    x: (stage.scrollLeft + cx) / Math.max(1, stage.scrollWidth),
+    y: (stage.scrollTop + cy) / Math.max(1, stage.scrollHeight),
+  }
+  if (zoom.value !== 'free') {
+    // 以当前显示尺寸为基准进入自由模式，画面无跳变
+    const img = stage.querySelector('img')
+    const base = img && naturalW.value ? (img.clientWidth / naturalW.value) * 100 : 100
+    zoom.value = 'free'
+    zoomPct.value = clampPct(Math.round(base))
+  }
+  zoomPct.value = clampPct(zoomPct.value + (e.deltaY < 0 ? 10 : -10))
+  await nextTick()
+  stage.scrollLeft = anchor.x * stage.scrollWidth - cx
+  stage.scrollTop = anchor.y * stage.scrollHeight - cy
+}
+
+// ── 舞台指针交互：拖拽平移（自由模式）与点击翻页共存 ──
+// 位移超过 4px 视为拖拽（不翻页）；自由模式下按住拖动滚动条实现平移
+let panState = null   // { x, y, sl, st, moved }
+function onStagePointerDown(e) {
+  if (e.button !== 0) return
+  const stage = stageEl.value
+  if (!stage) return
+  panState = { x: e.clientX, y: e.clientY, sl: stage.scrollLeft, st: stage.scrollTop, moved: false }
+  if (zoom.value === 'free') {
+    stage.setPointerCapture(e.pointerId)
+    isPanning.value = true
+  }
+}
+function onStagePointerMove(e) {
+  if (!panState) return
+  const dx = e.clientX - panState.x
+  const dy = e.clientY - panState.y
+  if (!panState.moved && Math.hypot(dx, dy) > 4) panState.moved = true
+  if (zoom.value === 'free' && panState.moved) {
+    const stage = stageEl.value
+    stage.scrollLeft = panState.sl - dx
+    stage.scrollTop = panState.st - dy
+  }
+}
+function onStagePointerUp(e) {
+  if (!panState) return
+  const clicked = !panState.moved
+  panState = null
+  isPanning.value = false
+  if (!clicked) return
+  // 原点击翻页逻辑：阅读前进侧（RTL 左 1/3，LTR 右 1/3）
+  const r = e.currentTarget.getBoundingClientRect()
+  const x = e.clientX - r.left
+  if (x < r.width / 3) (rtl.value ? next() : prev())
+  else if (x > (2 * r.width) / 3) (rtl.value ? prev() : next())
+}
+function onStageDblClick() {
+  if (zoom.value === 'free') setZoom('fit')
+}
+
 // 工具栏自动隐藏：鼠标静止 2.2s 后淡出
 function pokeChrome() {
   chromeVisible.value = true
@@ -222,14 +313,8 @@ function pokeChrome() {
   hideTimer = setTimeout(() => { chromeVisible.value = false }, 2200)
 }
 
-function onStageClick(e) {
-  const r = e.currentTarget.getBoundingClientRect()
-  const x = e.clientX - r.left
-  // 阅读前进侧：RTL 在左 1/3，LTR 在右 1/3
-  if (x < r.width / 3) (rtl.value ? next() : prev())
-  else if (x > (2 * r.width) / 3) (rtl.value ? prev() : next())
-}
 function onWheel(e) {
+  if (e.ctrlKey) return ctrlZoom(e)   // Ctrl+滚轮：自由缩放（各模式通用）
   if (zoom.value !== 'fit') return       // 滚动模式下滚轮用于滚动页面
   if (e.deltaY !== 0) { e.deltaY > 0 ? next() : prev(); return }
   if (e.deltaX === 0) return
@@ -322,7 +407,7 @@ function onBarUp() {
 </script>
 
 <style scoped>
-.reader { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.reader { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 /* 顶栏高度与主界面 TopBar 保持一致（58px）；左右等宽令中区控件天然居中 */
 .top {
   height: 58px; flex: none;
@@ -364,9 +449,20 @@ function onBarUp() {
 /* 适应宽度：纵向滚动 */
 .reader-stage.zoom-width { flex-direction: column; align-items: center; overflow-y: auto; }
 .reader-stage.zoom-width img { width: 100%; height: auto; max-height: none; }
-/* 原始尺寸：自由滚动 */
-.reader-stage.zoom-original { overflow: auto; }
-.reader-stage.zoom-original img { max-width: none; max-height: none; }
+/* 原始尺寸：自由滚动。flex-start + margin:auto 组合居中：
+   内容小于容器时居中，超出时两侧均可滚动到达（flex 居中的溢出是对称的，
+   会导致起始侧不可达）；flex:none 防止超大图被 flex 收缩钳回容器宽 */
+.reader-stage.zoom-original { overflow: auto; justify-content: flex-start; align-items: flex-start; }
+.reader-stage.zoom-original img { flex: none; max-width: none; max-height: none; margin: auto; }
+/* 自由缩放（Ctrl+滚轮）：溢出滚动 + 拖拽平移，居中与防收缩策略同上 */
+.reader-stage.zoom-free { overflow: auto; cursor: grab; justify-content: flex-start; align-items: flex-start; }
+.reader-stage.zoom-free.panning { cursor: grabbing; }
+.reader-stage.zoom-free img {
+  flex: none;
+  max-width: none; max-height: none; height: auto; margin: auto;
+}
+.zoom-free .spread { flex: none; width: max-content; margin: auto; }
+.zoom-free .spread img { flex: none; max-width: none; max-height: none; height: auto; }
 
 /* 双页对开 */
 .spread {
