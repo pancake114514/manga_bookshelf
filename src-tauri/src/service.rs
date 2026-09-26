@@ -20,6 +20,55 @@ pub struct LibraryService {
     pub db: Mutex<Database>,
 }
 
+// ── 库校验 ──────────────────────────────────────────────────────────────────
+
+/// 对象级校验结果（仅异常对象进入报告）
+#[derive(Debug, serde::Serialize)]
+pub struct ObjectVerify {
+    pub obj_id: String,
+    pub name: String,
+    pub storage_path: String,
+    pub dir_exists: bool,
+    pub image_count: usize,
+    /// 已登记但文件缺失的图片文件名
+    pub missing_images: Vec<String>,
+    /// 磁盘存在但未登记的图片文件名
+    pub unregistered_files: Vec<String>,
+}
+
+/// 库校验只读报告
+#[derive(Debug, serde::Serialize)]
+pub struct VerifyReport {
+    pub objects_total: usize,
+    pub missing_images_total: usize,
+    pub unregistered_total: usize,
+    pub abnormal: Vec<ObjectVerify>,
+    /// 库根下不属于任何对象的目录（可导入）
+    pub orphan_dirs: Vec<String>,
+}
+
+/// 修复计划（按前端勾选生成；各列表为对象 ID）
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct VerifyFixPlan {
+    #[serde(default)]
+    pub remove_missing: Vec<String>,
+    #[serde(default)]
+    pub remove_empty: Vec<String>,
+    #[serde(default)]
+    pub register: Vec<String>,
+}
+
+/// 修复执行结果
+#[derive(Debug, serde::Serialize)]
+pub struct VerifyFixResult {
+    pub removed_rows: usize,
+    pub registered: usize,
+    pub removed_objects: usize,
+}
+
+/// 校验快照：对象（id、名称、存储路径）与其图片记录（文件名、路径）
+type VerifySnapshot = Vec<(String, String, Option<String>, Vec<(String, String)>)>;
+
 impl LibraryService {
     pub fn new(db_path: &str) -> Result<Self, String> {
         let db = Database::open(db_path)?;
@@ -109,6 +158,201 @@ impl LibraryService {
             &keep,
             crate::config::THUMB_CACHE_MAX_BYTES,
         ))
+    }
+
+    // ── 库校验 ──────────────────────────────────────────────────────────────
+
+/// 校验库与磁盘的一致性（只读报告，不做任何修改）。
+/// 检查在 db 锁外进行（纯文件系统 stat），不阻塞其他命令。
+pub fn verify_library(&self) -> Result<VerifyReport, String> {
+    let root = self.get_config("storage_root")?.ok_or("图库未配置")?;
+    if !Path::new(&root).is_dir() {
+        return Err(format!("图库目录当前不可访问（外置/网络磁盘未连接？）：{root}"));
+    }
+
+    // 短锁快照：对象与其图片记录
+    let snapshot: VerifySnapshot = {
+            let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+            db.get_all_objects(true)?
+                .into_iter()
+                .map(|o| {
+                    let imgs = db
+                        .get_images(&o.id)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|i| (i.filename, i.filepath))
+                        .collect();
+                    (o.id, o.name, o.storage_path, imgs)
+                })
+                .collect()
+        };
+        let objects_total = snapshot.len();
+
+        let mut abnormal: Vec<ObjectVerify> = Vec::new();
+        let mut missing_total = 0usize;
+        let mut unreg_total = 0usize;
+        let mut known_dirs: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for (id, name, storage_path, images) in snapshot {
+            let sp = storage_path.clone().unwrap_or_default();
+            if !sp.is_empty() {
+                known_dirs.insert(normalize_path(&sp));
+            }
+            let dir_exists = !sp.is_empty() && Path::new(&sp).is_dir();
+            let mut missing: Vec<String> = Vec::new();
+            let mut unregistered: Vec<String> = Vec::new();
+            if dir_exists {
+                let registered: std::collections::HashSet<String> =
+                    images.iter().map(|(f, _)| f.clone()).collect();
+                for (fname, fpath) in &images {
+                    if !Path::new(fpath).is_file() {
+                        missing.push(fname.clone());
+                    }
+                }
+                for p in collect_images(&sp) {
+                    let n = Path::new(&p)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    if !registered.contains(&n) {
+                        unregistered.push(n);
+                    }
+                }
+            } else if !sp.is_empty() {
+                // 目录整体缺失：全部已登记图片视为缺失
+                missing = images.iter().map(|(f, _)| f.clone()).collect();
+            }
+            missing_total += missing.len();
+            unreg_total += unregistered.len();
+            if !dir_exists || !missing.is_empty() || !unregistered.is_empty() || images.is_empty() {
+                abnormal.push(ObjectVerify {
+                    obj_id: id,
+                    name,
+                    storage_path: sp,
+                    dir_exists,
+                    image_count: images.len(),
+                    missing_images: missing,
+                    unregistered_files: unregistered,
+                });
+            }
+        }
+
+        // 孤儿目录：库根下不属于任何对象的目录（跳过 .thumbcache 等隐藏项）
+        let mut orphan_dirs: Vec<String> = Vec::new();
+        if let Ok(entries) = fs::read_dir(&root) {
+            for e in entries.flatten() {
+                let fname = e.file_name().to_string_lossy().to_string();
+                if fname.starts_with('.') || !e.path().is_dir() {
+                    continue;
+                }
+                let norm = normalize_path(&e.path().to_string_lossy());
+                if !known_dirs.contains(&norm) {
+                    orphan_dirs.push(fname);
+                }
+            }
+        }
+
+        Ok(VerifyReport {
+            objects_total,
+            missing_images_total: missing_total,
+            unregistered_total: unreg_total,
+            abnormal,
+            orphan_dirs,
+        })
+    }
+
+    /// 应用库校验修复。三类操作均为幂等（执行时以磁盘/DB 现状复查为准），
+    /// 顺序：移除失效记录 → 补登记 → 删除空对象（空判定基于前两步之后的状态）。
+    pub fn apply_verify_fixes(&self, plan: &VerifyFixPlan) -> Result<VerifyFixResult, String> {
+        let mut removed_rows = 0usize;
+        let mut registered = 0usize;
+        let mut removed_objects = 0usize;
+
+        // ① 移除缺失图片行（复查文件仍缺失才删）
+        for obj_id in &plan.remove_missing {
+            let targets: Vec<String> = {
+                let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+                db.get_images(obj_id)?
+                    .into_iter()
+                    .filter(|i| !Path::new(&i.filepath).is_file())
+                    .map(|i| i.id)
+                    .collect()
+            };
+            if targets.is_empty() {
+                continue;
+            }
+            let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+            for img_id in &targets {
+                db.delete_image(img_id)?;
+                removed_rows += 1;
+            }
+        }
+
+        // ② 补登记未登记文件（以 DB 现状为准，天然幂等）
+        for obj_id in &plan.register {
+            let sp = {
+                let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+                db.get_object_opt(obj_id)?.and_then(|o| o.storage_path)
+            };
+            let Some(sp) = sp.filter(|s| !s.trim().is_empty()) else {
+                continue;
+            };
+            if !Path::new(&sp).is_dir() {
+                continue;
+            }
+            let (registered_names, sort_start) = {
+                let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+                let names: std::collections::HashSet<String> = db
+                    .get_images(obj_id)?
+                    .into_iter()
+                    .map(|i| i.filename)
+                    .collect();
+                (names, db.get_image_count(obj_id).unwrap_or(0))
+            };
+            let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+            for p in collect_images(&sp) {
+                let fname = Path::new(&p)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if registered_names.contains(&fname) {
+                    continue;
+                }
+                db.add_image(&new_uuid(), obj_id, &fname, &p, sort_start + registered as i64)?;
+                registered += 1;
+            }
+        }
+
+        // ③ 删除已无有效图片的对象（不删文件；空判定复查）
+        let root = self.get_config("storage_root")?;
+        for obj_id in &plan.remove_empty {
+            let empty = {
+                let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+                match db.get_object_opt(obj_id)? {
+                    None => false,
+                    Some(o) => {
+                        let sp = o.storage_path.unwrap_or_default();
+                        if sp.trim().is_empty() || !Path::new(&sp).is_dir() {
+                            true
+                        } else {
+                            db.get_images(obj_id)?
+                                .iter()
+                                .all(|i| !Path::new(&i.filepath).is_file())
+                        }
+                    }
+                }
+            };
+            if empty {
+                self.delete_object(obj_id, false, root.as_deref())?;
+                removed_objects += 1;
+            }
+        }
+
+        Ok(VerifyFixResult {
+            removed_rows,
+            registered,
+            removed_objects,
+        })
     }
 
     pub fn get_tag_values(&self, category: &str) -> Result<Vec<String>, String> {
@@ -952,5 +1196,80 @@ mod tests {
         assert!(new_dir.starts_with(&new_root_c));
         assert!(new_dir.join("a.png").is_file());
         assert!(new_root.join("同名目录").join("keep.txt").is_file(), "预置文件不应被破坏");
+    }
+
+    #[test]
+    fn verify_library_reports_missing_unregistered_and_orphans() {
+        let (svc, _d, oid) = seeded("verify", "校验对象", tags(vec![]));
+        let obj = svc.get_object(&oid).unwrap().unwrap();
+        let sp = PathBuf::from(obj.storage_path.clone().unwrap());
+        let imgs = svc.get_images(&oid).unwrap();
+        // 外部删除一张已登记图片 + 手动塞一张未登记图片 + 库根造孤儿目录
+        fs::remove_file(&imgs[0].filepath).unwrap();
+        image::RgbImage::from_pixel(30, 40, image::Rgb([1, 2, 3]))
+            .save(sp.join("zz_new.png")).unwrap();
+        let root = sp.parent().unwrap();
+        fs::create_dir_all(root.join("孤儿目录")).unwrap();
+
+        let report = svc.verify_library().unwrap();
+        assert_eq!(report.objects_total, 1);
+        let ab = report.abnormal.iter().find(|o| o.obj_id == oid).expect("应报告异常对象");
+        assert_eq!(ab.missing_images, vec![imgs[0].filename.clone()], "缺失文件名应入报告");
+        assert_eq!(ab.unregistered_files, vec!["zz_new.png".to_string()]);
+        assert!(report.orphan_dirs.contains(&"孤儿目录".to_string()));
+    }
+
+    #[test]
+    fn verify_library_reports_healthy_object_as_clean() {
+        let (svc, _d, oid) = seeded("verifyok", "健康对象", tags(vec![]));
+        let report = svc.verify_library().unwrap();
+        assert!(report.abnormal.iter().all(|o| o.obj_id != oid));
+        assert!(report.orphan_dirs.is_empty());
+    }
+
+    #[test]
+    fn apply_verify_fixes_repairs_and_is_idempotent() {
+        let (svc, _d, oid) = seeded("vfix", "修复对象", tags(vec![]));
+        let obj = svc.get_object(&oid).unwrap().unwrap();
+        let sp = PathBuf::from(obj.storage_path.clone().unwrap());
+        let imgs = svc.get_images(&oid).unwrap();
+        fs::remove_file(&imgs[0].filepath).unwrap();
+        image::RgbImage::from_pixel(30, 40, image::Rgb([4, 5, 6]))
+            .save(sp.join("zz_new.png")).unwrap();
+
+        let plan = VerifyFixPlan {
+            remove_missing: vec![oid.clone()],
+            register: vec![oid.clone()],
+            remove_empty: vec![],
+        };
+        let r = svc.apply_verify_fixes(&plan).unwrap();
+        assert_eq!(r.removed_rows, 1, "应移除 1 条失效记录");
+        assert_eq!(r.registered, 1, "应补登记 1 张");
+        // 修复后复审无异常；重复应用无变化（幂等）
+        let report = svc.verify_library().unwrap();
+        assert!(report.abnormal.is_empty(), "修复后应无异常: {:?}", report.abnormal);
+        let r2 = svc.apply_verify_fixes(&plan).unwrap();
+        assert_eq!(r2.removed_rows + r2.registered + r2.removed_objects, 0, "重复应用应为零操作");
+        // 对象保留且仍为 2 张（删 1 补 1）
+        assert!(svc.get_object(&oid).unwrap().is_some());
+        assert_eq!(svc.get_object(&oid).unwrap().unwrap().image_count, 2);
+    }
+
+    #[test]
+    fn apply_verify_fixes_removes_empty_object_keeps_files() {
+        let (svc, _d, oid) = seeded("vfixempty", "空对象", tags(vec![]));
+        let obj = svc.get_object(&oid).unwrap().unwrap();
+        let sp = PathBuf::from(obj.storage_path.clone().unwrap());
+        for i in svc.get_images(&oid).unwrap() {
+            fs::remove_file(&i.filepath).unwrap();
+        }
+        let plan = VerifyFixPlan {
+            remove_empty: vec![oid.clone()],
+            ..Default::default()
+        };
+        let r = svc.apply_verify_fixes(&plan).unwrap();
+        assert_eq!(r.removed_objects, 1);
+        assert!(svc.get_object(&oid).unwrap().is_none(), "空对象应被移除");
+        assert!(sp.is_dir(), "不删文件：目录应保留");
     }
 }

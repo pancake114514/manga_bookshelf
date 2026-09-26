@@ -631,6 +631,23 @@ pub fn prune_thumb_cache(
     Ok(PruneResult { ok: true, removed, freed_bytes: freed })
 }
 
+/// 库校验（只读报告）。文件系统遍历可能耗时，标记 async。
+#[tauri::command(async)]
+pub fn verify_library(
+    svc: State<'_, LibraryService>,
+) -> Result<crate::service::VerifyReport, String> {
+    svc.verify_library()
+}
+
+/// 应用库校验修复（三类操作按前端勾选，幂等）
+#[tauri::command(async)]
+pub fn apply_verify_fixes(
+    svc: State<'_, LibraryService>,
+    plan: crate::service::VerifyFixPlan,
+) -> Result<crate::service::VerifyFixResult, String> {
+    svc.apply_verify_fixes(&plan)
+}
+
 /// 在系统资源管理器中打开对象的存储目录（Windows: explorer 选中该文件夹）
 #[tauri::command]
 pub fn open_in_explorer(

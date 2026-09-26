@@ -34,6 +34,8 @@ export const api = {
   // 库管理
   migrate: (newRoot) => invoke('migrate', { body: { newRoot } }),
   pruneThumbCache: () => invoke('prune_thumb_cache'),
+  verifyLibrary: () => invoke('verify_library'),
+  applyVerifyFixes: (plan) => invoke('apply_verify_fixes', { plan }),
 
   // 系统集成
   openInExplorer: (id) => invoke('open_in_explorer', { oid: id }),
