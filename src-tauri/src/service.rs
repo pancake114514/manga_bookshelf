@@ -469,6 +469,8 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
             }
         }
         db.set_object_series(obj_id, series_id.as_deref(), volume)?;
+        // 对象移出原系列后，原系列可能已无引用——顺手清理空系列
+        db.prune_empty_series()?;
         Ok(())
     }
 
@@ -558,6 +560,8 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
 
         // 删除对象（tags / images 通过外键 CASCADE 一并删除）
         db.delete_object(obj_id)?;
+        // 对象可能是其系列的最后一卷——顺手清理零引用系列
+        db.prune_empty_series()?;
 
         // 物理删除文件（失败/跳过不回滚：DB 已删干净，仅向用户提示残留）
         let mut warnings: Vec<String> = Vec::new();
@@ -1540,5 +1544,33 @@ mod tests {
         assert_eq!(vols[1].name, "卷二");
         assert_eq!(vols[2].name, "无卷号", "无卷号殿后");
         assert_eq!(vols[0].series_name.as_deref(), Some("排序系列"));
+    }
+
+    #[test]
+    fn empty_series_pruned_after_reference_changes() {
+        let (svc, d, oid1) = seeded("sprune", "甲卷", tags(vec![]));
+        let src = d.join("src");
+        let root = d.join("storage");
+        let oid2 = uuid::Uuid::new_v4().to_string();
+        svc.import_directory(&oid2, "乙卷", &tags(vec![]),
+            src.to_str().unwrap(), root.to_str().unwrap(), true, None, None).unwrap();
+        svc.set_series_for_object(&oid1, Some("会空的系列"), Some(1)).unwrap();
+        svc.set_series_for_object(&oid2, Some("会空的系列"), Some(2)).unwrap();
+
+        // 移出一卷：系列仍有引用 → 保留
+        svc.set_series_for_object(&oid1, None, None).unwrap();
+        assert!((store_series_names(&svc)).iter().any(|n| n == "会空的系列"));
+        // 移出最后一卷：系列零引用 → 被清理
+        svc.set_series_for_object(&oid2, None, None).unwrap();
+        assert!(!(store_series_names(&svc)).iter().any(|n| n == "会空的系列"));
+
+        // 删除对象路径：重建系列仅含一卷后删除该对象 → 系列随之清理
+        svc.set_series_for_object(&oid1, Some("随删系列"), Some(1)).unwrap();
+        svc.delete_object(&oid1, false, None).unwrap();
+        assert!(!(store_series_names(&svc)).iter().any(|n| n == "随删系列"));
+    }
+
+    fn store_series_names(svc: &LibraryService) -> Vec<String> {
+        svc.list_series().unwrap().into_iter().map(|s| s.name).collect()
     }
 }

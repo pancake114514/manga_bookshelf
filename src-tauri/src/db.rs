@@ -424,6 +424,20 @@ impl Database {
             })
     }
 
+    /// 清理零引用系列（对象全部移出/删除后残留的空系列），返回删除数。
+    /// 供 set_series_for_object / delete_object 等引用变化路径后调用，幂等。
+    pub fn prune_empty_series(&self) -> Result<usize, String> {
+        let n = self
+            .conn
+            .execute(
+                "DELETE FROM series WHERE id NOT IN
+                 (SELECT DISTINCT series_id FROM objects WHERE series_id IS NOT NULL)",
+                [],
+            )
+            .map_err(|e| format!("清理空系列失败: {e}"))?;
+        Ok(n)
+    }
+
     // ── 批量查询 ────────────────────────────────────────────────────────────
 
     /// 批量组装对象（一次查 tags、图片数量、首图路径，避免 N+1）
