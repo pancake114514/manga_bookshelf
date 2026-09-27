@@ -203,12 +203,24 @@ pub fn migrate_library(
         }
     };
 
-    // 迁移前备份数据库
-    let backup_ok = fs::copy(
-        db.conn.path().unwrap_or("library.db"),
-        &backup_path,
-    )
-    .is_ok();
+    // 迁移前备份数据库。三重保障：
+    // 1) 先 checkpoint 把 WAL 合入主库——否则最近写入仍在 -wal 文件里，复制主文件
+    //    得到的是缺数据的残缺备份；
+    // 2) 备份失败直接中止迁移（不移动任何目录）——否则后续失败时没有恢复手段；
+    // 3) 先写 .bak.tmp 再改名——避免复制中途失败时把上一次完好的备份覆盖掉
+    let tmp_backup = format!("{backup_path}.tmp");
+    let backup_result = (|| -> Result<(), String> {
+        db.checkpoint()?;
+        fs::copy(db.conn.path().unwrap_or("library.db"), &tmp_backup)
+            .map_err(|e| format!("复制数据库失败: {e}"))?;
+        fs::rename(&tmp_backup, &backup_path)
+            .map_err(|e| format!("备份改名失败: {e}"))?;
+        Ok(())
+    })();
+    if let Err(e) = backup_result {
+        let _ = fs::remove_file(&tmp_backup);
+        return Err(format!("迁移已中止——创建备份失败：{e}"));
+    }
 
     fs::create_dir_all(&new_root).map_err(|e| format!("创建新根目录失败: {e}"))?;
 
@@ -286,10 +298,8 @@ pub fn migrate_library(
         let _ = fs::remove_dir_all(&old_cache);
     }
 
-    // 清理备份
-    if backup_ok {
-        let _ = fs::remove_file(&backup_path);
-    }
+    // 清理备份（迁移成功才删；失败路径保留 .bak 作为手工恢复手段）
+    let _ = fs::remove_file(&backup_path);
 
     Ok((plans.len(), warnings))
 }
@@ -298,6 +308,80 @@ pub fn migrate_library(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+
+    // ── 迁移备份保障测试 ──────────────────────────────────────────────────
+
+    /// 造一个含 2 张图并写入配置的对象库，返回 (svc, 库根目录)
+    fn seeded_for_backup(tag: &str) -> (crate::service::LibraryService, std::path::PathBuf, String) {
+        use crate::db::Tags;
+        let d = std::env::temp_dir().join(format!("ms_test_bk_{tag}_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(d.join("src")).unwrap();
+        let img = image::RgbImage::from_pixel(40, 60, image::Rgb([90, 90, 200]));
+        img.save(d.join("src/a.png")).unwrap();
+        img.save(d.join("src/b.png")).unwrap();
+        std::fs::create_dir_all(d.join("storage")).unwrap();
+        let svc = crate::service::LibraryService::new(d.join("lib.db").to_str().unwrap()).unwrap();
+        let oid = uuid::Uuid::new_v4().to_string();
+        svc.import_directory(&oid, "备份对象", &Tags(Default::default()),
+            d.join("src").to_str().unwrap(), d.join("storage").to_str().unwrap(),
+            true, None, None).unwrap();
+        // 迁移前最新写入（大概率仍在 WAL 中未 checkpoint）
+        svc.set_config("storage_root", d.join("storage").to_str().unwrap()).unwrap();
+        svc.set_config("wal_marker", "最新写入").unwrap();
+        (svc, d, oid)
+    }
+
+    /// 备份配方（checkpoint + 复制主文件）必须捕获 WAL 中未落盘的最新数据——
+    /// 这是迁移备份修复①的核心语义：直接复现 migrate_library 的备份三步并检验副本
+    #[test]
+    fn backup_recipe_includes_wal_data() {
+        let (svc, d, oid) = seeded_for_backup("wal");
+
+        // 复现迁移备份流程：checkpoint → 复制主文件（不复制 -wal）
+        let bak = d.join("lib.db.bak");
+        {
+            let db = svc.db.lock().unwrap_or_else(|p| p.into_inner());
+            db.checkpoint().expect("checkpoint 应成功");
+        }
+        std::fs::copy(d.join("lib.db"), &bak).unwrap();
+
+        // WAL 已被截断（数据在主文件里）
+        if let Ok(meta) = std::fs::metadata(d.join("lib.db-wal")) {
+            assert_eq!(meta.len(), 0, "checkpoint(TRUNCATE) 后 WAL 应为空");
+        }
+        // 备份副本包含最近写入的配置与对象数据
+        let bak_svc = crate::service::LibraryService::new(bak.to_str().unwrap()).unwrap();
+        assert_eq!(bak_svc.get_config("wal_marker").unwrap().as_deref(), Some("最新写入"),
+            "备份缺少 WAL 中未 checkpoint 的写入");
+        assert!(bak_svc.get_object(&oid).unwrap().is_some(), "备份缺少对象数据");
+        // 原库未受影响
+        assert!(d.join("storage").join("备份对象").join("a.png").is_file());
+    }
+
+    /// 备份创建失败（.bak.tmp 被目录占用导致复制失败）必须中止迁移，
+    /// 不移动任何目录、不改动数据库记录
+    #[test]
+    fn backup_failure_aborts_migration_without_moving_anything() {
+        let (svc, d, oid) = seeded_for_backup("abort");
+        let new_root = d.join("new_root");
+        std::fs::create_dir_all(&new_root).unwrap(); // 新根合法（通过 prepare 校验）
+        // 占位：让备份临时文件路径无法写入（复制阶段失败）
+        std::fs::create_dir_all(d.join("lib.db.bak.tmp")).unwrap();
+
+        let res = migrate_library(&svc, new_root.to_str().unwrap(), None);
+        assert!(res.is_err(), "备份失败必须中止迁移");
+        let msg = res.unwrap_err();
+        assert!(msg.contains("中止") || msg.contains("备份"), "错误应说明备份中止: {msg}");
+
+        // 未移动任何目录、未建新根、DB 记录仍指旧位置
+        // 新根内不应有任何被移入的对象目录（本测试预建了空新根）
+        assert_eq!(new_root.read_dir().unwrap().count(), 0, "不应移动任何目录到新根");
+        let old_dir = d.join("storage").join("备份对象");
+        assert!(old_dir.join("a.png").is_file(), "原目录必须原样保留");
+        let obj = svc.get_object(&oid).unwrap().unwrap();
+        assert!(obj.storage_path.clone().unwrap().contains("备份对象"), "DB 仍指向旧路径");
+    }
 
     #[test]
     fn check_writable_accepts_writable_dir() {
