@@ -126,6 +126,18 @@ impl LibraryService {
         Ok(crate::db::filter_assembled_by_tags(base, filters))
     }
 
+    /// 按系列 ID 取全部分卷（详情页分卷导航用）
+    pub fn get_series_volumes(
+        &self,
+        series_id: &str,
+        include_r18: bool,
+    ) -> Result<Vec<AssembledObject>, String> {
+        self.db
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get_series_volumes(series_id, include_r18)
+    }
+
     pub fn get_object(&self, obj_id: &str) -> Result<Option<AssembledObject>, String> {
         let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
         let obj = db.get_object_opt(obj_id)?;
@@ -1504,5 +1516,29 @@ mod tests {
         svc.set_series_for_object(&oid1, Some("同系列"), None).unwrap();
         // 自身重复设置同卷号（幂等场景）→ 允许
         svc.set_series_for_object(&oid2, Some("同系列"), Some(2)).unwrap();
+    }
+
+    #[test]
+    fn series_volumes_ordered_by_volume() {
+        let (svc, d, oid_v2) = seeded("volorder", "卷二", tags(vec![]));
+        let src = d.join("src");
+        let root = d.join("storage");
+        let oid_v1 = uuid::Uuid::new_v4().to_string();
+        let oid_none = uuid::Uuid::new_v4().to_string();
+        svc.import_directory(&oid_v1, "卷一", &tags(vec![]),
+            src.to_str().unwrap(), root.to_str().unwrap(), true, None, None).unwrap();
+        svc.import_directory(&oid_none, "无卷号", &tags(vec![]),
+            src.to_str().unwrap(), root.to_str().unwrap(), true, None, None).unwrap();
+        svc.set_series_for_object(&oid_v2, Some("排序系列"), Some(2)).unwrap();
+        svc.set_series_for_object(&oid_v1, Some("排序系列"), Some(1)).unwrap();
+        svc.set_series_for_object(&oid_none, Some("排序系列"), None).unwrap();
+
+        let sid = svc.get_object(&oid_v1).unwrap().unwrap().series_id.unwrap();
+        let vols = svc.get_series_volumes(&sid, true).unwrap();
+        assert_eq!(vols.len(), 3, "系列应有 3 卷");
+        assert_eq!(vols[0].name, "卷一");
+        assert_eq!(vols[1].name, "卷二");
+        assert_eq!(vols[2].name, "无卷号", "无卷号殿后");
+        assert_eq!(vols[0].series_name.as_deref(), Some("排序系列"));
     }
 }

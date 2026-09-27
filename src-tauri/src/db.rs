@@ -627,6 +627,28 @@ impl Database {
         self.assemble_objects(&rows, include_r18)
     }
 
+    /// 按系列 ID 取全部卷（卷号升序、无卷号殿后），供详情页分卷导航
+    pub fn get_series_volumes(
+        &self,
+        series_id: &str,
+        include_r18: bool,
+    ) -> Result<Vec<AssembledObject>, String> {
+        let sql = r#"SELECT o.*, s.name AS series_name FROM objects o
+                     LEFT JOIN series s ON o.series_id = s.id
+                     WHERE o.series_id = ?
+                     ORDER BY CASE WHEN o.volume IS NULL THEN 1 ELSE 0 END, o.volume, o.created_at"#;
+        let mut stmt = self
+            .conn
+            .prepare(sql)
+            .map_err(|e| format!("查询系列分卷失败: {e}"))?;
+        let rows: Vec<ObjectRow> = stmt
+            .query_map(params![series_id], ObjectRow::from_row)
+            .map_err(|e| format!("查询系列分卷失败: {e}"))?
+            .filter_map(|r| r.ok())
+            .collect();
+        self.assemble_objects(&rows, include_r18)
+    }
+
     // ── 系列 ──────────────────────────────────────────────────────────────────
 
     /// 创建系列，返回是否成功（重名 UNIQUE 冲突时返回 false）

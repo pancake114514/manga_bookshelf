@@ -159,6 +159,7 @@ pub fn run() {
             commands::prune_thumb_cache,
             commands::verify_library,
             commands::apply_verify_fixes,
+            commands::get_series_volumes,
             commands::open_in_explorer,
         ])
         // 关闭拦截：删除进行中时阻止直接退出，确认后才放行（防文件删到一半被杀进程）

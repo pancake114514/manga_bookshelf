@@ -763,6 +763,16 @@ pub fn prune_thumb_cache(
     Ok(PruneResult { ok: true, removed, freed_bytes: freed })
 }
 
+/// 按系列 ID 取全部分卷（详情页侧栏分卷导航）
+#[tauri::command]
+pub fn get_series_volumes(
+    svc: State<'_, LibraryService>,
+    sid: String,
+) -> Result<Vec<ObjectSummary>, String> {
+    let objects = svc.get_series_volumes(&sid, true)?;
+    Ok(objects.iter().map(serialize_object).collect())
+}
+
 /// 库校验（只读报告）。文件系统遍历可能耗时，标记 async。
 #[tauri::command(async)]
 pub fn verify_library(

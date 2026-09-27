@@ -43,6 +43,7 @@ export const api = {
 
   // 系列 / 分卷
   series: () => invoke('get_series'),
+  seriesVolumes: (sid) => invoke('get_series_volumes', { sid }),
   renameSeries: (id, newName) => invoke('rename_series', { id, body: { new_name: newName } }),
   deleteSeries: (id) => invoke('delete_series', { id }),
 
