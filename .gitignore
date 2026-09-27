@@ -43,3 +43,7 @@ git_commit_result.txt
 
 # 临时调试目录
 .temp/
+
+# 本地 AI 协作约定（不入库）
+agents.md
+AGENTS.md
