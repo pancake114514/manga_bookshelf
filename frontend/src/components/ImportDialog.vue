@@ -110,7 +110,7 @@ import {
   NModal, NButton, NInput, NInputGroup, NSelect, NAlert, NProgress, NRate, NTag, NCheckbox, useMessage,
 } from 'naive-ui'
 import { api, dialog } from '../api'
-import { store, refreshTagValues } from '../store'
+import { store, refreshTagValues, loadSeries } from '../store'
 import TagFields from './TagFields.vue'
 import { IconFolder, IconLibrary, IconImage } from './icons'
 import { parseMangaName, applyParsedTags } from '../naming'
@@ -274,6 +274,8 @@ async function runBatch() {
     if (batchCancelled.value || !show.value) break   // 手动停止 / 关闭弹窗
     const displayName = e.name.trim() || e.folder
     try {
+      const check = await api.validateName(displayName)
+      if (!check.ok) throw new Error(check.error)
       await api.importDirectory({
         source_dir: e.path,
         name: displayName,
@@ -288,6 +290,7 @@ async function runBatch() {
   }
   batchRunning.value = false
   refreshTagValues()
+  loadSeries()
   emit('done')
   const okN = batchResults.value.filter(r => r.ok).length
   const failN = batchResults.value.length - okN
@@ -346,6 +349,7 @@ async function run() {
     emit('update:show', false)
     resetAll()
     refreshTagValues()
+    loadSeries()
     emit('done')
   } catch (e) {
     errMsg.value = e.message

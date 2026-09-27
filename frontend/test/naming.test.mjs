@@ -60,5 +60,11 @@ check('applyParsedTags null 安全',
   applyParsedTags({ author: ['A'] }, { full: 'x', name: 'x', cm: null, author: null }),
   { author: ['A'] })
 
+// ⑨ 全角括号兼容：（C105）与半角等价
+check('全角圆括号CM与作者',
+  parseMangaName('（C105）[角砂糖 (よろず)] ウマ嫁 ウマ×トレ結婚生活合同'),
+  { full: '（C105）[角砂糖 (よろず)] ウマ嫁 ウマ×トレ結婚生活合同',
+    name: 'ウマ嫁 ウマ×トレ結婚生活合同', cm: 'C105', author: '角砂糖 (よろず)' })
+
 console.log(failed ? `\nFAILED: ${failed}` : '\nALL PASS')
 process.exit(failed ? 1 : 0)

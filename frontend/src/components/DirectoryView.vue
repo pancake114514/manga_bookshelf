@@ -3,11 +3,15 @@
     <div class="info-bar">
       <n-button size="small" @click="back"><IconBack :size="14" /> 书架</n-button>
       <div class="info-row">
-        <img class="cover" :src="detail.cover_url" alt="">
+        <!-- 封面加载失败（无封面/文件缺失）时隐藏 img，显示底色空白而非破碎图标 -->
+        <img v-if="coverOk" class="cover" :src="detail.cover_url" alt="" @error="coverOk = false">
         <div class="meta">
           <div class="title-row">
             <h2 class="title">{{ detail.name }}</h2>
-            <n-button type="primary" @click="continueRead"><IconPlay :size="13" /> 继续阅读</n-button>
+            <n-button v-if="detail.images?.length" type="primary" @click="continueRead"><IconPlay :size="13" /> 继续阅读</n-button>
+          </div>
+          <div v-if="detail.series_name" class="series-line">
+            {{ detail.series_name }}<template v-if="detail.volume != null"> · 第 {{ detail.volume }} 卷</template>
           </div>
           <div class="rate-row">
             <n-rate size="small" :value="rating" @update:value="rate" />
@@ -28,6 +32,8 @@
       <div class="thumb-grid">
         <div v-for="(img, i) in detail.images" :key="img.id" class="thumb-card"
              @dblclick="openAt(i)">
+          <!-- 该页书签标记 -->
+          <span v-if="bmSet.has(i)" class="bm-badge" title="已加书签"><IconBookmark :size="10" /></span>
           <img :src="img.thumb_url" loading="lazy" alt="">
           <span class="fname">{{ img.filename }}</span>
         </div>
@@ -37,15 +43,28 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 import { NButton, NRate } from 'naive-ui'
 import { api } from '../api'
 import { store } from '../store'
 import { catLabel } from '../constants'
-import { IconBack, IconPlay } from './icons'
+import { IconBack, IconPlay, IconBookmark } from './icons'
 
 const props = defineProps({ obj: { type: Object, required: true } })
 const detail = computed(() => props.obj)
+
+// 书签页集合：卡片右上角显示标记（从阅读器返回时组件重建会重新拉取）
+const bmSet = ref(new Set())
+onMounted(async () => {
+  try {
+    const list = await api.bookmarks(props.obj.id)
+    bmSet.value = new Set(list.map(b => b.page_idx))
+  } catch { /* 书签拉取失败不阻塞详情页 */ }
+})
+
+// 封面可用性：加载失败置 false 隐藏 img；封面 URL 变化（换图）时复位重试
+const coverOk = ref(true)
+watch(() => props.obj.cover_url, () => { coverOk.value = true })
 
 const rating = computed(() => Number(props.obj.tags?.rating?.[0] || 0))
 
@@ -85,7 +104,7 @@ function filterTag(cat, val) {
 
 function back() { store.view = { name: 'shelf' } }
 function openAt(idx) {
-  store.reader = { obj: props.obj, images: props.obj.images, index: idx }
+  store.reader = { obj: props.obj, images: props.obj.images, index: idx, from: 'directory' }
   store.view = { name: 'reader' }
 }
 function continueRead() {
@@ -102,6 +121,7 @@ function continueRead() {
 .rate-row { margin-top: 8px; line-height: 1; }
 .title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .title { font-size: 20px; font-weight: 700; word-break: break-all; }
+.series-line { margin-top: 6px; font-size: 13px; opacity: .6; }
 .tag-row { display: flex; gap: 6px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
 .cat { font-size: 12px; opacity: .55; }
 .tag {
@@ -121,6 +141,15 @@ function continueRead() {
   border: 1px solid var(--border, rgba(128,128,128,.2));
   border-radius: 8px; overflow: hidden; cursor: pointer;
   transition: transform .15s, border-color .15s;
+  position: relative;
+}
+/* 书签标记：卡片右上角小角标（琥珀橙） */
+.bm-badge {
+  position: absolute; top: 4px; right: 4px; z-index: 2;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 4px;
+  background: #f5a623; color: #fff;
+  pointer-events: none;
 }
 .thumb-card:hover { transform: translateY(-2px); border-color: var(--ms-primary, #18a058); }
 .thumb-card img {

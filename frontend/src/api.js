@@ -32,10 +32,25 @@ export const api = {
   countImages: (dir) => invoke('count_images', { dir }),
 
   // 库管理
-  migrate: (newRoot) => invoke('migrate', { body: { newRoot } }),
+  // 注意：请求体字段须与后端 serde 结构体字段名一致（snake_case）
+  migrate: (newRoot) => invoke('migrate', { body: { new_root: newRoot } }),
+  pruneThumbCache: () => invoke('prune_thumb_cache'),
+  verifyLibrary: () => invoke('verify_library'),
+  applyVerifyFixes: (plan) => invoke('apply_verify_fixes', { plan }),
 
   // 系统集成
   openInExplorer: (id) => invoke('open_in_explorer', { oid: id }),
+
+  // 系列 / 分卷
+  series: () => invoke('get_series'),
+  seriesVolumes: (sid) => invoke('get_series_volumes', { sid }),
+  renameSeries: (id, newName) => invoke('rename_series', { id, body: { new_name: newName } }),
+  deleteSeries: (id) => invoke('delete_series', { id }),
+
+  // 书签
+  bookmarks: (oid) => invoke('list_bookmarks', { oid }),
+  addBookmark: (body) => invoke('add_bookmark', { body }),
+  removeBookmark: (id) => invoke('remove_bookmark', { id }),
 
   // 配置
   getConfig: (key) => invoke('get_config_value', { key }).then(r => r.value),

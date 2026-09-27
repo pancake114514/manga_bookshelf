@@ -2,18 +2,51 @@
   <main class="reader" :class="{ idle: !chromeVisible }" @wheel="onWheel" @mousemove="pokeChrome">
     <!-- 顶栏与主界面等高，整条均可拖动（系统原生拖动），交互控件以 mousedown.stop 排除 -->
     <div class="top" @mousedown="barMouseDown">
-      <!-- 左区：返回 + 对象名 -->
+      <!-- 左区：返回 + 对象名 + 书签 -->
       <div class="left">
         <n-button size="small" @mousedown.stop @click="back"><IconBack :size="14" /> 返回</n-button>
         <span class="obj-title">{{ reader.obj.name }}</span>
+        <n-button size="small" @mousedown.stop
+                  :type="currentBookmark ? 'primary' : 'default'" :secondary="!currentBookmark"
+                  :title="currentBookmark ? '移除书签（B）' : '添加书签（B）'"
+                  @click="toggleBookmark"><IconBookmark :size="14" /></n-button>
+        <n-popover trigger="click" placement="bottom-start" :width="340" :show-arrow="false">
+          <template #trigger>
+            <n-button size="small" @mousedown.stop title="书签列表">书签</n-button>
+          </template>
+          <div class="bm-panel">
+            <div v-if="!bookmarks.length" class="bm-empty">暂无书签</div>
+            <div v-for="b in bookmarks" :key="b.id" class="bm-row" @click="goTo(b.page_idx)">
+              <span class="bm-page">第 {{ b.page_idx + 1 }} 页</span>
+              <span class="bm-fname">{{ reader.images[b.page_idx]?.filename || '' }}</span>
+              <template v-if="editingId === b.id">
+                <n-input v-model:value="editNote" size="tiny" :maxlength="200" placeholder="输入备注（回车保存）"
+                         @click.stop @keydown.enter.prevent="saveEdit(b)"
+                         @keydown.esc="cancelEdit" autofocus />
+                <n-button size="tiny" quaternary type="primary" @click.stop="saveEdit(b)" title="保存">确定</n-button>
+              </template>
+              <template v-else>
+                <span class="bm-note" :class="{ placeholder: !b.note }">{{ b.note || '无备注' }}</span>
+                <n-button size="tiny" quaternary @click.stop="startEdit(b)" title="编辑备注"><IconEdit :size="12" /></n-button>
+              </template>
+              <n-button size="tiny" quaternary @click.stop="removeBm(b)" title="删除书签"><IconTrash :size="12" /></n-button>
+            </div>
+          </div>
+        </n-popover>
       </div>
-      <!-- 中区：缩放/双页/全屏，随左右等宽区天然居中 -->
+      <!-- 中区：缩放/方向/双页/全屏，随左右等宽区天然居中 -->
       <div class="center">
         <n-button-group size="small" @mousedown.stop>
           <n-button :type="zoom === 'fit' ? 'primary' : 'default'" :secondary="zoom !== 'fit'" @click="setZoom('fit')">适应页面</n-button>
           <n-button :type="zoom === 'width' ? 'primary' : 'default'" :secondary="zoom !== 'width'" @click="setZoom('width')">适应宽度</n-button>
           <n-button :type="zoom === 'original' ? 'primary' : 'default'" :secondary="zoom !== 'original'" @click="setZoom('original')">原始</n-button>
         </n-button-group>
+        <!-- 自由缩放（Ctrl+滚轮）时的当前倍率，点击恢复「适应页面」 -->
+        <n-button v-if="zoom === 'free'" size="small" @mousedown.stop title="点击恢复「适应页面」（或双击页面）"
+                  @click="setZoom('fit')">{{ zoomPct }}%</n-button>
+        <n-button size="small" @mousedown.stop :type="rtl ? 'primary' : 'default'" :secondary="!rtl"
+                  :title="rtl ? '阅读方向：右→左（日漫）' : '阅读方向：左→右'"
+                  @click="toggleDir">{{ rtl ? '右→左' : '左→右' }}</n-button>
         <n-button size="small" @mousedown.stop :type="double ? 'primary' : 'default'" :secondary="!double"
                   :title="double ? '退出双页对开' : '双页对开（快捷键 D）'" @click="toggleDouble">
           <IconDoublePage :size="14" /> 双页
@@ -28,26 +61,36 @@
       </div>
     </div>
 
-    <div class="reader-stage" :class="[`zoom-${zoom}`]" @click="onStageClick">
-      <template v-if="double">
+    <div ref="stageEl" class="reader-stage" :class="[`zoom-${zoom}`, { panning: isPanning }]"
+         @wheel="onWheel" @pointerdown="onStagePointerDown" @pointermove="onStagePointerMove"
+         @pointerup="onStagePointerUp" @pointercancel="onStagePointerUp" @dblclick="onStageDblClick">
+      <!-- 空对象兜底：0 图时给出明确空态而非无限转圈（正常入口已拦截，此处防御外部删图等异常数据） -->
+      <div v-if="!total" class="empty-page">该对象没有内容</div>
+      <template v-else-if="double">
         <div class="spread">
-          <img v-if="spreadLeft" :src="spreadLeft" alt="">
-          <img v-if="spreadRight" :src="spreadRight" alt="">
+          <img v-if="shownLeft" :src="shownLeft" alt="" :style="freeStyle">
+          <img v-if="shownRight" :src="shownRight" alt="" :style="freeStyle">
         </div>
-        <n-spin v-if="!spreadRight" size="large" class="spread-spin" />
+        <n-spin v-if="!(rtl ? shownRight : shownLeft)" size="large" class="spread-spin" />
       </template>
       <template v-else>
-        <img v-if="loadedSrc" :src="loadedSrc" alt="">
+        <img v-if="shownSingle" :src="shownSingle" alt="" :style="freeStyle">
         <n-spin v-else size="large" class="stage-spin" />
       </template>
     </div>
 
-    <div class="bottom">
-      <div ref="barEl" class="progress" @pointerdown="onBarDown" @pointermove="onBarMove" @pointerup="dragging = false">
+    <div v-if="total" class="bottom">
+      <div ref="barEl" class="progress" @pointerdown="onBarDown" @pointermove="onBarMove"
+           @pointerup="onBarUp" @pointercancel="onBarUp">
         <div class="track" />
-        <!-- 填充与滑块统一按「轨道有效长度」计算（两侧各内缩 20px），滑块圆心与填充边缘重合 -->
-        <div class="filled" :style="{ width: `calc((100% - 40px) * ${fillPct / 100})` }" />
-        <div class="knob" :style="{ right: `calc(20px + (100% - 40px) * ${fillPct / 100})` }" />
+        <!-- 填充与滑块统一按「轨道有效长度」计算（两侧各内缩 20px），滑块圆心与填充边缘重合；
+             RTL 自右端起（index=0 在最右），LTR 自左端起 -->
+        <div class="filled" :style="fillStyle" />
+        <div v-for="b in bookmarks" :key="b.id" class="bm-tick"
+             :style="tickStyle(b.page_idx)"
+             :title="`第 ${b.page_idx + 1} 页${b.note ? '：' + b.note : ''}`"
+             @pointerdown.stop @click.stop="goTo(b.page_idx)" />
+        <div class="knob" :class="{ ltr: !rtl }" :style="knobStyle" />
         <div class="page-label">{{ label }}</div>
       </div>
     </div>
@@ -55,46 +98,89 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { NButton, NButtonGroup, NSpin } from 'naive-ui'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { NButton, NButtonGroup, NSpin, NPopover, NInput } from 'naive-ui'
 import { api, win } from '../api'
 import { store } from '../store'
 import { barMouseDown } from '../windowState'
-import { IconBack, IconMaximize, IconDoublePage } from './icons'
+import { IconBack, IconMaximize, IconDoublePage, IconBookmark, IconEdit, IconTrash } from './icons'
 import WindowControls from './WindowControls.vue'
 
 const ZOOMS = ['fit', 'width', 'original']
 const CFG_DOUBLE = 'ui_reader_double'
 const CFG_ZOOM = 'ui_reader_zoom'
+const CFG_DIR = 'ui_reader_direction'
 
 const reader = store.reader
 const index = ref(Math.max(0, Math.min(reader.index, reader.images.length - 1)))
-const loadedSrc = ref('')
 const dragging = ref(false)
 const barEl = ref(null)
 const double = ref(false)
 const zoom = ref('fit')
+// 自由缩放（Ctrl+滚轮进入）：zoom === 'free' 时生效，基于原图自然宽的百分比
+const zoomPct = ref(100)
+const naturalW = ref(0)
+const stageEl = ref(null)
+const isPanning = ref(false)
+const rtl = ref(true)
 const chromeVisible = ref(true)
 const fullscreen = ref(false)
 let saveTimer = null
 let hideTimer = null
 
-const total = reader.images.length
-const current = computed(() => reader.images[index.value])
-// 进度条从右向左：index=0 在最右端
-const fillPct = computed(() => (total > 1 ? (index.value / (total - 1)) * 100 : 0))
-const label = computed(() =>
-  double.value && index.value + 1 < total
-    ? `${index.value + 1}-${index.value + 2} / ${total}`
-    : `${index.value + 1} / ${total}`)
+// 图片显示层：新图完整解码后才切换 src，旧图保持显示（消除翻页闪白）。
+// 代际计数丢弃过期加载：快速连翻时，旧请求晚到不回写。
+const shownSingle = ref('')
+const shownLeft = ref('')
+const shownRight = ref('')
+let singleGen = 0
+let spreadGen = 0
 
-// 双页对开：右页在前（日漫右开本），展开为 [index+1 左, index 右]
-const spreadRight = computed(() => current.value?.image_url || '')
-const spreadLeft = computed(() => (double.value ? reader.images[index.value + 1]?.image_url : ''))
+// 进度条拖动状态：
+//   scrubIndex   拖动中的页码（数字/滑块即时跟随）
+//   scrubPreview 节流后的预览页码（驱动图片加载，快速扫动只在停顿处加载）
+// 拖动中不触发相邻页预载排队与进度落库，松手才真正 goTo
+const scrubIndex = ref(null)
+const scrubPreview = ref(null)
+let scrubTimer = null
+
+const total = reader.images.length
+// 展示层页码：拖动预览期间跟随 scrubPreview
+const displayIndex = computed(() => (scrubPreview.value ?? index.value))
+const current = computed(() => reader.images[displayIndex.value])
+// 展示页码：拖动中跟随 scrubIndex
+const viewIndex = computed(() => (scrubIndex.value ?? index.value))
+// 进度条：RTL 时 index=0 在最右端
+const fillPct = computed(() => (total > 1 ? (viewIndex.value / (total - 1)) * 100 : 0))
+const label = computed(() => {
+  const i = viewIndex.value
+  return double.value && i + 1 < total
+    ? `${i + 1}-${i + 2} / ${total}`
+    : `${i + 1} / ${total}`
+})
+const fillStyle = computed(() => ({
+  [rtl.value ? 'right' : 'left']: '20px',
+  width: `calc((100% - 40px) * ${fillPct.value / 100})`,
+}))
+const knobStyle = computed(() => ({
+  [rtl.value ? 'right' : 'left']: `calc(20px + (100% - 40px) * ${fillPct.value / 100})`,
+}))
+
+// 双页对开：当前页为「主位」、下一页为「副位」；RTL 主位在右（日漫右开本），
+// LTR 主位在左。封面（第 1 页）单独成屏，从第 2 页起对开。
+const primarySrc = computed(() => current.value?.image_url || '')
+const secondarySrc = computed(() =>
+  double.value && displayIndex.value > 0 && displayIndex.value + 1 < total
+    ? (reader.images[displayIndex.value + 1]?.image_url || '')
+    : '')
+const spreadLeft = computed(() => (rtl.value ? secondarySrc.value : primarySrc.value))
+const spreadRight = computed(() => (rtl.value ? primarySrc.value : secondarySrc.value))
 
 function align(i) {
   const n = Math.max(0, Math.min(i, total - 1))
-  return double.value ? n - (n % 2) : n
+  if (!double.value) return n
+  if (n === 0) return 0            // 封面单显
+  return n % 2 === 0 ? n - 1 : n   // 对开基页取奇数（1,3,5…）
 }
 
 function saveProgress() {
@@ -126,14 +212,107 @@ function preload(i) {
   }
 }
 
-// 当前页异步解码，避免大图卡顿翻页闪烁
-watch(index, () => { loadedSrc.value = '' }, { immediate: false })
+// ── 书签 ──
+// 进入阅读器加载当前对象书签（page_idx 升序），离开时清理
+const bookmarks = ref([])
+const editingId = ref(null)
+const editNote = ref('')
 
-const displaySrc = computed(() => current.value?.image_url)
-// 用双层 img 简化：直接显示当前 URL，浏览器缓存保证已预加载的图即时呈现
-watch(displaySrc, v => { loadedSrc.value = v }, { immediate: true })
+async function loadBookmarks() {
+  try { bookmarks.value = await api.bookmarks(reader.obj.id) }
+  catch { bookmarks.value = [] }
+}
 
-// 切换双页时对齐到偶数页
+// 当前页是否已藏书签
+const currentBookmark = computed(() =>
+  bookmarks.value.find(b => b.page_idx === index.value))
+
+async function toggleBookmark() {
+  const existing = bookmarks.value.find(b => b.page_idx === index.value)
+  if (existing) {
+    try {
+      await api.removeBookmark(existing.id)
+      bookmarks.value = bookmarks.value.filter(b => b.id !== existing.id)
+    } catch (e) { console.error(e) }
+  } else {
+    try {
+      const row = await api.addBookmark({
+        obj_id: reader.obj.id, page_idx: index.value, note: null,
+      })
+      bookmarks.value = [...bookmarks.value, row].sort((a, b) => a.page_idx - b.page_idx)
+    } catch (e) { console.error(e) }
+  }
+}
+
+// 进度条书签刻度：定位公式与 knob 一致（两侧内缩 20px）
+function tickStyle(p) {
+  const pos = total > 1 ? (p / (total - 1)) * 100 : 0
+  return {
+    [rtl.value ? 'right' : 'left']: `calc(20px + (100% - 40px) * ${pos / 100})`,
+    transform: rtl.value ? 'translateX(50%)' : 'translateX(-50%)',
+  }
+}
+
+// 书签备注行内编辑（利用 add_bookmark 幂等覆盖同页备注）
+function startEdit(b) {
+  editingId.value = b.id
+  editNote.value = b.note || ''
+}
+function cancelEdit() {
+  editingId.value = null
+  editNote.value = ''
+}
+async function saveEdit(b) {
+  try {
+    const row = await api.addBookmark({
+      obj_id: reader.obj.id, page_idx: b.page_idx,
+      note: editNote.value.trim() || null,
+    })
+    bookmarks.value = bookmarks.value.map(x => x.page_idx === row.page_idx ? row : x)
+  } catch (e) { console.error(e) }
+  editingId.value = null
+  editNote.value = ''
+}
+async function removeBm(b) {
+  try {
+    await api.removeBookmark(b.id)
+    bookmarks.value = bookmarks.value.filter(x => x.id !== b.id)
+  } catch (e) { console.error(e) }
+}
+
+// 单页：异步解码完成后整体切换，旧图保持显示
+watch(() => current.value?.image_url, v => {
+  const g = ++singleGen
+  if (!v) { shownSingle.value = ''; return }
+  const im = new Image()
+  im.onload = im.onerror = () => {
+    if (g !== singleGen) return
+    shownSingle.value = v
+    naturalW.value = im.naturalWidth || 0
+  }
+  im.src = v
+}, { immediate: true })
+
+// 双页：两页都就绪才整屏切换，避免半屏先跳
+watch([spreadLeft, spreadRight], ([l, r]) => {
+  const g = ++spreadGen
+  if (!l && !r) { shownLeft.value = ''; shownRight.value = ''; return }
+  const load = src => new Promise(res => {
+    const im = new Image()
+    im.onload = im.onerror = () => res(im.naturalWidth || 0)
+    im.src = src
+  })
+  Promise.all([l ? load(l) : Promise.resolve(0), r ? load(r) : Promise.resolve(0)])
+    .then(([lw, rw]) => {
+      if (g !== spreadGen) return
+      shownLeft.value = l
+      shownRight.value = r
+      // 主位（随阅读方向）图片的自然宽作为自由缩放基准
+      naturalW.value = (rtl.value ? rw : lw) || lw || rw || 0
+    })
+}, { immediate: true })
+
+// 切换双页时按对开基页对齐
 watch(double, () => { index.value = align(index.value) })
 
 function toggleDouble() { setDouble(!double.value) }
@@ -141,10 +320,89 @@ function setDouble(v) {
   double.value = v
   api.setConfig(CFG_DOUBLE, v ? '1' : '0').catch(() => {})
 }
+function toggleDir() { setDir(!rtl.value) }
+function setDir(v) {
+  rtl.value = v
+  api.setConfig(CFG_DIR, v ? 'rtl' : 'ltr').catch(() => {})
+}
 function setZoom(z) {
   if (!ZOOMS.includes(z)) return
   zoom.value = z
   api.setConfig(CFG_ZOOM, z).catch(() => {})
+}
+
+// ── 自由缩放（Ctrl+滚轮）与拖拽平移 ──
+// 自由模式的图片宽度 = 原图自然宽 × zoomPct%，stage 溢出滚动 + 指针拖拽平移
+const freeStyle = computed(() =>
+  zoom.value === 'free' && naturalW.value
+    ? { width: `${Math.round((naturalW.value * zoomPct.value) / 100)}px` }
+    : undefined)
+
+function clampPct(p) { return Math.max(20, Math.min(800, p)) }
+
+async function ctrlZoom(e) {
+  e.preventDefault()
+  const stage = stageEl.value
+  if (!stage) return
+  const rect = stage.getBoundingClientRect()
+  const cx = e.clientX - rect.left
+  const cy = e.clientY - rect.top
+  // 光标锚点：保持光标处的内容点缩放前后位置不变
+  const anchor = {
+    x: (stage.scrollLeft + cx) / Math.max(1, stage.scrollWidth),
+    y: (stage.scrollTop + cy) / Math.max(1, stage.scrollHeight),
+  }
+  if (zoom.value !== 'free') {
+    // 以当前显示尺寸为基准进入自由模式，画面无跳变
+    const img = stage.querySelector('img')
+    const base = img && naturalW.value ? (img.clientWidth / naturalW.value) * 100 : 100
+    zoom.value = 'free'
+    zoomPct.value = clampPct(Math.round(base))
+  }
+  zoomPct.value = clampPct(zoomPct.value + (e.deltaY < 0 ? 10 : -10))
+  await nextTick()
+  stage.scrollLeft = anchor.x * stage.scrollWidth - cx
+  stage.scrollTop = anchor.y * stage.scrollHeight - cy
+}
+
+// ── 舞台指针交互：拖拽平移（自由模式）与点击翻页共存 ──
+// 位移超过 4px 视为拖拽（不翻页）；自由模式下按住拖动滚动条实现平移
+let panState = null   // { x, y, sl, st, moved }
+function onStagePointerDown(e) {
+  if (e.button !== 0) return
+  const stage = stageEl.value
+  if (!stage) return
+  panState = { x: e.clientX, y: e.clientY, sl: stage.scrollLeft, st: stage.scrollTop, moved: false }
+  if (zoom.value === 'free') {
+    stage.setPointerCapture(e.pointerId)
+    isPanning.value = true
+  }
+}
+function onStagePointerMove(e) {
+  if (!panState) return
+  const dx = e.clientX - panState.x
+  const dy = e.clientY - panState.y
+  if (!panState.moved && Math.hypot(dx, dy) > 4) panState.moved = true
+  if (zoom.value === 'free' && panState.moved) {
+    const stage = stageEl.value
+    stage.scrollLeft = panState.sl - dx
+    stage.scrollTop = panState.st - dy
+  }
+}
+function onStagePointerUp(e) {
+  if (!panState) return
+  const clicked = !panState.moved
+  panState = null
+  isPanning.value = false
+  if (!clicked) return
+  // 原点击翻页逻辑：阅读前进侧（RTL 左 1/3，LTR 右 1/3）
+  const r = e.currentTarget.getBoundingClientRect()
+  const x = e.clientX - r.left
+  if (x < r.width / 3) (rtl.value ? next() : prev())
+  else if (x > (2 * r.width) / 3) (rtl.value ? prev() : next())
+}
+function onStageDblClick() {
+  if (zoom.value === 'free') setZoom('fit')
 }
 
 // 工具栏自动隐藏：鼠标静止 2.2s 后淡出
@@ -154,24 +412,33 @@ function pokeChrome() {
   hideTimer = setTimeout(() => { chromeVisible.value = false }, 2200)
 }
 
-function onStageClick(e) {
-  const r = e.currentTarget.getBoundingClientRect()
-  const x = e.clientX - r.left
-  if (x < r.width / 3) next()            // 左 1/3 → 下一页
-  else if (x > (2 * r.width) / 3) prev() // 右 1/3 → 上一页
-}
+// 滚轮翻页冷却：高分辨率滚轮/触摸板一格会连发多个 wheel 事件，防止一次滚动翻多页
+let lastWheelNav = 0
 function onWheel(e) {
+  if (e.ctrlKey) return ctrlZoom(e)   // Ctrl+滚轮：自由缩放（各模式通用）
   if (zoom.value !== 'fit') return       // 滚动模式下滚轮用于滚动页面
-  if (e.deltaY > 0 || e.deltaX > 0) next()
-  else prev()
+  const now = performance.now()
+  if (now - lastWheelNav < 100) return
+  if (e.deltaY !== 0) { lastWheelNav = now; e.deltaY > 0 ? next() : prev(); return }
+  if (e.deltaX === 0) return
+  lastWheelNav = now
+  // 横向滚轮沿阅读前进方向为下一页（RTL 向左，LTR 向右）
+  ;(e.deltaX > 0) !== rtl.value ? next() : prev()
 }
 
 function onKey(e) {
-  if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') next()
-  else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') prev()
-  else if (e.key === 'Escape') back()
-  else if (e.key === 'F11' || e.key.toLowerCase() === 'f') toggleFullscreen()
-  else if (e.key.toLowerCase() === 'd') toggleDouble()
+  // 编辑书签备注时按键不触发阅读器快捷键
+  const tag = e.target?.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return
+  const k = e.key
+  if (k === 'ArrowDown') next()
+  else if (k === 'ArrowUp') prev()
+  else if (k === 'ArrowLeft') (rtl.value ? next() : prev())
+  else if (k === 'ArrowRight') (rtl.value ? prev() : next())
+  else if (k === 'Escape') back()
+  else if (k === 'F11' || k.toLowerCase() === 'f') toggleFullscreen()
+  else if (k.toLowerCase() === 'd') toggleDouble()
+  else if (k.toLowerCase() === 'b') toggleBookmark()
 }
 onMounted(() => {
   window.addEventListener('keydown', onKey)
@@ -179,20 +446,28 @@ onMounted(() => {
   // 恢复阅读器偏好
   api.getConfig(CFG_DOUBLE).then(r => { if (r.value === '1') double.value = true }).catch(() => {})
   api.getConfig(CFG_ZOOM).then(r => { if (ZOOMS.includes(r.value)) zoom.value = r.value }).catch(() => {})
+  api.getConfig(CFG_DIR).then(r => { if (r.value === 'ltr') rtl.value = false }).catch(() => {})
+  preload(index.value)   // 进入时预热相邻页
+  loadBookmarks()        // 加载当前对象书签
 })
 onUnmounted(() => {
   window.removeEventListener('keydown', onKey)
   clearTimeout(saveTimer)
   clearTimeout(hideTimer)
+  clearTimeout(scrubTimer)
   win.exitFullscreen()                                         // 兜底还原全屏
   api.lastRead(reader.obj.id, index.value).catch(() => {})   // 退出前兜底落库
+  bookmarks.value = []                                        // 离开清理书签
 })
 
 function back() {
   clearTimeout(saveTimer)
   win.exitFullscreen()
   api.lastRead(reader.obj.id, index.value).catch(() => {})
-  store.view = { name: 'directory' }
+  // 回到来处：详情页进入则回详情页，书架直达则回书架
+  // （直达时 store.directory 未设置，固定跳 directory 会因渲染空数据而卡死）
+  const to = reader.from === 'directory' && store.directory ? 'directory' : 'shelf'
+  store.view = { name: to }
 }
 
 // 真全屏走 Win32 窗口层（WebView2 不响应 HTML requestFullscreen）
@@ -200,31 +475,53 @@ async function toggleFullscreen() {
   fullscreen.value = await win.toggleFullscreen()
 }
 
-// ── 进度条拖动 ──
+// ── 进度条拖动（拖动中即时预览、节流加载，松手才落库+预载） ──
 function barToIndex(clientX) {
   const r = barEl.value.getBoundingClientRect()
   const pad = 20
   const w = r.width - pad * 2
   if (w <= 0) return 0
-  const ratio = Math.max(0, Math.min(1, (r.width - pad - (clientX - r.left)) / w))
+  const pos = rtl.value
+    ? r.width - pad - (clientX - r.left)   // RTL：自右端起
+    : clientX - r.left - pad               // LTR：自左端起
+  const ratio = Math.max(0, Math.min(1, pos / w))
   return Math.round(ratio * (total - 1))
+}
+function setScrub(i) {
+  if (i === scrubIndex.value) return
+  scrubIndex.value = i
+  // 图片预览按 200ms 节流：快速扫动只在停顿处加载（就绪才切换保证画面稳定）
+  clearTimeout(scrubTimer)
+  scrubTimer = setTimeout(() => { scrubPreview.value = i }, 200)
 }
 function onBarDown(e) {
   dragging.value = true
   pokeChrome()
-  goTo(barToIndex(e.clientX))
+  barEl.value?.setPointerCapture(e.pointerId)
+  const i = align(barToIndex(e.clientX))
+  scrubIndex.value = i
+  scrubPreview.value = i   // 按下立即预览
 }
 function onBarMove(e) {
-  if (dragging.value) goTo(barToIndex(e.clientX))
+  if (dragging.value) setScrub(align(barToIndex(e.clientX)))
+}
+function onBarUp() {
+  if (!dragging.value) return
+  dragging.value = false
+  clearTimeout(scrubTimer)
+  const t = scrubIndex.value
+  scrubIndex.value = null
+  scrubPreview.value = null
+  if (t != null && t !== index.value) goTo(t)
 }
 </script>
 
 <style scoped>
-.reader { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.reader { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 /* 顶栏高度与主界面 TopBar 保持一致（58px）；左右等宽令中区控件天然居中 */
 .top {
   height: 58px; flex: none;
-  display: flex; align-items: stretch;
+  display: flex; align-items: stretch; gap: 10px;
   border-bottom: 1px solid var(--border);
   transition: opacity .3s;
   user-select: none;
@@ -254,13 +551,28 @@ function onBarMove(e) {
   user-select: none; -webkit-user-drag: none;
 }
 .stage-spin, .spread-spin { position: absolute; }
+.empty-page {
+  color: var(--text2); font-size: 14px;
+  user-select: none; cursor: default;
+}
 
 /* 适应宽度：纵向滚动 */
 .reader-stage.zoom-width { flex-direction: column; align-items: center; overflow-y: auto; }
 .reader-stage.zoom-width img { width: 100%; height: auto; max-height: none; }
-/* 原始尺寸：自由滚动 */
-.reader-stage.zoom-original { overflow: auto; }
-.reader-stage.zoom-original img { max-width: none; max-height: none; }
+/* 原始尺寸：自由滚动。flex-start + margin:auto 组合居中：
+   内容小于容器时居中，超出时两侧均可滚动到达（flex 居中的溢出是对称的，
+   会导致起始侧不可达）；flex:none 防止超大图被 flex 收缩钳回容器宽 */
+.reader-stage.zoom-original { overflow: auto; justify-content: flex-start; align-items: flex-start; }
+.reader-stage.zoom-original img { flex: none; max-width: none; max-height: none; margin: auto; }
+/* 自由缩放（Ctrl+滚轮）：溢出滚动 + 拖拽平移，居中与防收缩策略同上 */
+.reader-stage.zoom-free { overflow: auto; cursor: grab; justify-content: flex-start; align-items: flex-start; }
+.reader-stage.zoom-free.panning { cursor: grabbing; }
+.reader-stage.zoom-free img {
+  flex: none;
+  max-width: none; max-height: none; height: auto; margin: auto;
+}
+.zoom-free .spread { flex: none; width: max-content; margin: auto; }
+.zoom-free .spread img { flex: none; max-width: none; max-height: none; height: auto; }
 
 /* 双页对开 */
 .spread {
@@ -280,18 +592,48 @@ function onBarMove(e) {
   top: 18px; left: 20px; right: 20px; height: 4px; border-radius: 2px;
   background: rgba(128,128,128,.35);
 }
-.filled {
-  top: 18px; right: 20px; height: 4px; border-radius: 2px;
-  background: var(--ms-primary);
-}
+/* 锚定侧（right/left）由内联样式按阅读方向提供 */
+.filled { top: 18px; height: 4px; border-radius: 2px; background: var(--ms-primary); }
 .knob {
   top: 12px; width: 16px; height: 16px; border-radius: 50%;
   transform: translateX(50%);
   background: var(--card); border: 2px solid var(--ms-primary);
 }
+.knob.ltr { transform: translateX(-50%); }
 .page-label {
   position: absolute; top: 26px; left: 0; right: 0; bottom: 0;
   display: flex; align-items: center; justify-content: center;
   font-size: 11px; line-height: 14px; color: var(--text2); opacity: .8;
 }
+
+/* 书签刻度：通高细线，定位公式同 knob */
+.bm-tick {
+  position: absolute; top: 2px; bottom: 2px; width: 3px;
+  border-radius: 1.5px; cursor: pointer;
+  background: #f5a623;
+  z-index: 1;
+}
+.bm-tick:hover { filter: brightness(1.2); }
+
+/* 书签列表面板 */
+.bm-panel { max-height: 360px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.bm-empty { font-size: 13px; opacity: .5; padding: 12px 4px; text-align: center; }
+.bm-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px; border-radius: 6px; cursor: pointer;
+  transition: background .15s;
+}
+.bm-row:hover { background: var(--chip-bg); }
+.bm-page { font-size: 12px; font-weight: 700; flex: none; }
+.bm-fname {
+  font-size: 11px; opacity: .5; flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-family: Georgia, serif;
+}
+.bm-note {
+  font-size: 12px; flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.bm-note.placeholder { opacity: .4; }
+.bm-row :deep(.n-input) { width: 120px; }
 </style>

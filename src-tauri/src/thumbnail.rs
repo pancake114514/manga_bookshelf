@@ -45,6 +45,21 @@ fn thumb_path(cache_dir: &str, source_path: &str, size: (u32, u32)) -> PathBuf {
     }
 }
 
+/// 探测缩略图缓存：命中返回缓存路径，未命中返回 None。
+/// 供协议层在排队生成前先查缓存，命中则免占并发许可直接读文件。
+pub fn cached_thumb_path(
+    source_path: &str,
+    cache_dir: &str,
+    size: (u32, u32),
+) -> Option<String> {
+    let path = thumb_path(cache_dir, source_path, size);
+    if path.is_file() {
+        Some(path.to_string_lossy().to_string())
+    } else {
+        None
+    }
+}
+
 /// 生成缩略图，返回缓存路径；失败返回 None。
 /// 策略：等比缩放后居中裁剪到目标尺寸，不填充任何背景色。
 pub fn generate_thumbnail(
@@ -89,11 +104,29 @@ pub fn generate_thumbnail(
     let new_w = (src_w as f64 * scale).round() as u32;
     let new_h = (src_h as f64 * scale).round() as u32;
 
-    let resized = img.resize_exact(new_w, new_h, image::imageops::FilterType::Lanczos3);
+    // 大比率降采样时 Lanczos3 的核宽度随缩放比放大（约 13× 缩小时每输出
+    // 像素需 80+ 采样点），是缩略图生成的最大 CPU 热点；thumbnail() 的
+    // box-filter 单趟降采样在此场景快数倍，160~220px 目标尺寸下画质肉眼
+    // 无差。仅小比率调整（<2×）时保留 Lanczos3。
+    let resized = if src_w >= new_w.saturating_mul(2) || src_h >= new_h.saturating_mul(2) {
+        let t = img.thumbnail(new_w, new_h);
+        // thumbnail 按比例取整可能比目标小 1px，补齐以保证可裁剪
+        if t.width() < target_w || t.height() < target_h {
+            t.resize_exact(
+                target_w.max(t.width()),
+                target_h.max(t.height()),
+                image::imageops::FilterType::Lanczos3,
+            )
+        } else {
+            t
+        }
+    } else {
+        img.resize_exact(new_w, new_h, image::imageops::FilterType::Lanczos3)
+    };
 
     // 居中裁剪
-    let left = (new_w.saturating_sub(target_w)) / 2;
-    let top = (new_h.saturating_sub(target_h)) / 2;
+    let left = (resized.width().saturating_sub(target_w)) / 2;
+    let top = (resized.height().saturating_sub(target_h)) / 2;
     let cropped = resized.crop_imm(left, top, target_w, target_h);
 
     // 先写临时文件再原子替换
@@ -146,6 +179,84 @@ pub fn clear_cached_thumbs(cache_dir: &str, source_paths: &[String]) -> usize {
             }
     }
     removed
+}
+
+/// 清理缩略图缓存（维护操作）。
+///
+/// 两段策略：
+/// ① 正确性清理——keep_sources 为全部活动源（对象封面+图片），按当前 mtime/size
+///   计算各自在全部尺寸档位下"应存在"的缓存文件名；缓存目录中不在该集合内的
+///   一律删除（已删对象残留、源文件替换后的失效版本等）。
+/// ② 总量上限——清理后若总大小仍超 max_total_bytes，按 mtime 从旧到新删除直到
+///   达标（被删的活动缓存下次访问时会自动重新生成）。
+///
+/// 返回 (删除文件数, 释放字节数)。写入中的 .tmp 临时文件跳过（生成流程即将
+/// 原子改名接管；仅进程崩溃才会残留，体积极小）。
+pub fn prune_thumb_cache(
+    cache_dir: &str,
+    keep_sources: &[String],
+    max_total_bytes: u64,
+) -> (usize, u64) {
+    // ① 计算应保留的文件名集合
+    let mut keep: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for src in keep_sources {
+        for size in &[THUMBNAIL_SIZE, GRID_THUMB_SIZE, COVER_THUMB_SIZE] {
+            let p = thumb_path(cache_dir, src, *size);
+            if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                keep.insert(name.to_string());
+            }
+        }
+    }
+
+    let dir = match fs::read_dir(cache_dir) {
+        Ok(d) => d,
+        Err(_) => return (0, 0),
+    };
+
+    let mut removed = 0usize;
+    let mut freed: u64 = 0;
+    let mut kept_files: Vec<(std::path::PathBuf, u64, std::time::SystemTime)> = Vec::new();
+    let mut kept_total: u64 = 0;
+
+    for entry in dir.flatten() {
+        let name = entry.file_name();
+        let name = match name.to_str() {
+            Some(s) => s.to_string(),
+            None => continue,
+        };
+        if name.ends_with(".tmp") {
+            continue;
+        }
+        let meta = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if keep.contains(&name) {
+            let mtime = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
+            kept_total += meta.len();
+            kept_files.push((entry.path(), meta.len(), mtime));
+        } else if fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
+            freed += meta.len();
+        }
+    }
+
+    // ② 总量超限时按最旧优先删除（活动缓存可再生，删除安全）
+    if kept_total > max_total_bytes {
+        kept_files.sort_by_key(|(_, _, mtime)| *mtime);
+        for (path, len, _) in kept_files {
+            if kept_total <= max_total_bytes {
+                break;
+            }
+            if fs::remove_file(&path).is_ok() {
+                removed += 1;
+                freed += len;
+                kept_total = kept_total.saturating_sub(len);
+            }
+        }
+    }
+
+    (removed, freed)
 }
 
 
@@ -204,5 +315,62 @@ mod tests {
         assert!(removed >= 1, "应至少移除 1 个缓存");
         assert!(!PathBuf::from(&t1).exists(), "指定源的缓存应被清除");
         assert!(PathBuf::from(&t2).exists(), "未指定源的缓存应保留");
+    }
+
+    #[test]
+    fn prune_removes_stale_and_foreign_files_keeps_live() {
+        let d = tmp("prune");
+        let img = image::RgbImage::from_pixel(400, 600, image::Rgb([9, 90, 9]));
+        let src = d.join("page.png");
+        img.save(&src).unwrap();
+        let cache = d.join("cache");
+        fs::create_dir_all(&cache).unwrap();
+        let t1 = generate_thumbnail(src.to_str().unwrap(), cache.to_str().unwrap(), crate::config::THUMBNAIL_SIZE).unwrap();
+
+        // 外来文件（不属于任何活动源）
+        fs::write(cache.join("deadbeef__123_456.jpg"), "x").unwrap();
+
+        // 源文件被替换（内容变化 → mtime/size 变）→ 重新生成得到新缓存名，旧版本成为失效残留
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let img2 = image::RgbImage::from_pixel(410, 610, image::Rgb([9, 90, 9]));
+        img2.save(&src).unwrap();
+        let t2 = generate_thumbnail(src.to_str().unwrap(), cache.to_str().unwrap(), crate::config::THUMBNAIL_SIZE).unwrap();
+        assert_ne!(t1, t2, "替换源后应产生新缓存文件名");
+        assert!(PathBuf::from(&t1).is_file(), "旧缓存此刻仍残留（待清理）");
+
+        let (removed, freed) = prune_thumb_cache(
+            cache.to_str().unwrap(),
+            &[src.to_string_lossy().to_string()],
+            u64::MAX,
+        );
+        assert!(removed >= 2, "旧版本与外来文件都应被清理: removed={removed}");
+        assert!(freed > 0);
+        assert!(!PathBuf::from(&t1).exists(), "失效版本应被删除");
+        assert!(PathBuf::from(&t2).is_file(), "活动缓存应保留");
+    }
+
+    #[test]
+    fn prune_enforces_total_cap_by_oldest_first() {
+        let d = tmp("prunecap");
+        let cache = d.join("cache");
+        fs::create_dir_all(&cache).unwrap();
+        let img = image::RgbImage::from_pixel(60, 80, image::Rgb([7, 7, 7]));
+        let s1 = d.join("a.png");
+        let s2 = d.join("b.png");
+        img.save(&s1).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        img.save(&s2).unwrap();
+        let t1 = generate_thumbnail(s1.to_str().unwrap(), cache.to_str().unwrap(), crate::config::THUMBNAIL_SIZE).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let t2 = generate_thumbnail(s2.to_str().unwrap(), cache.to_str().unwrap(), crate::config::THUMBNAIL_SIZE).unwrap();
+        assert!(PathBuf::from(&t1).is_file() && PathBuf::from(&t2).is_file());
+
+        // 上限设 0：两个活动缓存都被删（极端但可断言按序全删）
+        let (removed, _) = prune_thumb_cache(cache.to_str().unwrap(), &[
+            s1.to_string_lossy().to_string(),
+            s2.to_string_lossy().to_string(),
+        ], 0);
+        assert!(removed >= 2, "超限应删除活动缓存: removed={removed}");
+        assert!(!PathBuf::from(&t1).exists() && !PathBuf::from(&t2).exists());
     }
 }

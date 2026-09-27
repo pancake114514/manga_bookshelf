@@ -11,6 +11,7 @@
               <TopBar v-if="store.view.name !== 'reader'" />
               <div class="app-main">
                 <TagSidebar v-if="showSidebar" />
+                <DirectorySidebar v-else-if="store.view.name === 'directory'" :obj="store.directory.obj" />
                 <Bookshelf v-if="store.view.name === 'shelf'" />
                 <DirectoryView v-else-if="store.view.name === 'directory'" :obj="store.directory.obj" />
                 <Reader v-else-if="store.view.name === 'reader'" />
@@ -43,14 +44,15 @@ import TitleBar from './components/TitleBar.vue'
 import TopBar from './components/TopBar.vue'
 import EdgeResize from './components/EdgeResize.vue'
 import TagSidebar from './components/TagSidebar.vue'
+import DirectorySidebar from './components/DirectorySidebar.vue'
 import Bookshelf from './components/Bookshelf.vue'
 import DirectoryView from './components/DirectoryView.vue'
 import Reader from './components/Reader.vue'
 import ImportDialog from './components/ImportDialog.vue'
 import LibraryDialog from './components/LibraryDialog.vue'
 
-const showSidebar = computed(() =>
-  store.view.name === 'shelf' || store.view.name === 'directory')
+// 主界面侧栏：书架用标签筛选；详情页用对象侧栏（组件内部按内容动态隐藏）
+const showSidebar = computed(() => store.view.name === 'shelf')
 const showTitleBar = computed(() => !store.ready || !store.storageRoot)
 
 function retry() { boot() }

@@ -1,0 +1,65 @@
+name: Release
+
+# tag（v*）推送时自动打包安装包并发布到 GitHub Releases；
+# 也可在 Actions 页手动触发（workflow_dispatch，版本号取自 tauri.conf.json）
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # tauri-action 创建 Release 需要写权限
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # 安装前端依赖；构建由 tauri build 的 beforeBuildCommand 完成
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      # 版本一致性校验：tag 版本与 tauri.conf.json / Cargo.toml / package.json 必须一致，
+      # 且三处配置互相一致——不一致直接失败，防止 Release 挂错版本号的包
+      - name: Verify version consistency
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          CONF=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          CARGO=$(grep -A 5 '^\[package\]' src-tauri/Cargo.toml | grep -m1 '^version' | sed 's/version *= *"\([^"]*\)".*/\1/')
+          NPMV=$(node -p "require('./frontend/package.json').version")
+          echo "tag=${TAG:-（手动触发，无 tag）} conf=$CONF cargo=$CARGO npm=$NPMV"
+          if [ -n "$TAG" ] && [ "$TAG" != "$CONF" ]; then
+            echo "::error::tag 版本 v$TAG 与 tauri.conf.json 的 $CONF 不一致"
+            exit 1
+          fi
+          if [ "$CONF" != "$CARGO" ] || [ "$CONF" != "$NPMV" ]; then
+            echo "::error::三处版本号不一致 conf=$CONF cargo=$CARGO npm=$NPMV"
+            exit 1
+          fi
+
+      # 打包（NSIS + MSI，取自 bundle.targets: "all"）并创建/更新 GitHub Release；
+      # tagName/releaseName 中的 __VERSION__ 由 action 替换为 tauri.conf.json 的版本
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: 'MangaShelf v__VERSION__'
+          releaseBody: '从下方 Assets 下载安装包（NSIS 为推荐安装器，MSI 供批量部署）。'
+          releaseDraft: false
+          prerelease: false

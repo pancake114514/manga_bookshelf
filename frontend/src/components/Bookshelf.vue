@@ -1,5 +1,5 @@
 <template>
-  <main class="shelf">
+  <main class="shelf" @scroll="onShelfScroll">
     <div class="toolbar">
       <div class="result-hint">
         共 {{ shown.length }} 个对象{{ store.r18 ? '' : '（R-18 已隐藏）' }}{{ store.keyword ? ` · 搜索「${store.keyword}」` : '' }}
@@ -18,20 +18,50 @@
                     :secondary="store.density !== d"
                     @click="setDensity(d)">{{ label }}</n-button>
         </n-button-group>
+        <n-button-group size="small" :title="'切换视图模式'">
+          <n-button :type="!store.grouped ? 'primary' : 'default'" :secondary="store.grouped"
+                    title="平铺视图" @click="setGrouped(false)">
+            <IconGrid :size="14" /> 平铺
+          </n-button>
+          <n-button :type="store.grouped ? 'primary' : 'default'" :secondary="!store.grouped"
+                    title="按系列分组" @click="setGrouped(true)">
+            <IconList :size="14" /> 系列分组
+          </n-button>
+        </n-button-group>
         <n-button v-if="!selectMode" size="small" @click="enterSelect">
           <IconCheckSquare :size="14" /> 多选
         </n-button>
       </div>
     </div>
 
-    <div ref="gridEl" class="shelf-grid" :class="[phase, `density-${store.density}`]">
-      <ObjectCard v-for="(o, i) in shown" :key="o.id" :obj="o"
+    <!-- 平铺视图 -->
+    <div v-if="!store.grouped" ref="gridEl" class="shelf-grid" :class="[phase, `density-${store.density}`]">
+      <ObjectCard v-for="(o, i) in visible" :key="o.id" :obj="o"
         :anim-delay="phase ? Math.min(i * (phase === 'leaving' ? 12 : 26), 420) : 0"
         :revealed="revealedSet.has(o.id)"
         :select-mode="selectMode" :selected="selected.has(o.id)"
-        @open="openDir" @edit="editObj" @cover="changeCover" @del="delObj"
+        @open="openDir" @read="openReader" @edit="editObj" @cover="changeCover" @del="delObj"
         @rate="rateObj" @toggle-select="toggleSelect" />
     </div>
+
+    <!-- 系列分组视图 -->
+    <template v-else>
+      <section v-for="g in groups" :key="g.key" class="series-group">
+        <div class="group-header" @click="toggleCollapse(g.key)">
+          <IconChevronRight class="chev" :class="{ open: !collapsed.has(g.key) }" :size="14" />
+          <span class="g-name">{{ g.name }}</span>
+          <span class="g-count">共 {{ g.members.length }} 卷</span>
+        </div>
+        <div v-show="!collapsed.has(g.key)" class="shelf-grid" :class="[phase, `density-${store.density}`]">
+          <ObjectCard v-for="(o, i) in g.members" :key="o.id" :obj="o"
+            :anim-delay="phase ? Math.min(i * (phase === 'leaving' ? 12 : 26), 420) : 0"
+            :revealed="revealedSet.has(o.id)"
+            :select-mode="selectMode" :selected="selected.has(o.id)"
+            @open="openDir" @read="openReader" @edit="editObj" @cover="changeCover" @del="delObj"
+            @rate="rateObj" @toggle-select="toggleSelect" />
+        </div>
+      </section>
+    </template>
     <n-empty v-if="!shown.length && !phase" class="empty" size="large"
              description="书架空空如也，点击右上角「导入」添加图片吧" />
 
@@ -64,12 +94,12 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted, h } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, h } from 'vue'
 import { useMessage, useDialog, NCheckbox, NSelect, NButton, NButtonGroup, NModal, NEmpty } from 'naive-ui'
 import { api, dialog as fileDialog } from '../api'
-import { store, refreshTagValues, setSort, setDensity } from '../store'
+import { store, refreshTagValues, loadSeries, setSort, setDensity, setGrouped } from '../store'
 import { CATS } from '../constants'
-import { IconArrowUp, IconArrowDown, IconCheckSquare, IconX } from './icons'
+import { IconArrowUp, IconArrowDown, IconCheckSquare, IconX, IconGrid, IconList, IconChevronRight } from './icons'
 import ObjectCard from './ObjectCard.vue'
 import EditDialog from './EditDialog.vue'
 import TagFields from './TagFields.vue'
@@ -78,6 +108,31 @@ const message = useMessage()
 const dialog = useDialog()
 
 const shown = ref([])
+
+// ── 渐进渲染：大库不全量挂载 DOM ──
+// 首屏只渲染 INITIAL 张，滚动接近底部再按 BATCH 追加；DOM 数量随滚动增长
+// 而非随库规模一次性全量挂载（几千张卡片的首屏挂载/筛选切换卡顿主因）。
+// 数据操作（多选/批量删除等）仍基于 shown 全集，不受渲染截断影响。
+const RENDER_INITIAL = 80
+const RENDER_BATCH = 100
+const renderCount = ref(RENDER_INITIAL)
+const visible = computed(() => shown.value.slice(0, renderCount.value))
+
+// 结果集变化（筛选/搜索/排序/刷新）时重置已渲染量
+watch(shown, () => { renderCount.value = RENDER_INITIAL })
+// 分组视图滚动会推高 renderCount，切回平铺时重置以恢复渐进渲染
+watch(() => store.grouped, () => { renderCount.value = RENDER_INITIAL })
+
+function onShelfScroll(e) {
+  if (renderCount.value >= shown.value.length) return
+  const el = e.currentTarget
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 600) {
+    renderCount.value += RENDER_BATCH
+  }
+}
+
+// 超过此数量跳过整批右出左入过渡（几百张卡片的级联动画本身即卡顿源）
+const ANIM_MAX = 300
 const phase = ref('')            // '' | 'leaving' | 'entering'
 const revealedSet = ref(new Set())
 const editShow = ref(false)
@@ -109,6 +164,51 @@ function applySort(list) {
   })
 }
 
+// ── 系列分组视图 ──
+// 按 series_name 分组：组内排序为 volume 升序 NULLS LAST，再按现有全局排序键；
+// 无系列对象归「未分组」组排在最后；组间按系列名排序（中文 localeCompare）。
+const NONE_KEY = '__none__'
+const collapsed = ref(new Set())
+function toggleCollapse(key) {
+  const next = new Set(collapsed.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  collapsed.value = next
+}
+function sortInGroup(members) {
+  const fn = SORTERS[store.sort.key] || SORTERS.created_at
+  return [...members].sort((a, b) => {
+    // volume 升序，null/undefined 排最后
+    const va = a.volume == null ? Infinity : a.volume
+    const vb = b.volume == null ? Infinity : b.volume
+    if (va !== vb) return va - vb
+    const sa = fn(a), sb = fn(b)
+    const c = typeof sa === 'string' ? sa.localeCompare(String(sb), 'zh') : sa - sb
+    return store.sort.desc ? -c : c
+  })
+}
+const groups = computed(() => {
+  const map = new Map()       // seriesName -> members[]
+  const ungrouped = []
+  for (const o of shown.value) {
+    const sn = o.series_name
+    if (sn) {
+      if (!map.has(sn)) map.set(sn, [])
+      map.get(sn).push(o)
+    } else {
+      ungrouped.push(o)
+    }
+  }
+  const out = []
+  for (const [name, members] of [...map.entries()].sort((a, b) => a[0].localeCompare(b[0], 'zh'))) {
+    out.push({ key: name, name, members: sortInGroup(members) })
+  }
+  if (ungrouped.length) {
+    out.push({ key: NONE_KEY, name: '未分组', members: sortInGroup(ungrouped) })
+  }
+  return out
+})
+
 // 多选
 const selectMode = ref(false)
 const selected = ref(new Set())
@@ -134,6 +234,11 @@ watch(() => [store.filters, store.keyword, store.r18], async () => {
   exitSelect()
 
   const sorted = applySort(next)
+  if (sorted.length > ANIM_MAX) {      // 大结果集跳过整批过渡动画
+    shown.value = sorted
+    phase.value = ''
+    return
+  }
   if (!shown.value.length) {           // 首次或从空态恢复：直接入场动画
     shown.value = sorted
     phase.value = 'entering'
@@ -162,6 +267,7 @@ async function silentReload() {
   phase.value = ''
   shown.value = applySort(await fetchObjects().catch(() => []))
   refreshTagValues()
+  loadSeries()
 }
 
 // 导入完成等外部数据变更（App 层转发 reloadTick）
@@ -169,6 +275,7 @@ watch(() => store.reloadTick, () => { silentReload() })
 
 onMounted(async () => {
   shown.value = applySort(await fetchObjects().catch(() => []))
+  if (shown.value.length > ANIM_MAX) return   // 大库首屏不做入场动画
   phase.value = 'entering'
   setTimeout(() => { phase.value = '' }, 900)
 })
@@ -221,6 +328,7 @@ async function runBatchTag() {
     batchShow.value = false
     exitSelect()
     refreshTagValues()
+    loadSeries()
   } catch (e) {
     message.error(e.message)
   } finally {
@@ -230,7 +338,8 @@ async function runBatchTag() {
 
 function confirmBatchDelete() {
   const n = selected.value.size
-  const checked = { value: false }
+  // 必须用 ref：对话框内容是渲染函数，普通对象无响应式，勾选状态不会回显
+  const checked = ref(false)
   dialog.warning({
     title: '批量删除',
     content: () => h('div', null, [
@@ -249,11 +358,25 @@ function confirmBatchDelete() {
 async function runBatchDelete(deleteFiles) {
   const objs = shown.value.filter(o => selected.value.has(o.id))
   let ok = 0, fail = 0
-  for (const o of objs) {
-    try { await api.deleteObject(o.id, deleteFiles); ok++ } catch { fail++ }
+  const warns = []
+  store.deleting++
+  try {
+    for (const o of objs) {
+      try {
+        const res = await api.deleteObject(o.id, deleteFiles)
+        if (res?.warnings?.length) warns.push(...res.warnings)
+        ok++
+      } catch { fail++ }
+    }
+  } finally {
+    store.deleting--
   }
   if (fail) message.warning(`已删除 ${ok} 个，失败 ${fail} 个`)
   else message.success(`已删除 ${ok} 个`)
+  if (warns.length) {
+    const head = warns.slice(0, 3).join('；')
+    message.warning(warns.length > 3 ? `${head} 等 ${warns.length} 条提示` : head)
+  }
   exitSelect()
   silentReload()
 }
@@ -270,6 +393,22 @@ async function openDir(obj) {
   const detail = await api.object(obj.id)
   store.directory = { obj: detail }
   store.view = { name: 'directory' }
+}
+
+// 卡片「继续阅读」：取详情后直达阅读器，恢复上次进度（省去进详情页一跳）
+async function openReader(obj) {
+  try {
+    const detail = await api.object(obj.id)
+    if (!detail.images?.length) {
+      message.warning('该对象没有内容')
+      return
+    }
+    const idx = Math.min(obj.last_read_idx || 0, detail.images.length - 1)
+    store.reader = { obj: detail, images: detail.images, index: idx, from: 'shelf' }
+    store.view = { name: 'reader' }
+  } catch (e) {
+    message.error(e.message || String(e))
+  }
 }
 
 function editObj(obj) {
@@ -302,7 +441,8 @@ async function rateObj(obj, val) {
 }
 
 function delObj(obj) {
-  const checked = { value: false }
+  // 必须用 ref：对话框内容是渲染函数，普通对象无响应式，勾选状态不会回显
+  const checked = ref(false)
   dialog.warning({
     title: '删除对象',
     content: () => h('div', null, [
@@ -319,11 +459,14 @@ function delObj(obj) {
 }
 
 async function doDelete(obj, deleteFiles) {
+  store.deleting++
   try {
-    await api.deleteObject(obj.id, deleteFiles)
-    message.success('已删除')
+    const res = await api.deleteObject(obj.id, deleteFiles)
+    if (res?.warnings?.length) message.warning(res.warnings.join('；'))
+    else message.success('已删除')
     silentReload()
   } catch (e) { message.error(e.message) }
+  finally { store.deleting-- }
 }
 </script>
 
@@ -359,4 +502,20 @@ async function doDelete(obj, deleteFiles) {
 .shelf-grid.entering :deep(.obj-card) {
   animation: card-in .34s cubic-bezier(.22, .9, .36, 1) backwards;
 }
+
+/* 系列分组视图 */
+.series-group { margin-bottom: 18px; }
+.group-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; margin-bottom: 10px;
+  cursor: pointer; user-select: none;
+  border-radius: 8px;
+  background: var(--chip-bg);
+  transition: background .15s;
+}
+.group-header:hover { background: var(--chip-bg); filter: brightness(1.08); }
+.group-header .chev { opacity: .55; transition: transform .18s; flex: none; }
+.group-header .chev.open { transform: rotate(90deg); }
+.g-name { font-size: 14px; font-weight: 700; }
+.g-count { font-size: 12px; opacity: .5; }
 </style>

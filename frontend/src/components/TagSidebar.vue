@@ -16,6 +16,16 @@
       </div>
     </div>
 
+    <!-- 系列筛选（非标签类别，走 filters.series 由后端按系列名查询） -->
+    <div v-if="seriesNames.length" class="group">
+      <div class="group-title">系列</div>
+      <div class="chips">
+        <span v-for="v in seriesNames" :key="v" class="chip"
+              :class="{ active: (store.filters.series || []).includes(v) }"
+              @click="toggle('series', v)">{{ v }}</span>
+      </div>
+    </div>
+
     <div v-for="(values, cat) in store.tagValues" :key="cat" class="group">
       <div class="group-title">{{ catLabel(cat) }}</div>
       <div class="chips">
@@ -40,6 +50,11 @@ import { IconStarFill } from './icons'
 
 const selectedCount = computed(() =>
   Object.values(store.filters).reduce((n, v) => n + v.length, 0))
+
+// 系列名列表（按中文排序展示）
+const seriesNames = computed(() =>
+  (store.series || []).map(s => s.name).filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, 'zh')))
 
 // 评分筛选：filters.rating 取连续值 [n..5]，语义为「n 星及以上」
 const minRating = computed(() => {

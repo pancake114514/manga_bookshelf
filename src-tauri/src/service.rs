@@ -10,7 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use crate::db::{AssembledObject, Database, ImageRow, Tags, new_uuid};
+use crate::db::{AssembledObject, BookmarkRow, Database, ImageRow, SeriesRow, Tags, new_uuid};
 use crate::file_ops::{
     collect_images, copy_image_keep_name, find_thumb_cover,
 };
@@ -19,6 +19,55 @@ use crate::thumbnail::{clear_cached_thumbs, get_thumb_cache_dir};
 pub struct LibraryService {
     pub db: Mutex<Database>,
 }
+
+// ── 库校验 ──────────────────────────────────────────────────────────────────
+
+/// 对象级校验结果（仅异常对象进入报告）
+#[derive(Debug, serde::Serialize)]
+pub struct ObjectVerify {
+    pub obj_id: String,
+    pub name: String,
+    pub storage_path: String,
+    pub dir_exists: bool,
+    pub image_count: usize,
+    /// 已登记但文件缺失的图片文件名
+    pub missing_images: Vec<String>,
+    /// 磁盘存在但未登记的图片文件名
+    pub unregistered_files: Vec<String>,
+}
+
+/// 库校验只读报告
+#[derive(Debug, serde::Serialize)]
+pub struct VerifyReport {
+    pub objects_total: usize,
+    pub missing_images_total: usize,
+    pub unregistered_total: usize,
+    pub abnormal: Vec<ObjectVerify>,
+    /// 库根下不属于任何对象的目录（可导入）
+    pub orphan_dirs: Vec<String>,
+}
+
+/// 修复计划（按前端勾选生成；各列表为对象 ID）
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct VerifyFixPlan {
+    #[serde(default)]
+    pub remove_missing: Vec<String>,
+    #[serde(default)]
+    pub remove_empty: Vec<String>,
+    #[serde(default)]
+    pub register: Vec<String>,
+}
+
+/// 修复执行结果
+#[derive(Debug, serde::Serialize)]
+pub struct VerifyFixResult {
+    pub removed_rows: usize,
+    pub registered: usize,
+    pub removed_objects: usize,
+}
+
+/// 校验快照：对象（id、名称、存储路径）与其图片记录（文件名、路径）
+type VerifySnapshot = Vec<(String, String, Option<String>, Vec<(String, String)>)>;
 
 impl LibraryService {
     pub fn new(db_path: &str) -> Result<Self, String> {
@@ -60,6 +109,35 @@ impl LibraryService {
         self.db.lock().unwrap_or_else(|p| p.into_inner()).filter_by_tags(filters, include_r18)
     }
 
+    /// 按系列名筛选（可与标签筛选组合：先按系列取集，再在内存里过滤标签）
+    pub fn filter_by_series(
+        &self,
+        series_names: &[String],
+        filters: &HashMap<String, Vec<String>>,
+        include_r18: bool,
+    ) -> Result<Vec<AssembledObject>, String> {
+        let base = {
+            let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+            db.get_objects_by_series_names(series_names, include_r18)?
+        };
+        if filters.is_empty() {
+            return Ok(base);
+        }
+        Ok(crate::db::filter_assembled_by_tags(base, filters))
+    }
+
+    /// 按系列 ID 取全部分卷（详情页分卷导航用）
+    pub fn get_series_volumes(
+        &self,
+        series_id: &str,
+        include_r18: bool,
+    ) -> Result<Vec<AssembledObject>, String> {
+        self.db
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get_series_volumes(series_id, include_r18)
+    }
+
     pub fn get_object(&self, obj_id: &str) -> Result<Option<AssembledObject>, String> {
         let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
         let obj = db.get_object_opt(obj_id)?;
@@ -80,6 +158,9 @@ impl LibraryService {
             cover_image: row.cover_image,
             last_read_idx: row.last_read_idx,
             created_at: row.created_at,
+            series_id: row.series_id,
+            series_name: row.series_name,
+            volume: row.volume,
             tags,
             image_count,
             first_image,
@@ -92,6 +173,218 @@ impl LibraryService {
 
     pub fn get_image_by_id(&self, obj_id: &str, img_id: &str) -> Result<Option<ImageRow>, String> {
         self.db.lock().unwrap_or_else(|p| p.into_inner()).get_image_by_id(obj_id, img_id)
+    }
+
+    /// 清理缩略图缓存（正确性清理 + 总量上限），返回 (删除文件数, 释放字节数)
+    pub fn prune_thumbnail_cache(&self) -> Result<(usize, u64), String> {
+        let root = self.get_config("storage_root")?.ok_or("图库未配置")?;
+        let mut keep: Vec<String> = Vec::new();
+        {
+            let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+            keep.extend(db.get_all_cover_paths()?);
+            keep.extend(db.get_all_image_filepaths()?);
+        }
+        let cache_dir = get_thumb_cache_dir(&root);
+        Ok(crate::thumbnail::prune_thumb_cache(
+            &cache_dir,
+            &keep,
+            crate::config::THUMB_CACHE_MAX_BYTES,
+        ))
+    }
+
+    // ── 库校验 ──────────────────────────────────────────────────────────────
+
+/// 校验库与磁盘的一致性（只读报告，不做任何修改）。
+/// 检查在 db 锁外进行（纯文件系统 stat），不阻塞其他命令。
+pub fn verify_library(&self) -> Result<VerifyReport, String> {
+    let root = self.get_config("storage_root")?.ok_or("图库未配置")?;
+    if !Path::new(&root).is_dir() {
+        return Err(format!("图库目录当前不可访问（外置/网络磁盘未连接？）：{root}"));
+    }
+
+    // 短锁快照：对象与其图片记录
+    let snapshot: VerifySnapshot = {
+            let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+            db.get_all_objects(true)?
+                .into_iter()
+                .map(|o| {
+                    let imgs = db
+                        .get_images(&o.id)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|i| (i.filename, i.filepath))
+                        .collect();
+                    (o.id, o.name, o.storage_path, imgs)
+                })
+                .collect()
+        };
+        let objects_total = snapshot.len();
+
+        let mut abnormal: Vec<ObjectVerify> = Vec::new();
+        let mut missing_total = 0usize;
+        let mut unreg_total = 0usize;
+        let mut known_dirs: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for (id, name, storage_path, images) in snapshot {
+            let sp = storage_path.clone().unwrap_or_default();
+            if !sp.is_empty() {
+                known_dirs.insert(normalize_path(&sp));
+            }
+            let dir_exists = !sp.is_empty() && Path::new(&sp).is_dir();
+            let mut missing: Vec<String> = Vec::new();
+            let mut unregistered: Vec<String> = Vec::new();
+            if dir_exists {
+                let registered: std::collections::HashSet<String> =
+                    images.iter().map(|(f, _)| f.clone()).collect();
+                for (fname, fpath) in &images {
+                    if !Path::new(fpath).is_file() {
+                        missing.push(fname.clone());
+                    }
+                }
+                for p in collect_images(&sp) {
+                    let n = Path::new(&p)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    if !registered.contains(&n) {
+                        unregistered.push(n);
+                    }
+                }
+            } else if !sp.is_empty() {
+                // 目录整体缺失：全部已登记图片视为缺失
+                missing = images.iter().map(|(f, _)| f.clone()).collect();
+            }
+            missing_total += missing.len();
+            unreg_total += unregistered.len();
+            if !dir_exists || !missing.is_empty() || !unregistered.is_empty() || images.is_empty() {
+                abnormal.push(ObjectVerify {
+                    obj_id: id,
+                    name,
+                    storage_path: sp,
+                    dir_exists,
+                    image_count: images.len(),
+                    missing_images: missing,
+                    unregistered_files: unregistered,
+                });
+            }
+        }
+
+        // 孤儿目录：库根下不属于任何对象的目录（跳过 .thumbcache 等隐藏项）
+        let mut orphan_dirs: Vec<String> = Vec::new();
+        if let Ok(entries) = fs::read_dir(&root) {
+            for e in entries.flatten() {
+                let fname = e.file_name().to_string_lossy().to_string();
+                if fname.starts_with('.') || !e.path().is_dir() {
+                    continue;
+                }
+                let norm = normalize_path(&e.path().to_string_lossy());
+                if !known_dirs.contains(&norm) {
+                    orphan_dirs.push(fname);
+                }
+            }
+        }
+
+        Ok(VerifyReport {
+            objects_total,
+            missing_images_total: missing_total,
+            unregistered_total: unreg_total,
+            abnormal,
+            orphan_dirs,
+        })
+    }
+
+    /// 应用库校验修复。三类操作均为幂等（执行时以磁盘/DB 现状复查为准），
+    /// 顺序：移除失效记录 → 补登记 → 删除空对象（空判定基于前两步之后的状态）。
+    pub fn apply_verify_fixes(&self, plan: &VerifyFixPlan) -> Result<VerifyFixResult, String> {
+        let mut removed_rows = 0usize;
+        let mut registered = 0usize;
+        let mut removed_objects = 0usize;
+
+        // ① 移除缺失图片行（复查文件仍缺失才删）
+        for obj_id in &plan.remove_missing {
+            let targets: Vec<String> = {
+                let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+                db.get_images(obj_id)?
+                    .into_iter()
+                    .filter(|i| !Path::new(&i.filepath).is_file())
+                    .map(|i| i.id)
+                    .collect()
+            };
+            if targets.is_empty() {
+                continue;
+            }
+            let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+            for img_id in &targets {
+                db.delete_image(img_id)?;
+                removed_rows += 1;
+            }
+        }
+
+        // ② 补登记未登记文件（以 DB 现状为准，天然幂等）
+        for obj_id in &plan.register {
+            let sp = {
+                let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+                db.get_object_opt(obj_id)?.and_then(|o| o.storage_path)
+            };
+            let Some(sp) = sp.filter(|s| !s.trim().is_empty()) else {
+                continue;
+            };
+            if !Path::new(&sp).is_dir() {
+                continue;
+            }
+            let (registered_names, sort_start) = {
+                let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+                let names: std::collections::HashSet<String> = db
+                    .get_images(obj_id)?
+                    .into_iter()
+                    .map(|i| i.filename)
+                    .collect();
+                (names, db.get_image_count(obj_id).unwrap_or(0))
+            };
+            let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+            for p in collect_images(&sp) {
+                let fname = Path::new(&p)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if registered_names.contains(&fname) {
+                    continue;
+                }
+                db.add_image(&new_uuid(), obj_id, &fname, &p, sort_start + registered as i64)?;
+                registered += 1;
+            }
+        }
+
+        // ③ 删除已无有效图片的对象（不删文件；空判定复查）
+        let root = self.get_config("storage_root")?;
+        for obj_id in &plan.remove_empty {
+            let empty = {
+                let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+                match db.get_object_opt(obj_id)? {
+                    None => false,
+                    Some(o) => {
+                        let sp = o.storage_path.unwrap_or_default();
+                        if sp.trim().is_empty() || !Path::new(&sp).is_dir() {
+                            true
+                        } else {
+                            db.get_images(obj_id)?
+                                .iter()
+                                .all(|i| !Path::new(&i.filepath).is_file())
+                        }
+                    }
+                }
+            };
+            if empty {
+                self.delete_object(obj_id, false, root.as_deref())?;
+                removed_objects += 1;
+            }
+        }
+
+        Ok(VerifyFixResult {
+            removed_rows,
+            registered,
+            removed_objects,
+        })
     }
 
     pub fn get_tag_values(&self, category: &str) -> Result<Vec<String>, String> {
@@ -140,6 +433,66 @@ impl LibraryService {
         self.db.lock().unwrap_or_else(|p| p.into_inner()).update_last_read(obj_id, idx)
     }
 
+    // ── 系列 ───────────────────────────────────────────────────────────────
+
+    pub fn list_series(&self) -> Result<Vec<SeriesRow>, String> {
+        self.db.lock().unwrap_or_else(|p| p.into_inner()).list_series()
+    }
+
+    pub fn rename_series(&self, id: &str, name: &str) -> Result<(), String> {
+        self.db.lock().unwrap_or_else(|p| p.into_inner()).rename_series(id, name)
+    }
+
+    /// 删除系列；成员对象的 series_id 靠 ON DELETE SET NULL 自动置空
+    pub fn delete_series(&self, id: &str) -> Result<(), String> {
+        self.db.lock().unwrap_or_else(|p| p.into_inner()).delete_series(id)
+    }
+
+    /// 设置对象所属系列与卷号。
+    /// series_name 为 None/空串 → series_id 置 NULL；非空 → 按名查找或创建系列。
+    /// 调用方若只想改卷号，应先读取当前 series_name 一并传入以保持不变。
+    pub fn set_series_for_object(
+        &self,
+        obj_id: &str,
+        series_name: Option<&str>,
+        volume: Option<i64>,
+    ) -> Result<(), String> {
+        let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+        let series_id = match series_name.filter(|s| !s.is_empty()) {
+            Some(name) => Some(db.get_or_create_series_by_name(name)?),
+            None => None,
+        };
+        // 卷号查重：同系列同卷号不允许重复占用
+        if let (Some(sid), Some(vol)) = (&series_id, volume) {
+            if let Some(other) = db.find_series_volume_conflict(sid, vol, obj_id)? {
+                return Err(format!("该系列已存在卷 {vol}：「{other}」，请使用其他卷号"));
+            }
+        }
+        db.set_object_series(obj_id, series_id.as_deref(), volume)?;
+        // 对象移出原系列后，原系列可能已无引用——顺手清理空系列
+        db.prune_empty_series()?;
+        Ok(())
+    }
+
+    // ── 书签 ───────────────────────────────────────────────────────────────
+
+    pub fn list_bookmarks(&self, obj_id: &str) -> Result<Vec<BookmarkRow>, String> {
+        self.db.lock().unwrap_or_else(|p| p.into_inner()).list_bookmarks(obj_id)
+    }
+
+    pub fn add_bookmark(
+        &self,
+        obj_id: &str,
+        idx: i64,
+        note: Option<&str>,
+    ) -> Result<BookmarkRow, String> {
+        self.db.lock().unwrap_or_else(|p| p.into_inner()).add_bookmark(obj_id, idx, note)
+    }
+
+    pub fn remove_bookmark(&self, id: i64) -> Result<(), String> {
+        self.db.lock().unwrap_or_else(|p| p.into_inner()).remove_bookmark(id)
+    }
+
     /// 检查存储路径是否已被（其他）对象占用
     /// 注意：调用方必须已持有 db 锁（对 std::sync::Mutex 重入加锁会死锁）
     fn storage_path_taken(db: &Database, path: &str, exclude_id: Option<&str>) -> bool {
@@ -173,13 +526,15 @@ impl LibraryService {
         false
     }
 
-    /// 删除对象（DB + 可选本地文件 + 缩略图缓存）
+    /// 删除对象（DB + 可选本地文件 + 缩略图缓存）。
+    /// 返回警告列表：文件删除失败、共享目录跳过等不阻断删除（DB 记录已删干净），
+    /// 仅作为提示透出给前端。
     pub fn delete_object(
         &self,
         obj_id: &str,
         delete_files: bool,
         storage_root: Option<&str>,
-    ) -> Result<(), String> {
+    ) -> Result<Vec<String>, String> {
         let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
         let obj = db.get_object_opt(obj_id)?;
 
@@ -205,23 +560,32 @@ impl LibraryService {
 
         // 删除对象（tags / images 通过外键 CASCADE 一并删除）
         db.delete_object(obj_id)?;
+        // 对象可能是其系列的最后一卷——顺手清理零引用系列
+        db.prune_empty_series()?;
 
-        // 物理删除文件
+        // 物理删除文件（失败/跳过不回滚：DB 已删干净，仅向用户提示残留）
+        let mut warnings: Vec<String> = Vec::new();
         if delete_files {
             if let Some(obj) = &obj {
                 if let Some(sp) = &obj.storage_path {
                     if Path::new(sp).is_dir() {
                         // 防御：历史数据可能存在多对象共享同一存储目录
                         if !Self::storage_path_taken(&db, sp, None) {
-            let _ = fs::remove_dir_all(sp);
+                            if let Err(e) = fs::remove_dir_all(sp) {
+                                log::warn!("对象 {} 的本地文件删除失败: {sp}: {e}", obj_id);
+                                warnings.push(format!(
+                                    "本地文件删除失败（可能被其他程序占用）：{sp}"
+                                ));
+                            }
                         } else {
                             log::warn!("对象 {} 的存储目录与其他对象共享，跳过物理删除: {}", obj_id, sp);
+                            warnings.push(format!("存储目录与其他对象共享，已跳过物理删除：{sp}"));
                         }
                     }
                 }
             }
         }
-        Ok(())
+        Ok(warnings)
     }
 
     // ── 导入 ───────────────────────────────────────────────────────────────
@@ -821,9 +1185,32 @@ mod tests {
         let (svc2, _d2, oid2) = seeded("del2", "连文件删", tags(vec![]));
         let sp = PathBuf::from(svc2.get_object(&oid2).unwrap().unwrap().storage_path.clone().unwrap());
         let root2 = sp.parent().unwrap();
-        svc2.delete_object(&oid2, true, Some(root2.to_str().unwrap())).unwrap();
+        let warnings = svc2.delete_object(&oid2, true, Some(root2.to_str().unwrap())).unwrap();
+        assert!(warnings.is_empty(), "正常删除不应有警告: {warnings:?}");
         assert!(svc2.get_object(&oid2).unwrap().is_none());
         assert!(!sp.exists(), "存储目录应被删除");
+    }
+
+    #[test]
+    fn delete_object_warns_on_shared_storage_dir() {
+        // 两对象人为共享存储目录：删除其一应产生警告、不物理删目录、DB 记录删干净
+        let (svc, d) = new_svc("delshared");
+        let root = d.join("storage");
+        fs::create_dir_all(&root).unwrap();
+        let src = d.join("src");
+        fs::create_dir_all(&src).unwrap();
+        mk_img(&src, "a.png");
+        let oid1 = uuid::Uuid::new_v4().to_string();
+        let oid2 = uuid::Uuid::new_v4().to_string();
+        svc.import_directory(&oid1, "甲", &tags(vec![]), src.to_str().unwrap(), root.to_str().unwrap(), true, None, None).unwrap();
+        svc.import_directory(&oid2, "乙", &tags(vec![]), src.to_str().unwrap(), root.to_str().unwrap(), true, None, None).unwrap();
+        let sp1 = svc.get_object(&oid1).unwrap().unwrap().storage_path.clone().unwrap();
+        svc.db.lock().unwrap().update_object_storage_path(&oid2, &sp1).unwrap();
+        let warnings = svc.delete_object(&oid1, true, Some(root.to_str().unwrap())).unwrap();
+        assert_eq!(warnings.len(), 1, "共享目录应产生警告: {warnings:?}");
+        assert!(Path::new(&sp1).is_dir(), "共享目录不应被物理删除");
+        assert!(svc.get_object(&oid1).unwrap().is_none(), "DB 记录应已删除");
+        assert!(svc.get_object(&oid2).unwrap().is_some(), "另一对象不受影响");
     }
 
     #[test]
@@ -903,5 +1290,287 @@ mod tests {
         assert!(new_dir.starts_with(&new_root_c));
         assert!(new_dir.join("a.png").is_file());
         assert!(new_root.join("同名目录").join("keep.txt").is_file(), "预置文件不应被破坏");
+    }
+
+    #[test]
+    fn verify_library_reports_missing_unregistered_and_orphans() {
+        let (svc, _d, oid) = seeded("verify", "校验对象", tags(vec![]));
+        let obj = svc.get_object(&oid).unwrap().unwrap();
+        let sp = PathBuf::from(obj.storage_path.clone().unwrap());
+        let imgs = svc.get_images(&oid).unwrap();
+        // 外部删除一张已登记图片 + 手动塞一张未登记图片 + 库根造孤儿目录
+        fs::remove_file(&imgs[0].filepath).unwrap();
+        image::RgbImage::from_pixel(30, 40, image::Rgb([1, 2, 3]))
+            .save(sp.join("zz_new.png")).unwrap();
+        let root = sp.parent().unwrap();
+        fs::create_dir_all(root.join("孤儿目录")).unwrap();
+
+        let report = svc.verify_library().unwrap();
+        assert_eq!(report.objects_total, 1);
+        let ab = report.abnormal.iter().find(|o| o.obj_id == oid).expect("应报告异常对象");
+        assert_eq!(ab.missing_images, vec![imgs[0].filename.clone()], "缺失文件名应入报告");
+        assert_eq!(ab.unregistered_files, vec!["zz_new.png".to_string()]);
+        assert!(report.orphan_dirs.contains(&"孤儿目录".to_string()));
+    }
+
+    #[test]
+    fn verify_library_reports_healthy_object_as_clean() {
+        let (svc, _d, oid) = seeded("verifyok", "健康对象", tags(vec![]));
+        let report = svc.verify_library().unwrap();
+        assert!(report.abnormal.iter().all(|o| o.obj_id != oid));
+        assert!(report.orphan_dirs.is_empty());
+    }
+
+    #[test]
+    fn apply_verify_fixes_repairs_and_is_idempotent() {
+        let (svc, _d, oid) = seeded("vfix", "修复对象", tags(vec![]));
+        let obj = svc.get_object(&oid).unwrap().unwrap();
+        let sp = PathBuf::from(obj.storage_path.clone().unwrap());
+        let imgs = svc.get_images(&oid).unwrap();
+        fs::remove_file(&imgs[0].filepath).unwrap();
+        image::RgbImage::from_pixel(30, 40, image::Rgb([4, 5, 6]))
+            .save(sp.join("zz_new.png")).unwrap();
+
+        let plan = VerifyFixPlan {
+            remove_missing: vec![oid.clone()],
+            register: vec![oid.clone()],
+            remove_empty: vec![],
+        };
+        let r = svc.apply_verify_fixes(&plan).unwrap();
+        assert_eq!(r.removed_rows, 1, "应移除 1 条失效记录");
+        assert_eq!(r.registered, 1, "应补登记 1 张");
+        // 修复后复审无异常；重复应用无变化（幂等）
+        let report = svc.verify_library().unwrap();
+        assert!(report.abnormal.is_empty(), "修复后应无异常: {:?}", report.abnormal);
+        let r2 = svc.apply_verify_fixes(&plan).unwrap();
+        assert_eq!(r2.removed_rows + r2.registered + r2.removed_objects, 0, "重复应用应为零操作");
+        // 对象保留且仍为 2 张（删 1 补 1）
+        assert!(svc.get_object(&oid).unwrap().is_some());
+        assert_eq!(svc.get_object(&oid).unwrap().unwrap().image_count, 2);
+    }
+
+    #[test]
+    fn apply_verify_fixes_removes_empty_object_keeps_files() {
+        let (svc, _d, oid) = seeded("vfixempty", "空对象", tags(vec![]));
+        let obj = svc.get_object(&oid).unwrap().unwrap();
+        let sp = PathBuf::from(obj.storage_path.clone().unwrap());
+        for i in svc.get_images(&oid).unwrap() {
+            fs::remove_file(&i.filepath).unwrap();
+        }
+        let plan = VerifyFixPlan {
+            remove_empty: vec![oid.clone()],
+            ..Default::default()
+        };
+        let r = svc.apply_verify_fixes(&plan).unwrap();
+        assert_eq!(r.removed_objects, 1);
+        assert!(svc.get_object(&oid).unwrap().is_none(), "空对象应被移除");
+        assert!(sp.is_dir(), "不删文件：目录应保留");
+    }
+
+    #[test]
+    fn series_crud_rename_delete_and_volume_order() {
+        let (svc, d, oid1) = seeded("series1", "卷一", tags(vec![]));
+        let src = d.join("src");
+        let root = d.join("storage");
+        let oid2 = uuid::Uuid::new_v4().to_string();
+        svc.import_directory(&oid2, "卷二", &tags(vec![]),
+            src.to_str().unwrap(), root.to_str().unwrap(), true, None, None).unwrap();
+        let oid3 = uuid::Uuid::new_v4().to_string();
+        svc.import_directory(&oid3, "卷三", &tags(vec![]),
+            src.to_str().unwrap(), root.to_str().unwrap(), true, None, None).unwrap();
+
+        // 设置系列：oid1 vol=3, oid2 vol=1, oid3 vol=NULL
+        svc.set_series_for_object(&oid1, Some("系列A"), Some(3)).unwrap();
+        svc.set_series_for_object(&oid2, Some("系列A"), Some(1)).unwrap();
+        svc.set_series_for_object(&oid3, Some("系列A"), None).unwrap();
+
+        // 同名系列幂等：三个对象共用一个系列，不重复创建
+        let series = svc.list_series().unwrap();
+        assert_eq!(series.len(), 1, "同名系列不应重复创建");
+        assert_eq!(series[0].name, "系列A");
+        assert_eq!(series[0].count, 3);
+        let sid = series[0].id.clone();
+
+        // first_cover 取 volume 最小（=1，oid2）对象的封面；NULLS LAST
+        let obj2 = svc.get_object(&oid2).unwrap().unwrap();
+        assert_eq!(series[0].first_cover.as_deref(), obj2.cover_image.as_deref(),
+            "first_cover 应来自 volume 最小的对象（NULLS LAST）");
+
+        // 按名幂等获取返回同一 ID
+        let sid_again = svc.db.lock().unwrap()
+            .get_or_create_series_by_name("系列A").unwrap();
+        assert_eq!(sid_again, sid);
+
+        // 重命名后成员对象显示新名
+        svc.rename_series(&sid, "系列B").unwrap();
+        let obj1 = svc.get_object(&oid1).unwrap().unwrap();
+        assert_eq!(obj1.series_name.as_deref(), Some("系列B"), "成员对象应显示新名");
+
+        // 重名 UNIQUE 拒绝：先建第二个系列，再把第一个改成它的名字
+        svc.set_series_for_object(&oid3, Some("其他系列"), None).unwrap();
+        assert!(svc.rename_series(&sid, "其他系列").is_err(), "重名应被拒绝");
+
+        // 删除系列 → 对象 series_id 置 NULL（volume 不受影响）
+        svc.delete_series(&sid).unwrap();
+        let obj1_after = svc.get_object(&oid1).unwrap().unwrap();
+        assert!(obj1_after.series_id.is_none(), "删除系列后 series_id 应置 NULL");
+        assert!(obj1_after.series_name.is_none());
+        assert_eq!(obj1_after.volume, Some(3), "volume 不受系列删除影响");
+        // 剩余系列
+        let remaining = svc.list_series().unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].name, "其他系列");
+    }
+
+    #[test]
+    fn set_series_for_object_set_clear_and_volume_only() {
+        let (svc, _d, oid) = seeded("setser", "对象", tags(vec![]));
+
+        // 设置系列 + 卷号
+        svc.set_series_for_object(&oid, Some("系列X"), Some(1)).unwrap();
+        let obj = svc.get_object(&oid).unwrap().unwrap();
+        assert_eq!(obj.series_name.as_deref(), Some("系列X"));
+        assert!(obj.series_id.is_some());
+        assert_eq!(obj.volume, Some(1));
+
+        // 只改卷号：当前 series_name 原样传入（命令层正是这样保持系列不变）
+        svc.set_series_for_object(&oid, Some("系列X"), Some(2)).unwrap();
+        let obj = svc.get_object(&oid).unwrap().unwrap();
+        assert_eq!(obj.series_name.as_deref(), Some("系列X"), "系列应保持不变");
+        assert_eq!(obj.volume, Some(2), "卷号应更新");
+        assert_eq!(svc.list_series().unwrap().len(), 1, "不应产生重复系列");
+
+        // 空串视为清除系列
+        svc.set_series_for_object(&oid, Some(""), Some(3)).unwrap();
+        let obj = svc.get_object(&oid).unwrap().unwrap();
+        assert!(obj.series_id.is_none(), "空串应清除系列");
+        assert!(obj.series_name.is_none());
+        assert_eq!(obj.volume, Some(3));
+
+        // None 清除：series 与 volume 都置空
+        svc.set_series_for_object(&oid, None, None).unwrap();
+        let obj = svc.get_object(&oid).unwrap().unwrap();
+        assert!(obj.series_id.is_none());
+        assert!(obj.series_name.is_none());
+        assert!(obj.volume.is_none());
+    }
+
+    #[test]
+    fn bookmarks_add_list_update_remove() {
+        let (svc, _d, oid) = seeded("bm1", "书签对象", tags(vec![]));
+
+        // 乱序添加
+        svc.add_bookmark(&oid, 5, Some("note5")).unwrap();
+        svc.add_bookmark(&oid, 1, Some("note1")).unwrap();
+        svc.add_bookmark(&oid, 3, None).unwrap();
+
+        // 列表按 page_idx 升序
+        let bms = svc.list_bookmarks(&oid).unwrap();
+        assert_eq!(bms.len(), 3);
+        assert_eq!(
+            bms.iter().map(|b| b.page_idx).collect::<Vec<_>>(),
+            vec![1, 3, 5],
+            "应按 page_idx 排序"
+        );
+        assert_eq!(bms[0].note.as_deref(), Some("note1"));
+        assert!(bms[1].note.is_none());
+        assert_eq!(bms[0].object_id, oid);
+
+        // 同页重加 → 更新备注（幂等，不新增行）
+        svc.add_bookmark(&oid, 1, Some("updated1")).unwrap();
+        let bms2 = svc.list_bookmarks(&oid).unwrap();
+        assert_eq!(bms2.len(), 3, "同页重加不应新增书签");
+        let bm1 = bms2.iter().find(|b| b.page_idx == 1).unwrap();
+        assert_eq!(bm1.note.as_deref(), Some("updated1"));
+
+        // 删除指定书签
+        svc.remove_bookmark(bm1.id).unwrap();
+        let bms3 = svc.list_bookmarks(&oid).unwrap();
+        assert_eq!(bms3.len(), 2);
+        assert!(!bms3.iter().any(|b| b.page_idx == 1));
+    }
+
+    #[test]
+    fn bookmarks_cascade_on_object_delete() {
+        let (svc, _d, oid) = seeded("bm2", "级联对象", tags(vec![]));
+        svc.add_bookmark(&oid, 1, Some("a")).unwrap();
+        svc.add_bookmark(&oid, 2, Some("b")).unwrap();
+        assert_eq!(svc.list_bookmarks(&oid).unwrap().len(), 2);
+
+        // 删除对象 → 书签靠外键 CASCADE 自动清理
+        svc.delete_object(&oid, false, None).unwrap();
+        let bms = svc.list_bookmarks(&oid).unwrap();
+        assert!(bms.is_empty(), "对象删除后书签应级联清理");
+    }
+
+    #[test]
+    fn series_volume_duplicate_rejected() {
+        let (svc, d, oid1) = seeded("voldup", "卷一", tags(vec![]));
+        let src = d.join("src");
+        let root = d.join("storage");
+        let oid2 = uuid::Uuid::new_v4().to_string();
+        svc.import_directory(&oid2, "卷二", &tags(vec![]),
+            src.to_str().unwrap(), root.to_str().unwrap(), true, None, None).unwrap();
+        svc.set_series_for_object(&oid1, Some("同系列"), Some(1)).unwrap();
+        // 同系列同卷号 → 拒绝并提示冲突对象
+        let err = svc.set_series_for_object(&oid2, Some("同系列"), Some(1)).unwrap_err();
+        assert!(err.contains("卷一"), "错误应指出冲突对象: {err}");
+        // 不同卷号 → 允许；无卷号 → 允许（卷号可不填不查重）
+        svc.set_series_for_object(&oid2, Some("同系列"), Some(2)).unwrap();
+        svc.set_series_for_object(&oid1, Some("同系列"), None).unwrap();
+        // 自身重复设置同卷号（幂等场景）→ 允许
+        svc.set_series_for_object(&oid2, Some("同系列"), Some(2)).unwrap();
+    }
+
+    #[test]
+    fn series_volumes_ordered_by_volume() {
+        let (svc, d, oid_v2) = seeded("volorder", "卷二", tags(vec![]));
+        let src = d.join("src");
+        let root = d.join("storage");
+        let oid_v1 = uuid::Uuid::new_v4().to_string();
+        let oid_none = uuid::Uuid::new_v4().to_string();
+        svc.import_directory(&oid_v1, "卷一", &tags(vec![]),
+            src.to_str().unwrap(), root.to_str().unwrap(), true, None, None).unwrap();
+        svc.import_directory(&oid_none, "无卷号", &tags(vec![]),
+            src.to_str().unwrap(), root.to_str().unwrap(), true, None, None).unwrap();
+        svc.set_series_for_object(&oid_v2, Some("排序系列"), Some(2)).unwrap();
+        svc.set_series_for_object(&oid_v1, Some("排序系列"), Some(1)).unwrap();
+        svc.set_series_for_object(&oid_none, Some("排序系列"), None).unwrap();
+
+        let sid = svc.get_object(&oid_v1).unwrap().unwrap().series_id.unwrap();
+        let vols = svc.get_series_volumes(&sid, true).unwrap();
+        assert_eq!(vols.len(), 3, "系列应有 3 卷");
+        assert_eq!(vols[0].name, "卷一");
+        assert_eq!(vols[1].name, "卷二");
+        assert_eq!(vols[2].name, "无卷号", "无卷号殿后");
+        assert_eq!(vols[0].series_name.as_deref(), Some("排序系列"));
+    }
+
+    #[test]
+    fn empty_series_pruned_after_reference_changes() {
+        let (svc, d, oid1) = seeded("sprune", "甲卷", tags(vec![]));
+        let src = d.join("src");
+        let root = d.join("storage");
+        let oid2 = uuid::Uuid::new_v4().to_string();
+        svc.import_directory(&oid2, "乙卷", &tags(vec![]),
+            src.to_str().unwrap(), root.to_str().unwrap(), true, None, None).unwrap();
+        svc.set_series_for_object(&oid1, Some("会空的系列"), Some(1)).unwrap();
+        svc.set_series_for_object(&oid2, Some("会空的系列"), Some(2)).unwrap();
+
+        // 移出一卷：系列仍有引用 → 保留
+        svc.set_series_for_object(&oid1, None, None).unwrap();
+        assert!((store_series_names(&svc)).iter().any(|n| n == "会空的系列"));
+        // 移出最后一卷：系列零引用 → 被清理
+        svc.set_series_for_object(&oid2, None, None).unwrap();
+        assert!(!(store_series_names(&svc)).iter().any(|n| n == "会空的系列"));
+
+        // 删除对象路径：重建系列仅含一卷后删除该对象 → 系列随之清理
+        svc.set_series_for_object(&oid1, Some("随删系列"), Some(1)).unwrap();
+        svc.delete_object(&oid1, false, None).unwrap();
+        assert!(!(store_series_names(&svc)).iter().any(|n| n == "随删系列"));
+    }
+
+    fn store_series_names(svc: &LibraryService) -> Vec<String> {
+        svc.list_series().unwrap().into_iter().map(|s| s.name).collect()
     }
 }
