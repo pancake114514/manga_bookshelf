@@ -2,10 +2,37 @@
   <main class="reader" :class="{ idle: !chromeVisible }" @wheel="onWheel" @mousemove="pokeChrome">
     <!-- 顶栏与主界面等高，整条均可拖动（系统原生拖动），交互控件以 mousedown.stop 排除 -->
     <div class="top" @mousedown="barMouseDown">
-      <!-- 左区：返回 + 对象名 -->
+      <!-- 左区：返回 + 对象名 + 书签 -->
       <div class="left">
         <n-button size="small" @mousedown.stop @click="back"><IconBack :size="14" /> 返回</n-button>
         <span class="obj-title">{{ reader.obj.name }}</span>
+        <n-button size="small" @mousedown.stop
+                  :type="currentBookmark ? 'primary' : 'default'" :secondary="!currentBookmark"
+                  :title="currentBookmark ? '移除书签（B）' : '添加书签（B）'"
+                  @click="toggleBookmark"><IconBookmark :size="14" /></n-button>
+        <n-popover trigger="click" placement="bottom-start" :width="340" :show-arrow="false">
+          <template #trigger>
+            <n-button size="small" @mousedown.stop title="书签列表">书签</n-button>
+          </template>
+          <div class="bm-panel">
+            <div v-if="!bookmarks.length" class="bm-empty">暂无书签</div>
+            <div v-for="b in bookmarks" :key="b.id" class="bm-row" @click="goTo(b.page_idx)">
+              <span class="bm-page">第 {{ b.page_idx + 1 }} 页</span>
+              <span class="bm-fname">{{ reader.images[b.page_idx]?.filename || '' }}</span>
+              <template v-if="editingId === b.id">
+                <n-input v-model:value="editNote" size="tiny" :maxlength="200" placeholder="输入备注（回车保存）"
+                         @click.stop @keydown.enter.prevent="saveEdit(b)"
+                         @keydown.esc="cancelEdit" autofocus />
+                <n-button size="tiny" quaternary type="primary" @click.stop="saveEdit(b)" title="保存">确定</n-button>
+              </template>
+              <template v-else>
+                <span class="bm-note" :class="{ placeholder: !b.note }">{{ b.note || '无备注' }}</span>
+                <n-button size="tiny" quaternary @click.stop="startEdit(b)" title="编辑备注"><IconEdit :size="12" /></n-button>
+              </template>
+              <n-button size="tiny" quaternary @click.stop="removeBm(b)" title="删除书签"><IconTrash :size="12" /></n-button>
+            </div>
+          </div>
+        </n-popover>
       </div>
       <!-- 中区：缩放/方向/双页/全屏，随左右等宽区天然居中 -->
       <div class="center">
@@ -59,6 +86,10 @@
         <!-- 填充与滑块统一按「轨道有效长度」计算（两侧各内缩 20px），滑块圆心与填充边缘重合；
              RTL 自右端起（index=0 在最右），LTR 自左端起 -->
         <div class="filled" :style="fillStyle" />
+        <div v-for="b in bookmarks" :key="b.id" class="bm-tick"
+             :style="tickStyle(b.page_idx)"
+             :title="`第 ${b.page_idx + 1} 页${b.note ? '：' + b.note : ''}`"
+             @pointerdown.stop @click.stop="goTo(b.page_idx)" />
         <div class="knob" :class="{ ltr: !rtl }" :style="knobStyle" />
         <div class="page-label">{{ label }}</div>
       </div>
@@ -68,11 +99,11 @@
 
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import { NButton, NButtonGroup, NSpin } from 'naive-ui'
+import { NButton, NButtonGroup, NSpin, NPopover, NInput } from 'naive-ui'
 import { api, win } from '../api'
 import { store } from '../store'
 import { barMouseDown } from '../windowState'
-import { IconBack, IconMaximize, IconDoublePage } from './icons'
+import { IconBack, IconMaximize, IconDoublePage, IconBookmark, IconEdit, IconTrash } from './icons'
 import WindowControls from './WindowControls.vue'
 
 const ZOOMS = ['fit', 'width', 'original']
@@ -179,6 +210,74 @@ function preload(i) {
       im.src = reader.images[n].image_url
     }
   }
+}
+
+// ── 书签 ──
+// 进入阅读器加载当前对象书签（page_idx 升序），离开时清理
+const bookmarks = ref([])
+const editingId = ref(null)
+const editNote = ref('')
+
+async function loadBookmarks() {
+  try { bookmarks.value = await api.bookmarks(reader.obj.id) }
+  catch { bookmarks.value = [] }
+}
+
+// 当前页是否已藏书签
+const currentBookmark = computed(() =>
+  bookmarks.value.find(b => b.page_idx === index.value))
+
+async function toggleBookmark() {
+  const existing = bookmarks.value.find(b => b.page_idx === index.value)
+  if (existing) {
+    try {
+      await api.removeBookmark(existing.id)
+      bookmarks.value = bookmarks.value.filter(b => b.id !== existing.id)
+    } catch (e) { console.error(e) }
+  } else {
+    try {
+      const row = await api.addBookmark({
+        obj_id: reader.obj.id, page_idx: index.value, note: null,
+      })
+      bookmarks.value = [...bookmarks.value, row].sort((a, b) => a.page_idx - b.page_idx)
+    } catch (e) { console.error(e) }
+  }
+}
+
+// 进度条书签刻度：定位公式与 knob 一致（两侧内缩 20px）
+function tickStyle(p) {
+  const pos = total > 1 ? (p / (total - 1)) * 100 : 0
+  return {
+    [rtl.value ? 'right' : 'left']: `calc(20px + (100% - 40px) * ${pos / 100})`,
+    transform: rtl.value ? 'translateX(50%)' : 'translateX(-50%)',
+  }
+}
+
+// 书签备注行内编辑（利用 add_bookmark 幂等覆盖同页备注）
+function startEdit(b) {
+  editingId.value = b.id
+  editNote.value = b.note || ''
+}
+function cancelEdit() {
+  editingId.value = null
+  editNote.value = ''
+}
+async function saveEdit(b) {
+  try {
+    const row = await api.addBookmark({
+      obj_id: reader.obj.id, page_idx: b.page_idx,
+      note: editNote.value.trim() || null,
+    })
+    bookmarks.value = bookmarks.value.map(x => x.page_idx === row.page_idx ? row : x)
+  } catch (e) { console.error(e) }
+  editingId.value = null
+  editNote.value = ''
+}
+async function removeBm(b) {
+  try {
+    await api.removeBookmark(b.id)
+    bookmarks.value = bookmarks.value.filter(x => x.id !== b.id)
+  } catch (e) { console.error(e) }
 }
 
 // 单页：异步解码完成后整体切换，旧图保持显示
@@ -323,6 +422,9 @@ function onWheel(e) {
 }
 
 function onKey(e) {
+  // 编辑书签备注时按键不触发阅读器快捷键
+  const tag = e.target?.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return
   const k = e.key
   if (k === 'ArrowDown') next()
   else if (k === 'ArrowUp') prev()
@@ -331,6 +433,7 @@ function onKey(e) {
   else if (k === 'Escape') back()
   else if (k === 'F11' || k.toLowerCase() === 'f') toggleFullscreen()
   else if (k.toLowerCase() === 'd') toggleDouble()
+  else if (k.toLowerCase() === 'b') toggleBookmark()
 }
 onMounted(() => {
   window.addEventListener('keydown', onKey)
@@ -340,6 +443,7 @@ onMounted(() => {
   api.getConfig(CFG_ZOOM).then(r => { if (ZOOMS.includes(r.value)) zoom.value = r.value }).catch(() => {})
   api.getConfig(CFG_DIR).then(r => { if (r.value === 'ltr') rtl.value = false }).catch(() => {})
   preload(index.value)   // 进入时预热相邻页
+  loadBookmarks()        // 加载当前对象书签
 })
 onUnmounted(() => {
   window.removeEventListener('keydown', onKey)
@@ -348,6 +452,7 @@ onUnmounted(() => {
   clearTimeout(scrubTimer)
   win.exitFullscreen()                                         // 兜底还原全屏
   api.lastRead(reader.obj.id, index.value).catch(() => {})   // 退出前兜底落库
+  bookmarks.value = []                                        // 离开清理书签
 })
 
 function back() {
@@ -495,4 +600,35 @@ function onBarUp() {
   display: flex; align-items: center; justify-content: center;
   font-size: 11px; line-height: 14px; color: var(--text2); opacity: .8;
 }
+
+/* 书签刻度：通高细线，定位公式同 knob */
+.bm-tick {
+  position: absolute; top: 2px; bottom: 2px; width: 3px;
+  border-radius: 1.5px; cursor: pointer;
+  background: var(--ms-star);
+  z-index: 1;
+}
+.bm-tick:hover { filter: brightness(1.2); }
+
+/* 书签列表面板 */
+.bm-panel { max-height: 360px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.bm-empty { font-size: 13px; opacity: .5; padding: 12px 4px; text-align: center; }
+.bm-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px; border-radius: 6px; cursor: pointer;
+  transition: background .15s;
+}
+.bm-row:hover { background: var(--chip-bg); }
+.bm-page { font-size: 12px; font-weight: 700; flex: none; }
+.bm-fname {
+  font-size: 11px; opacity: .5; flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-family: Georgia, serif;
+}
+.bm-note {
+  font-size: 12px; flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.bm-note.placeholder { opacity: .4; }
+.bm-row :deep(.n-input) { width: 120px; }
 </style>

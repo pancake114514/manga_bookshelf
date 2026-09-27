@@ -10,6 +10,9 @@
             <h2 class="title">{{ detail.name }}</h2>
             <n-button v-if="detail.images?.length" type="primary" @click="continueRead"><IconPlay :size="13" /> 继续阅读</n-button>
           </div>
+          <div v-if="detail.series_name" class="series-line">
+            {{ detail.series_name }}<template v-if="detail.volume != null"> · 第 {{ detail.volume }} 卷</template>
+          </div>
           <div class="rate-row">
             <n-rate size="small" :value="rating" @update:value="rate" />
           </div>
@@ -107,6 +110,7 @@ function continueRead() {
 .rate-row { margin-top: 8px; line-height: 1; }
 .title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .title { font-size: 20px; font-weight: 700; word-break: break-all; }
+.series-line { margin-top: 6px; font-size: 13px; opacity: .6; }
 .tag-row { display: flex; gap: 6px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
 .cat { font-size: 12px; opacity: .55; }
 .tag {

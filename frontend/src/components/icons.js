@@ -42,6 +42,7 @@ export const IconStar = icon('<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 
 export const IconStarFill = icon('<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>', { fill: true })
 export const IconArrowUp = icon('<line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>')
 export const IconArrowDown = icon('<line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/>')
+export const IconBookmark = icon('<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>')
 // 自定义标题栏窗口控制按钮
 export const IconMinus = icon('<line x1="5" y1="12" x2="19" y2="12"/>')
 export const IconWinMax = icon('<rect x="5" y="5" width="14" height="14" rx="1"/>')

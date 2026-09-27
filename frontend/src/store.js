@@ -7,6 +7,7 @@ const CFG = {
   r18: 'ui_r18',
   sort: 'ui_sort',
   density: 'ui_density',
+  grouped: 'ui_shelf_grouped',
 }
 const DENSITIES = ['compact', 'standard', 'large']
 const DEFAULT_SORT = { key: 'created_at', desc: true }
@@ -29,8 +30,10 @@ export const store = reactive({
 
   sort: { ...DEFAULT_SORT },
   density: 'standard',
+  grouped: false,
 
   objects: [],
+  series: [],
   reloadTick: 0,
   view: { name: 'shelf' }, // shelf | directory | reader
 
@@ -47,9 +50,9 @@ export async function boot() {
   try {
     const st = await api.state()
     store.storageRoot = st.valid ? st.storage_root : null
-    const [theme, r18, sort, density] = await Promise.all([
+    const [theme, r18, sort, density, grouped] = await Promise.all([
       readConfig(CFG.theme), readConfig(CFG.r18),
-      readConfig(CFG.sort), readConfig(CFG.density),
+      readConfig(CFG.sort), readConfig(CFG.density), readConfig(CFG.grouped),
     ])
     if (theme === 'light' || theme === 'dark') store.theme = theme
     store.r18 = r18 === '1'
@@ -60,8 +63,10 @@ export async function boot() {
       }
     } catch { /* 忽略损坏的偏好值 */ }
     if (DENSITIES.includes(density)) store.density = density
+    store.grouped = grouped === '1'
     if (store.storageRoot) {
       store.tagValues = await api.tagValues().catch(() => ({}))
+      await loadSeries()
     }
   } catch (e) {
     store.bootError = e.message || String(e)
@@ -72,6 +77,10 @@ export async function boot() {
 
 export async function refreshTagValues() {
   store.tagValues = await api.tagValues().catch(() => ({}))
+}
+
+export async function loadSeries() {
+  store.series = await api.series().catch(() => [])
 }
 
 export function toggleTheme() {
@@ -93,4 +102,9 @@ export function setDensity(d) {
   if (!DENSITIES.includes(d)) return
   store.density = d
   api.setConfig(CFG.density, d).catch(() => {})
+}
+
+export function setGrouped(v) {
+  store.grouped = !!v
+  api.setConfig(CFG.grouped, v ? '1' : '0').catch(() => {})
 }

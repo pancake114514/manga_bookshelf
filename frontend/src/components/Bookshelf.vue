@@ -18,13 +18,24 @@
                     :secondary="store.density !== d"
                     @click="setDensity(d)">{{ label }}</n-button>
         </n-button-group>
+        <n-button-group size="small" :title="'切换视图模式'">
+          <n-button :type="!store.grouped ? 'primary' : 'default'" :secondary="store.grouped"
+                    title="平铺视图" @click="setGrouped(false)">
+            <IconGrid :size="14" /> 平铺
+          </n-button>
+          <n-button :type="store.grouped ? 'primary' : 'default'" :secondary="!store.grouped"
+                    title="按系列分组" @click="setGrouped(true)">
+            <IconList :size="14" /> 系列分组
+          </n-button>
+        </n-button-group>
         <n-button v-if="!selectMode" size="small" @click="enterSelect">
           <IconCheckSquare :size="14" /> 多选
         </n-button>
       </div>
     </div>
 
-    <div ref="gridEl" class="shelf-grid" :class="[phase, `density-${store.density}`]">
+    <!-- 平铺视图 -->
+    <div v-if="!store.grouped" ref="gridEl" class="shelf-grid" :class="[phase, `density-${store.density}`]">
       <ObjectCard v-for="(o, i) in visible" :key="o.id" :obj="o"
         :anim-delay="phase ? Math.min(i * (phase === 'leaving' ? 12 : 26), 420) : 0"
         :revealed="revealedSet.has(o.id)"
@@ -32,6 +43,25 @@
         @open="openDir" @read="openReader" @edit="editObj" @cover="changeCover" @del="delObj"
         @rate="rateObj" @toggle-select="toggleSelect" />
     </div>
+
+    <!-- 系列分组视图 -->
+    <template v-else>
+      <section v-for="g in groups" :key="g.key" class="series-group">
+        <div class="group-header" @click="toggleCollapse(g.key)">
+          <IconChevronRight class="chev" :class="{ open: !collapsed.has(g.key) }" :size="14" />
+          <span class="g-name">{{ g.name }}</span>
+          <span class="g-count">共 {{ g.members.length }} 卷</span>
+        </div>
+        <div v-show="!collapsed.has(g.key)" class="shelf-grid" :class="[phase, `density-${store.density}`]">
+          <ObjectCard v-for="(o, i) in g.members" :key="o.id" :obj="o"
+            :anim-delay="phase ? Math.min(i * (phase === 'leaving' ? 12 : 26), 420) : 0"
+            :revealed="revealedSet.has(o.id)"
+            :select-mode="selectMode" :selected="selected.has(o.id)"
+            @open="openDir" @read="openReader" @edit="editObj" @cover="changeCover" @del="delObj"
+            @rate="rateObj" @toggle-select="toggleSelect" />
+        </div>
+      </section>
+    </template>
     <n-empty v-if="!shown.length && !phase" class="empty" size="large"
              description="书架空空如也，点击右上角「导入」添加图片吧" />
 
@@ -67,9 +97,9 @@
 import { ref, computed, watch, onMounted, onUnmounted, h } from 'vue'
 import { useMessage, useDialog, NCheckbox, NSelect, NButton, NButtonGroup, NModal, NEmpty } from 'naive-ui'
 import { api, dialog as fileDialog } from '../api'
-import { store, refreshTagValues, setSort, setDensity } from '../store'
+import { store, refreshTagValues, loadSeries, setSort, setDensity, setGrouped } from '../store'
 import { CATS } from '../constants'
-import { IconArrowUp, IconArrowDown, IconCheckSquare, IconX } from './icons'
+import { IconArrowUp, IconArrowDown, IconCheckSquare, IconX, IconGrid, IconList, IconChevronRight } from './icons'
 import ObjectCard from './ObjectCard.vue'
 import EditDialog from './EditDialog.vue'
 import TagFields from './TagFields.vue'
@@ -90,6 +120,8 @@ const visible = computed(() => shown.value.slice(0, renderCount.value))
 
 // 结果集变化（筛选/搜索/排序/刷新）时重置已渲染量
 watch(shown, () => { renderCount.value = RENDER_INITIAL })
+// 分组视图滚动会推高 renderCount，切回平铺时重置以恢复渐进渲染
+watch(() => store.grouped, () => { renderCount.value = RENDER_INITIAL })
 
 function onShelfScroll(e) {
   if (renderCount.value >= shown.value.length) return
@@ -131,6 +163,51 @@ function applySort(list) {
     return store.sort.desc ? -c : c
   })
 }
+
+// ── 系列分组视图 ──
+// 按 series_name 分组：组内排序为 volume 升序 NULLS LAST，再按现有全局排序键；
+// 无系列对象归「未分组」组排在最后；组间按系列名排序（中文 localeCompare）。
+const NONE_KEY = '__none__'
+const collapsed = ref(new Set())
+function toggleCollapse(key) {
+  const next = new Set(collapsed.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  collapsed.value = next
+}
+function sortInGroup(members) {
+  const fn = SORTERS[store.sort.key] || SORTERS.created_at
+  return [...members].sort((a, b) => {
+    // volume 升序，null/undefined 排最后
+    const va = a.volume == null ? Infinity : a.volume
+    const vb = b.volume == null ? Infinity : b.volume
+    if (va !== vb) return va - vb
+    const sa = fn(a), sb = fn(b)
+    const c = typeof sa === 'string' ? sa.localeCompare(String(sb), 'zh') : sa - sb
+    return store.sort.desc ? -c : c
+  })
+}
+const groups = computed(() => {
+  const map = new Map()       // seriesName -> members[]
+  const ungrouped = []
+  for (const o of shown.value) {
+    const sn = o.series_name
+    if (sn) {
+      if (!map.has(sn)) map.set(sn, [])
+      map.get(sn).push(o)
+    } else {
+      ungrouped.push(o)
+    }
+  }
+  const out = []
+  for (const [name, members] of [...map.entries()].sort((a, b) => a[0].localeCompare(b[0], 'zh'))) {
+    out.push({ key: name, name, members: sortInGroup(members) })
+  }
+  if (ungrouped.length) {
+    out.push({ key: NONE_KEY, name: '未分组', members: sortInGroup(ungrouped) })
+  }
+  return out
+})
 
 // 多选
 const selectMode = ref(false)
@@ -190,6 +267,7 @@ async function silentReload() {
   phase.value = ''
   shown.value = applySort(await fetchObjects().catch(() => []))
   refreshTagValues()
+  loadSeries()
 }
 
 // 导入完成等外部数据变更（App 层转发 reloadTick）
@@ -250,6 +328,7 @@ async function runBatchTag() {
     batchShow.value = false
     exitSelect()
     refreshTagValues()
+    loadSeries()
   } catch (e) {
     message.error(e.message)
   } finally {
@@ -423,4 +502,20 @@ async function doDelete(obj, deleteFiles) {
 .shelf-grid.entering :deep(.obj-card) {
   animation: card-in .34s cubic-bezier(.22, .9, .36, 1) backwards;
 }
+
+/* 系列分组视图 */
+.series-group { margin-bottom: 18px; }
+.group-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; margin-bottom: 10px;
+  cursor: pointer; user-select: none;
+  border-radius: 8px;
+  background: var(--chip-bg);
+  transition: background .15s;
+}
+.group-header:hover { background: var(--chip-bg); filter: brightness(1.08); }
+.group-header .chev { opacity: .55; transition: transform .18s; flex: none; }
+.group-header .chev.open { transform: rotate(90deg); }
+.g-name { font-size: 14px; font-weight: 700; }
+.g-count { font-size: 12px; opacity: .5; }
 </style>

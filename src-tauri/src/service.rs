@@ -10,7 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use crate::db::{AssembledObject, Database, ImageRow, Tags, new_uuid};
+use crate::db::{AssembledObject, BookmarkRow, Database, ImageRow, SeriesRow, Tags, new_uuid};
 use crate::file_ops::{
     collect_images, copy_image_keep_name, find_thumb_cover,
 };
@@ -129,6 +129,9 @@ impl LibraryService {
             cover_image: row.cover_image,
             last_read_idx: row.last_read_idx,
             created_at: row.created_at,
+            series_id: row.series_id,
+            series_name: row.series_name,
+            volume: row.volume,
             tags,
             image_count,
             first_image,
@@ -399,6 +402,58 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
 
     pub fn update_last_read(&self, obj_id: &str, idx: i64) -> Result<(), String> {
         self.db.lock().unwrap_or_else(|p| p.into_inner()).update_last_read(obj_id, idx)
+    }
+
+    // ── 系列 ───────────────────────────────────────────────────────────────
+
+    pub fn list_series(&self) -> Result<Vec<SeriesRow>, String> {
+        self.db.lock().unwrap_or_else(|p| p.into_inner()).list_series()
+    }
+
+    pub fn rename_series(&self, id: &str, name: &str) -> Result<(), String> {
+        self.db.lock().unwrap_or_else(|p| p.into_inner()).rename_series(id, name)
+    }
+
+    /// 删除系列；成员对象的 series_id 靠 ON DELETE SET NULL 自动置空
+    pub fn delete_series(&self, id: &str) -> Result<(), String> {
+        self.db.lock().unwrap_or_else(|p| p.into_inner()).delete_series(id)
+    }
+
+    /// 设置对象所属系列与卷号。
+    /// series_name 为 None/空串 → series_id 置 NULL；非空 → 按名查找或创建系列。
+    /// 调用方若只想改卷号，应先读取当前 series_name 一并传入以保持不变。
+    pub fn set_series_for_object(
+        &self,
+        obj_id: &str,
+        series_name: Option<&str>,
+        volume: Option<i64>,
+    ) -> Result<(), String> {
+        let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+        let series_id = match series_name.filter(|s| !s.is_empty()) {
+            Some(name) => Some(db.get_or_create_series_by_name(name)?),
+            None => None,
+        };
+        db.set_object_series(obj_id, series_id.as_deref(), volume)?;
+        Ok(())
+    }
+
+    // ── 书签 ───────────────────────────────────────────────────────────────
+
+    pub fn list_bookmarks(&self, obj_id: &str) -> Result<Vec<BookmarkRow>, String> {
+        self.db.lock().unwrap_or_else(|p| p.into_inner()).list_bookmarks(obj_id)
+    }
+
+    pub fn add_bookmark(
+        &self,
+        obj_id: &str,
+        idx: i64,
+        note: Option<&str>,
+    ) -> Result<BookmarkRow, String> {
+        self.db.lock().unwrap_or_else(|p| p.into_inner()).add_bookmark(obj_id, idx, note)
+    }
+
+    pub fn remove_bookmark(&self, id: i64) -> Result<(), String> {
+        self.db.lock().unwrap_or_else(|p| p.into_inner()).remove_bookmark(id)
     }
 
     /// 检查存储路径是否已被（其他）对象占用
@@ -1271,5 +1326,141 @@ mod tests {
         assert_eq!(r.removed_objects, 1);
         assert!(svc.get_object(&oid).unwrap().is_none(), "空对象应被移除");
         assert!(sp.is_dir(), "不删文件：目录应保留");
+    }
+
+    #[test]
+    fn series_crud_rename_delete_and_volume_order() {
+        let (svc, d, oid1) = seeded("series1", "卷一", tags(vec![]));
+        let src = d.join("src");
+        let root = d.join("storage");
+        let oid2 = uuid::Uuid::new_v4().to_string();
+        svc.import_directory(&oid2, "卷二", &tags(vec![]),
+            src.to_str().unwrap(), root.to_str().unwrap(), true, None, None).unwrap();
+        let oid3 = uuid::Uuid::new_v4().to_string();
+        svc.import_directory(&oid3, "卷三", &tags(vec![]),
+            src.to_str().unwrap(), root.to_str().unwrap(), true, None, None).unwrap();
+
+        // 设置系列：oid1 vol=3, oid2 vol=1, oid3 vol=NULL
+        svc.set_series_for_object(&oid1, Some("系列A"), Some(3)).unwrap();
+        svc.set_series_for_object(&oid2, Some("系列A"), Some(1)).unwrap();
+        svc.set_series_for_object(&oid3, Some("系列A"), None).unwrap();
+
+        // 同名系列幂等：三个对象共用一个系列，不重复创建
+        let series = svc.list_series().unwrap();
+        assert_eq!(series.len(), 1, "同名系列不应重复创建");
+        assert_eq!(series[0].name, "系列A");
+        assert_eq!(series[0].count, 3);
+        let sid = series[0].id.clone();
+
+        // first_cover 取 volume 最小（=1，oid2）对象的封面；NULLS LAST
+        let obj2 = svc.get_object(&oid2).unwrap().unwrap();
+        assert_eq!(series[0].first_cover.as_deref(), obj2.cover_image.as_deref(),
+            "first_cover 应来自 volume 最小的对象（NULLS LAST）");
+
+        // 按名幂等获取返回同一 ID
+        let sid_again = svc.db.lock().unwrap()
+            .get_or_create_series_by_name("系列A").unwrap();
+        assert_eq!(sid_again, sid);
+
+        // 重命名后成员对象显示新名
+        svc.rename_series(&sid, "系列B").unwrap();
+        let obj1 = svc.get_object(&oid1).unwrap().unwrap();
+        assert_eq!(obj1.series_name.as_deref(), Some("系列B"), "成员对象应显示新名");
+
+        // 重名 UNIQUE 拒绝：先建第二个系列，再把第一个改成它的名字
+        svc.set_series_for_object(&oid3, Some("其他系列"), None).unwrap();
+        assert!(svc.rename_series(&sid, "其他系列").is_err(), "重名应被拒绝");
+
+        // 删除系列 → 对象 series_id 置 NULL（volume 不受影响）
+        svc.delete_series(&sid).unwrap();
+        let obj1_after = svc.get_object(&oid1).unwrap().unwrap();
+        assert!(obj1_after.series_id.is_none(), "删除系列后 series_id 应置 NULL");
+        assert!(obj1_after.series_name.is_none());
+        assert_eq!(obj1_after.volume, Some(3), "volume 不受系列删除影响");
+        // 剩余系列
+        let remaining = svc.list_series().unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].name, "其他系列");
+    }
+
+    #[test]
+    fn set_series_for_object_set_clear_and_volume_only() {
+        let (svc, _d, oid) = seeded("setser", "对象", tags(vec![]));
+
+        // 设置系列 + 卷号
+        svc.set_series_for_object(&oid, Some("系列X"), Some(1)).unwrap();
+        let obj = svc.get_object(&oid).unwrap().unwrap();
+        assert_eq!(obj.series_name.as_deref(), Some("系列X"));
+        assert!(obj.series_id.is_some());
+        assert_eq!(obj.volume, Some(1));
+
+        // 只改卷号：当前 series_name 原样传入（命令层正是这样保持系列不变）
+        svc.set_series_for_object(&oid, Some("系列X"), Some(2)).unwrap();
+        let obj = svc.get_object(&oid).unwrap().unwrap();
+        assert_eq!(obj.series_name.as_deref(), Some("系列X"), "系列应保持不变");
+        assert_eq!(obj.volume, Some(2), "卷号应更新");
+        assert_eq!(svc.list_series().unwrap().len(), 1, "不应产生重复系列");
+
+        // 空串视为清除系列
+        svc.set_series_for_object(&oid, Some(""), Some(3)).unwrap();
+        let obj = svc.get_object(&oid).unwrap().unwrap();
+        assert!(obj.series_id.is_none(), "空串应清除系列");
+        assert!(obj.series_name.is_none());
+        assert_eq!(obj.volume, Some(3));
+
+        // None 清除：series 与 volume 都置空
+        svc.set_series_for_object(&oid, None, None).unwrap();
+        let obj = svc.get_object(&oid).unwrap().unwrap();
+        assert!(obj.series_id.is_none());
+        assert!(obj.series_name.is_none());
+        assert!(obj.volume.is_none());
+    }
+
+    #[test]
+    fn bookmarks_add_list_update_remove() {
+        let (svc, _d, oid) = seeded("bm1", "书签对象", tags(vec![]));
+
+        // 乱序添加
+        svc.add_bookmark(&oid, 5, Some("note5")).unwrap();
+        svc.add_bookmark(&oid, 1, Some("note1")).unwrap();
+        svc.add_bookmark(&oid, 3, None).unwrap();
+
+        // 列表按 page_idx 升序
+        let bms = svc.list_bookmarks(&oid).unwrap();
+        assert_eq!(bms.len(), 3);
+        assert_eq!(
+            bms.iter().map(|b| b.page_idx).collect::<Vec<_>>(),
+            vec![1, 3, 5],
+            "应按 page_idx 排序"
+        );
+        assert_eq!(bms[0].note.as_deref(), Some("note1"));
+        assert!(bms[1].note.is_none());
+        assert_eq!(bms[0].object_id, oid);
+
+        // 同页重加 → 更新备注（幂等，不新增行）
+        svc.add_bookmark(&oid, 1, Some("updated1")).unwrap();
+        let bms2 = svc.list_bookmarks(&oid).unwrap();
+        assert_eq!(bms2.len(), 3, "同页重加不应新增书签");
+        let bm1 = bms2.iter().find(|b| b.page_idx == 1).unwrap();
+        assert_eq!(bm1.note.as_deref(), Some("updated1"));
+
+        // 删除指定书签
+        svc.remove_bookmark(bm1.id).unwrap();
+        let bms3 = svc.list_bookmarks(&oid).unwrap();
+        assert_eq!(bms3.len(), 2);
+        assert!(!bms3.iter().any(|b| b.page_idx == 1));
+    }
+
+    #[test]
+    fn bookmarks_cascade_on_object_delete() {
+        let (svc, _d, oid) = seeded("bm2", "级联对象", tags(vec![]));
+        svc.add_bookmark(&oid, 1, Some("a")).unwrap();
+        svc.add_bookmark(&oid, 2, Some("b")).unwrap();
+        assert_eq!(svc.list_bookmarks(&oid).unwrap().len(), 2);
+
+        // 删除对象 → 书签靠外键 CASCADE 自动清理
+        svc.delete_object(&oid, false, None).unwrap();
+        let bms = svc.list_bookmarks(&oid).unwrap();
+        assert!(bms.is_empty(), "对象删除后书签应级联清理");
     }
 }

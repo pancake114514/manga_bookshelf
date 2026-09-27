@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::config::{tag_category_order, THUMBNAIL_SIZE, GRID_THUMB_SIZE, COVER_THUMB_SIZE};
-use crate::db::{AssembledObject, ImageRow, TagValue, Tags, new_uuid};
+use crate::db::{AssembledObject, BookmarkRow, ImageRow, SeriesRow, TagValue, Tags, new_uuid};
 use crate::library_manager;
 use crate::service::LibraryService;
 use crate::thumbnail::generate_thumbnail;
@@ -33,6 +33,12 @@ pub struct ObjectPatch {
     pub name: Option<String>,
     pub tags: Option< serde_json::Value>,
     pub cover_image: Option<String>,
+    /// 三态：字段缺省（None）= 不改；传 null（Some(None)）= 清除；传字符串（Some(Some(..))）= 设置
+    #[serde(default, deserialize_with = "opt_opt")]
+    pub series_name: Option<Option<String>>,
+    /// 三态：字段缺省（None）= 不改；传 null（Some(None)）= 清除；传整数（Some(Some(..))）= 设置
+    #[serde(default, deserialize_with = "opt_opt")]
+    pub volume: Option<Option<i64>>,
 }
 
 #[derive(Deserialize)]
@@ -77,6 +83,18 @@ pub struct NameBody {
     pub name: String,
 }
 
+#[derive(Deserialize)]
+pub struct RenameSeriesBody {
+    pub new_name: String,
+}
+
+#[derive(Deserialize)]
+pub struct AddBookmarkBody {
+    pub obj_id: String,
+    pub page_idx: i64,
+    pub note: Option<String>,
+}
+
 // ── 响应体 ────────────────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -96,6 +114,9 @@ pub struct ObjectSummary {
     pub last_read_idx: i64,
     pub created_at: Option<String>,
     pub cover_url: String,
+    pub series_id: Option<String>,
+    pub series_name: Option<String>,
+    pub volume: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -111,6 +132,9 @@ pub struct ObjectDetail {
     pub cover_url: String,
     pub storage_path: Option<String>,
     pub images: Vec<ImageSummary>,
+    pub series_id: Option<String>,
+    pub series_name: Option<String>,
+    pub volume: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -214,6 +238,42 @@ fn json_to_tags(value: &serde_json::Value) -> Tags {
     Tags(map)
 }
 
+/// 三态补丁字段反序列化：JSON 缺省 → None（不改）；null → Some(None)（清除）；值 → Some(Some(v))（设置）。
+/// serde_json 会把显式 null 映射为 Option 的 None，导致"未传"与"传 null"无法区分；
+/// 此访问器拦截 visit_none 并映射为 Some(None)，保留三态语义。
+fn opt_opt<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    struct OptOptVisitor<T>(std::marker::PhantomData<T>);
+
+    impl<'v, U: serde::Deserialize<'v>> serde::de::Visitor<'v> for OptOptVisitor<U> {
+        type Value = Option<Option<U>>;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("null 或有效值")
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E> {
+            Ok(Some(None))
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E> {
+            Ok(Some(None))
+        }
+
+        fn visit_some<D2>(self, d: D2) -> Result<Self::Value, D2::Error>
+        where
+            D2: serde::Deserializer<'v>,
+        {
+            Ok(Some(Some(U::deserialize(d)?)))
+        }
+    }
+
+    d.deserialize_option(OptOptVisitor(std::marker::PhantomData))
+}
+
 fn serialize_object(o: &AssembledObject) -> ObjectSummary {
     ObjectSummary {
         id: o.id.clone(),
@@ -224,6 +284,9 @@ fn serialize_object(o: &AssembledObject) -> ObjectSummary {
         last_read_idx: o.last_read_idx,
         created_at: o.created_at.clone(),
         cover_url: asset_url(&format!("object/{}/cover", o.id)),
+        series_id: o.series_id.clone(),
+        series_name: o.series_name.clone(),
+        volume: o.volume,
     }
 }
 
@@ -358,6 +421,9 @@ pub fn get_object_detail(
             .iter()
             .map(|i| serialize_image(i, &obj.id))
             .collect(),
+        series_id: obj.series_id.clone(),
+        series_name: obj.series_name.clone(),
+        volume: obj.volume,
     };
     Ok(detail)
 }
@@ -383,10 +449,7 @@ pub fn update_object(
     oid: String,
     body: ObjectPatch,
 ) -> Result<SimpleResult, String> {
-    let obj = svc.get_object(&oid)?;
-    if obj.is_none() {
-        return Err("对象不存在".to_string());
-    }
+    let obj = svc.get_object(&oid)?.ok_or("对象不存在".to_string())?;
     if let Some(name) = body.name {
         svc.update_object_name(&oid, &name)?;
     }
@@ -396,6 +459,14 @@ pub fn update_object(
     }
     if let Some(cover) = body.cover_image {
         svc.update_object_cover(&oid, &cover)?;
+    }
+    // 系列与卷号（三态：缺省=不改，null=清除，传值=设置）。
+    // 未传的字段回退当前值（unwrap_or）；两者都未传时不触碰系列字段，
+    // 只改卷号时系列名原样回传、由服务层按名幂等解析
+    if body.series_name.is_some() || body.volume.is_some() {
+        let series_name = body.series_name.unwrap_or(obj.series_name.clone());
+        let volume = body.volume.unwrap_or(obj.volume);
+        svc.set_series_for_object(&oid, series_name.as_deref(), volume)?;
     }
     Ok(SimpleResult { ok: true, error: None })
 }
@@ -407,6 +478,61 @@ pub fn set_last_read(
     body: LastReadBody,
 ) -> Result<SimpleResult, String> {
     svc.update_last_read(&oid, body.idx)?;
+    Ok(SimpleResult { ok: true, error: None })
+}
+
+// ── 系列 ──────────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn get_series(
+    svc: State<'_, LibraryService>,
+) -> Result<Vec<SeriesRow>, String> {
+    svc.list_series()
+}
+
+#[tauri::command]
+pub fn rename_series(
+    svc: State<'_, LibraryService>,
+    id: String,
+    body: RenameSeriesBody,
+) -> Result<SimpleResult, String> {
+    svc.rename_series(&id, &body.new_name)?;
+    Ok(SimpleResult { ok: true, error: None })
+}
+
+#[tauri::command]
+pub fn delete_series(
+    svc: State<'_, LibraryService>,
+    id: String,
+) -> Result<SimpleResult, String> {
+    svc.delete_series(&id)?;
+    Ok(SimpleResult { ok: true, error: None })
+}
+
+// ── 书签 ──────────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn list_bookmarks(
+    svc: State<'_, LibraryService>,
+    oid: String,
+) -> Result<Vec<BookmarkRow>, String> {
+    svc.list_bookmarks(&oid)
+}
+
+#[tauri::command]
+pub fn add_bookmark(
+    svc: State<'_, LibraryService>,
+    body: AddBookmarkBody,
+) -> Result<BookmarkRow, String> {
+    svc.add_bookmark(&body.obj_id, body.page_idx, body.note.as_deref())
+}
+
+#[tauri::command]
+pub fn remove_bookmark(
+    svc: State<'_, LibraryService>,
+    id: i64,
+) -> Result<SimpleResult, String> {
+    svc.remove_bookmark(id)?;
     Ok(SimpleResult { ok: true, error: None })
 }
 
@@ -697,5 +823,30 @@ mod tests {
     fn count_images_rejects_missing_dir() {
         let d = std::env::temp_dir().join(format!("ms_count_none_{}", uuid::Uuid::new_v4()));
         assert!(count_images(d.to_str().unwrap().to_string()).is_err());
+    }
+
+    #[test]
+    fn object_patch_distinguishes_missing_and_null() {
+        // 字段缺省：None（不改）
+        let p: ObjectPatch = serde_json::from_str(r#"{"name":"x"}"#).unwrap();
+        assert_eq!(p.series_name, None, "缺省应解析为 None（不改）");
+        assert_eq!(p.volume, None);
+
+        // 传 null：Some(None)（清除）
+        let p: ObjectPatch =
+            serde_json::from_str(r#"{"series_name":null,"volume":null}"#).unwrap();
+        assert_eq!(p.series_name, Some(None), "显式 null 应解析为 Some(None)（清除）");
+        assert_eq!(p.volume, Some(None));
+
+        // 传值：Some(Some(v))（设置）
+        let p: ObjectPatch =
+            serde_json::from_str(r#"{"series_name":"S","volume":2}"#).unwrap();
+        assert_eq!(p.series_name, Some(Some("S".to_string())));
+        assert_eq!(p.volume, Some(Some(2)));
+
+        // 只传其一：另一字段仍为 None（不改）
+        let p: ObjectPatch = serde_json::from_str(r#"{"volume":5}"#).unwrap();
+        assert_eq!(p.series_name, None);
+        assert_eq!(p.volume, Some(Some(5)));
     }
 }
