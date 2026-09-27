@@ -22,17 +22,18 @@ export function parseMangaName(raw) {
 
   // ② CM 号：第一个圆括号段（如 "(COMIC1☆17)"），且内容非纯数字
   //    （避免把本名里的 "(FateGrand Order)" 之类误当 CM：CM 段必须出现在
-  //     作者方括号之前或作为开头段）
+  //     作者方括号之前或作为开头段）；兼容全角括号（如 "（C105）"）
   let cm = null
-  const cmMatch = s.match(/^\(([^()]+)\)\s*/)
+  const cmMatch = s.match(/^[（(]([^()（）]+)[）)]\s*/)
   if (cmMatch && !/^\d+$/.test(cmMatch[1].trim())) {
     cm = cmMatch[1].trim()
     s = s.slice(cmMatch[0].length).trim()
   }
 
-  // ③ 作者：第一个方括号段（如 "[OrangeMaru (YD)]"），紧随其后（或直接开头）
+  // ③ 作者：第一个方括号段（如 "[OrangeMaru (YD)]"），紧随其后（或直接开头）；
+  //    兼容全角方括号
   let author = null
-  const authorMatch = s.match(/^\[([^\[\]]+)\]\s*/)
+  const authorMatch = s.match(/^[\[［]([^\[\]［］]+)[\]］]\s*/)
   if (authorMatch) {
     author = authorMatch[1].trim()
     s = s.slice(authorMatch[0].length).trim()

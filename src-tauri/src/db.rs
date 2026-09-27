@@ -404,6 +404,26 @@ impl Database {
         Ok(())
     }
 
+    /// 卷号查重：同系列下是否已有其他对象占用该卷号，返回冲突对象名
+    pub fn find_series_volume_conflict(
+        &self,
+        series_id: &str,
+        volume: i64,
+        exclude_obj: &str,
+    ) -> Result<Option<String>, String> {
+        self.conn
+            .query_row(
+                "SELECT name FROM objects WHERE series_id=? AND volume=? AND id!=? LIMIT 1",
+                params![series_id, volume, exclude_obj],
+                |r| r.get::<_, String>(0),
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                _ => Err(format!("查询卷号冲突失败: {e}")),
+            })
+    }
+
     // ── 批量查询 ────────────────────────────────────────────────────────────
 
     /// 批量组装对象（一次查 tags、图片数量、首图路径，避免 N+1）
@@ -552,7 +572,7 @@ impl Database {
             SELECT DISTINCT o.*, s.name AS series_name FROM objects o
             LEFT JOIN tags t ON t.object_id = o.id
             LEFT JOIN series s ON o.series_id = s.id
-            WHERE o.name LIKE ? ESCAPE '\' OR t.value LIKE ? ESCAPE '\'
+            WHERE o.name LIKE ? ESCAPE '\' OR t.value LIKE ? ESCAPE '\' OR s.name LIKE ? ESCAPE '\'
             ORDER BY o.created_at DESC
         "#;
         let mut stmt = self
@@ -560,7 +580,7 @@ impl Database {
             .prepare(sql)
             .map_err(|e| format!("搜索对象失败: {e}"))?;
         let rows: Vec<ObjectRow> = stmt
-            .query_map(params![pattern, pattern], ObjectRow::from_row)
+            .query_map(params![pattern, pattern, pattern], ObjectRow::from_row)
             .map_err(|e| format!("搜索对象失败: {e}"))?
             .filter_map(|r| r.ok())
             .collect();
@@ -576,26 +596,35 @@ impl Database {
         if filters.is_empty() {
             return Ok(all);
         }
-        let result: Vec<AssembledObject> = all
-            .into_iter()
-            .filter(|obj| {
-                for (cat, values) in filters {
-                    if values.is_empty() {
-                        continue;
-                    }
-                    let obj_vals: Vec<String> = match obj.tags.0.get(cat) {
-                        Some(TagValue::List(v)) => v.clone(),
-                        Some(TagValue::Bool(true)) => vec!["true".to_string()],
-                        _ => Vec::new(),
-                    };
-                    if !values.iter().any(|v| obj_vals.contains(v)) {
-                        return false;
-                    }
-                }
-                true
-            })
+        Ok(filter_assembled_by_tags(all, filters))
+    }
+
+    /// 按系列名筛选对象（供侧栏系列筛选用）
+    pub fn get_objects_by_series_names(
+        &self,
+        names: &[String],
+        include_r18: bool,
+    ) -> Result<Vec<AssembledObject>, String> {
+        if names.is_empty() {
+            return self.get_all_objects(include_r18);
+        }
+        let placeholders = vec!["?"; names.len()].join(",");
+        let sql = format!(
+            r#"SELECT DISTINCT o.*, s.name AS series_name FROM objects o
+               LEFT JOIN series s ON o.series_id = s.id
+               WHERE s.name IN ({placeholders})
+               ORDER BY o.created_at DESC"#
+        );
+        let mut stmt = self
+            .conn
+            .prepare(&sql)
+            .map_err(|e| format!("按系列查询失败: {e}"))?;
+        let rows: Vec<ObjectRow> = stmt
+            .query_map(rusqlite::params_from_iter(names.iter()), ObjectRow::from_row)
+            .map_err(|e| format!("按系列查询失败: {e}"))?
+            .filter_map(|r| r.ok())
             .collect();
-        Ok(result)
+        self.assemble_objects(&rows, include_r18)
     }
 
     // ── 系列 ──────────────────────────────────────────────────────────────────
@@ -930,6 +959,32 @@ impl Database {
 }
 
 // ── Row 映射 trait ────────────────────────────────────────────────────────────
+
+/// 内存标签过滤（各筛选条件取 AND、条件内取 OR），供 filter_by_tags
+/// 与"系列 + 标签"组合筛选复用
+pub fn filter_assembled_by_tags(
+    list: Vec<AssembledObject>,
+    filters: &HashMap<String, Vec<String>>,
+) -> Vec<AssembledObject> {
+    list.into_iter()
+        .filter(|obj| {
+            for (cat, values) in filters {
+                if values.is_empty() {
+                    continue;
+                }
+                let obj_vals: Vec<String> = match obj.tags.0.get(cat) {
+                    Some(TagValue::List(v)) => v.clone(),
+                    Some(TagValue::Bool(true)) => vec!["true".to_string()],
+                    _ => Vec::new(),
+                };
+                if !values.iter().any(|v| obj_vals.contains(v)) {
+                    return false;
+                }
+            }
+            true
+        })
+        .collect()
+}
 
 pub trait FromRow: Sized {
     fn from_row(row: &Row) -> rusqlite::Result<Self>;

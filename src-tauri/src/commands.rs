@@ -366,12 +366,12 @@ pub fn get_objects(
     let include_r18 = include_r18.unwrap_or(false);
     let filters_str = filters.unwrap_or_else(|| "{}".to_string());
 
-    let tag_filters: HashMap<String, Vec<String>> = if filters_str.is_empty() || filters_str == "{}" {
-        HashMap::new()
-    } else {
+    // 解析筛选 JSON："series" 键走系列筛选，其余为标签类别筛选（可组合）
+    let mut series_filter: Vec<String> = Vec::new();
+    let mut tag_filters: HashMap<String, Vec<String>> = HashMap::new();
+    if !filters_str.is_empty() && filters_str != "{}" {
         let parsed: serde_json::Value = serde_json::from_str(&filters_str)
             .map_err(|e| format!("filters 不是合法 JSON: {e}"))?;
-        let mut map = HashMap::new();
         if let Some(obj) = parsed.as_object() {
             for (cat, val) in obj {
                 if let Some(arr) = val.as_array() {
@@ -379,15 +379,20 @@ pub fn get_objects(
                         .iter()
                         .filter_map(|v| v.as_str().map(|s| s.to_string()))
                         .collect();
-                    map.insert(cat.clone(), vals);
+                    if cat == "series" {
+                        series_filter = vals;
+                    } else {
+                        tag_filters.insert(cat.clone(), vals);
+                    }
                 }
             }
         }
-        map
-    };
+    }
 
     let objects = if !q.is_empty() {
         svc.search_objects(&q, include_r18)?
+    } else if !series_filter.is_empty() {
+        svc.filter_by_series(&series_filter, &tag_filters, include_r18)?
     } else if !tag_filters.is_empty() {
         svc.filter_by_tags(&tag_filters, include_r18)?
     } else {
@@ -450,6 +455,15 @@ pub fn update_object(
     body: ObjectPatch,
 ) -> Result<SimpleResult, String> {
     let obj = svc.get_object(&oid)?.ok_or("对象不存在".to_string())?;
+    // 系列与卷号（三态：缺省=不改，null=清除，传值=设置）最先处理——
+    // 卷号查重失败时整单不落库（名称/标签不会被半途修改）。
+    // 未传的字段回退当前值（unwrap_or）；两者都未传时不触碰系列字段，
+    // 只改卷号时系列名原样回传、由服务层按名幂等解析
+    if body.series_name.is_some() || body.volume.is_some() {
+        let series_name = body.series_name.clone().unwrap_or(obj.series_name.clone());
+        let volume = body.volume.unwrap_or(obj.volume);
+        svc.set_series_for_object(&oid, series_name.as_deref(), volume)?;
+    }
     if let Some(name) = body.name {
         svc.update_object_name(&oid, &name)?;
     }
@@ -459,14 +473,6 @@ pub fn update_object(
     }
     if let Some(cover) = body.cover_image {
         svc.update_object_cover(&oid, &cover)?;
-    }
-    // 系列与卷号（三态：缺省=不改，null=清除，传值=设置）。
-    // 未传的字段回退当前值（unwrap_or）；两者都未传时不触碰系列字段，
-    // 只改卷号时系列名原样回传、由服务层按名幂等解析
-    if body.series_name.is_some() || body.volume.is_some() {
-        let series_name = body.series_name.unwrap_or(obj.series_name.clone());
-        let volume = body.volume.unwrap_or(obj.volume);
-        svc.set_series_for_object(&oid, series_name.as_deref(), volume)?;
     }
     Ok(SimpleResult { ok: true, error: None })
 }

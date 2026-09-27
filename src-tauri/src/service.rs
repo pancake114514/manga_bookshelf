@@ -109,6 +109,23 @@ impl LibraryService {
         self.db.lock().unwrap_or_else(|p| p.into_inner()).filter_by_tags(filters, include_r18)
     }
 
+    /// 按系列名筛选（可与标签筛选组合：先按系列取集，再在内存里过滤标签）
+    pub fn filter_by_series(
+        &self,
+        series_names: &[String],
+        filters: &HashMap<String, Vec<String>>,
+        include_r18: bool,
+    ) -> Result<Vec<AssembledObject>, String> {
+        let base = {
+            let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+            db.get_objects_by_series_names(series_names, include_r18)?
+        };
+        if filters.is_empty() {
+            return Ok(base);
+        }
+        Ok(crate::db::filter_assembled_by_tags(base, filters))
+    }
+
     pub fn get_object(&self, obj_id: &str) -> Result<Option<AssembledObject>, String> {
         let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
         let obj = db.get_object_opt(obj_id)?;
@@ -433,6 +450,12 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
             Some(name) => Some(db.get_or_create_series_by_name(name)?),
             None => None,
         };
+        // 卷号查重：同系列同卷号不允许重复占用
+        if let (Some(sid), Some(vol)) = (&series_id, volume) {
+            if let Some(other) = db.find_series_volume_conflict(sid, vol, obj_id)? {
+                return Err(format!("该系列已存在卷 {vol}：「{other}」，请使用其他卷号"));
+            }
+        }
         db.set_object_series(obj_id, series_id.as_deref(), volume)?;
         Ok(())
     }
@@ -1462,5 +1485,24 @@ mod tests {
         svc.delete_object(&oid, false, None).unwrap();
         let bms = svc.list_bookmarks(&oid).unwrap();
         assert!(bms.is_empty(), "对象删除后书签应级联清理");
+    }
+
+    #[test]
+    fn series_volume_duplicate_rejected() {
+        let (svc, d, oid1) = seeded("voldup", "卷一", tags(vec![]));
+        let src = d.join("src");
+        let root = d.join("storage");
+        let oid2 = uuid::Uuid::new_v4().to_string();
+        svc.import_directory(&oid2, "卷二", &tags(vec![]),
+            src.to_str().unwrap(), root.to_str().unwrap(), true, None, None).unwrap();
+        svc.set_series_for_object(&oid1, Some("同系列"), Some(1)).unwrap();
+        // 同系列同卷号 → 拒绝并提示冲突对象
+        let err = svc.set_series_for_object(&oid2, Some("同系列"), Some(1)).unwrap_err();
+        assert!(err.contains("卷一"), "错误应指出冲突对象: {err}");
+        // 不同卷号 → 允许；无卷号 → 允许（卷号可不填不查重）
+        svc.set_series_for_object(&oid2, Some("同系列"), Some(2)).unwrap();
+        svc.set_series_for_object(&oid1, Some("同系列"), None).unwrap();
+        // 自身重复设置同卷号（幂等场景）→ 允许
+        svc.set_series_for_object(&oid2, Some("同系列"), Some(2)).unwrap();
     }
 }
