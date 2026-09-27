@@ -29,8 +29,10 @@
       <n-input-number v-model:value="volume" :min="1" placeholder="留空表示无卷号"
                       button-placement="both" clearable class="volume-input" />
 
-      <div class="field-label r18-label">R-18</div>
-      <n-switch v-model:value="r18" />
+      <div class="r18-row">
+        <span class="field-label r18-label">R-18</span>
+        <n-switch v-model:value="r18" />
+      </div>
     </div>
 
     <template #footer>
@@ -113,7 +115,7 @@ async function save() {
     emit('update:show', false)
     emit('saved')
   } catch (e) {
-    message.error(e.message)
+    message.error(e.message || String(e))
   } finally {
     saving.value = false
   }
@@ -123,6 +125,9 @@ async function save() {
 <style scoped>
 .form { display: flex; flex-direction: column; gap: 8px; }
 .field-label { font-size: 12px; font-weight: 700; opacity: .6; margin-top: 8px; letter-spacing: 1px; }
+/* R-18 行内布局：标签与开关同行居中，避免开关独占一行视觉错位 */
+.r18-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.r18-row .field-label { margin-top: 0; }
 .r18-label { color: var(--ms-danger); }
 .volume-input { width: 160px; }
 .footer { display: flex; justify-content: flex-end; gap: 10px; }

@@ -32,6 +32,8 @@
       <div class="thumb-grid">
         <div v-for="(img, i) in detail.images" :key="img.id" class="thumb-card"
              @dblclick="openAt(i)">
+          <!-- 该页书签标记 -->
+          <span v-if="bmSet.has(i)" class="bm-badge" title="已加书签"><IconBookmark :size="10" /></span>
           <img :src="img.thumb_url" loading="lazy" alt="">
           <span class="fname">{{ img.filename }}</span>
         </div>
@@ -41,15 +43,24 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 import { NButton, NRate } from 'naive-ui'
 import { api } from '../api'
 import { store } from '../store'
 import { catLabel } from '../constants'
-import { IconBack, IconPlay } from './icons'
+import { IconBack, IconPlay, IconBookmark } from './icons'
 
 const props = defineProps({ obj: { type: Object, required: true } })
 const detail = computed(() => props.obj)
+
+// 书签页集合：卡片右上角显示标记（从阅读器返回时组件重建会重新拉取）
+const bmSet = ref(new Set())
+onMounted(async () => {
+  try {
+    const list = await api.bookmarks(props.obj.id)
+    bmSet.value = new Set(list.map(b => b.page_idx))
+  } catch { /* 书签拉取失败不阻塞详情页 */ }
+})
 
 // 封面可用性：加载失败置 false 隐藏 img；封面 URL 变化（换图）时复位重试
 const coverOk = ref(true)
@@ -130,6 +141,15 @@ function continueRead() {
   border: 1px solid var(--border, rgba(128,128,128,.2));
   border-radius: 8px; overflow: hidden; cursor: pointer;
   transition: transform .15s, border-color .15s;
+  position: relative;
+}
+/* 书签标记：卡片右上角小角标（琥珀橙） */
+.bm-badge {
+  position: absolute; top: 4px; right: 4px; z-index: 2;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 4px;
+  background: #f5a623; color: #fff;
+  pointer-events: none;
 }
 .thumb-card:hover { transform: translateY(-2px); border-color: var(--ms-primary, #18a058); }
 .thumb-card img {

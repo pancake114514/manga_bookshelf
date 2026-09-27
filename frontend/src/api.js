@@ -32,7 +32,8 @@ export const api = {
   countImages: (dir) => invoke('count_images', { dir }),
 
   // 库管理
-  migrate: (newRoot) => invoke('migrate', { body: { newRoot } }),
+  // 注意：请求体字段须与后端 serde 结构体字段名一致（snake_case）
+  migrate: (newRoot) => invoke('migrate', { body: { new_root: newRoot } }),
   pruneThumbCache: () => invoke('prune_thumb_cache'),
   verifyLibrary: () => invoke('verify_library'),
   applyVerifyFixes: (plan) => invoke('apply_verify_fixes', { plan }),

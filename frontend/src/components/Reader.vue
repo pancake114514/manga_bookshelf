@@ -412,11 +412,16 @@ function pokeChrome() {
   hideTimer = setTimeout(() => { chromeVisible.value = false }, 2200)
 }
 
+// 滚轮翻页冷却：高分辨率滚轮/触摸板一格会连发多个 wheel 事件，防止一次滚动翻多页
+let lastWheelNav = 0
 function onWheel(e) {
   if (e.ctrlKey) return ctrlZoom(e)   // Ctrl+滚轮：自由缩放（各模式通用）
   if (zoom.value !== 'fit') return       // 滚动模式下滚轮用于滚动页面
-  if (e.deltaY !== 0) { e.deltaY > 0 ? next() : prev(); return }
+  const now = performance.now()
+  if (now - lastWheelNav < 100) return
+  if (e.deltaY !== 0) { lastWheelNav = now; e.deltaY > 0 ? next() : prev(); return }
   if (e.deltaX === 0) return
+  lastWheelNav = now
   // 横向滚轮沿阅读前进方向为下一页（RTL 向左，LTR 向右）
   ;(e.deltaX > 0) !== rtl.value ? next() : prev()
 }
@@ -516,7 +521,7 @@ function onBarUp() {
 /* 顶栏高度与主界面 TopBar 保持一致（58px）；左右等宽令中区控件天然居中 */
 .top {
   height: 58px; flex: none;
-  display: flex; align-items: stretch;
+  display: flex; align-items: stretch; gap: 10px;
   border-bottom: 1px solid var(--border);
   transition: opacity .3s;
   user-select: none;
@@ -605,7 +610,7 @@ function onBarUp() {
 .bm-tick {
   position: absolute; top: 2px; bottom: 2px; width: 3px;
   border-radius: 1.5px; cursor: pointer;
-  background: var(--ms-star);
+  background: #f5a623;
   z-index: 1;
 }
 .bm-tick:hover { filter: brightness(1.2); }
