@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Liquid Glass 预览 — MangaShelf</title>
+<style>
+/* 复刻 frontend/src 的真实令牌与玻璃样式（深色套） */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  --bg: #101014; --surface: #17171c; --card: #1e1e26;
+  --text: #ececf1; --text2: #a0a0ac; --text3: #6b6b78;
+  --border: rgba(255,255,255,.09); --border-strong: rgba(255,255,255,.16);
+  --chip-bg: rgba(255,255,255,.06);
+  --ms-primary: #63e2b7; --ms-danger: #d03050; --ms-star: #f0a020;
+  --lg-tint: rgba(255, 255, 255, .08);
+  --lg-tint-hover: rgba(255, 255, 255, .13);
+  --lg-border: rgba(255, 255, 255, .18);
+  --lg-border-hover: rgba(255, 255, 255, .32);
+  --lg-spec: rgba(255, 255, 255, .22);
+  --lg-umbra: rgba(0, 0, 0, .32);
+  background: var(--bg); color: var(--text);
+  user-select: none;
+}
+body.light {
+  --bg: #f5f6f8; --surface: #ffffff; --card: #ffffff;
+  --text: #1f1f25; --text2: #55555e; --text3: #9a9aa2;
+  --border: rgba(0,0,0,.09); --border-strong: rgba(0,0,0,.16);
+  --chip-bg: rgba(0,0,0,.045);
+  --ms-primary: #18a058;
+  --lg-tint: rgba(255, 255, 255, .52);
+  --lg-tint-hover: rgba(255, 255, 255, .72);
+  --lg-border: rgba(0, 0, 0, .07);
+  --lg-border-hover: rgba(0, 0, 0, .12);
+  --lg-spec: rgba(255, 255, 255, .95);
+  --lg-umbra: rgba(0, 0, 0, .14);
+}
+
+/* ── 液态玻璃按钮（与 styles.css 全局覆盖一致，.n-button → .btn） ── */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font: inherit; font-size: 13px; color: var(--text);
+  padding: 6px 14px; border-radius: 8px; cursor: pointer;
+  background-color: var(--lg-tint);
+  border: 1px solid var(--lg-border);
+  -webkit-backdrop-filter: blur(12px) saturate(170%);
+  backdrop-filter: blur(12px) saturate(170%);
+  box-shadow: inset 0 1px 0 var(--lg-spec), 0 2px 10px var(--lg-umbra);
+  transition: transform .16s cubic-bezier(.34,1.4,.64,1), background-color .2s, box-shadow .2s, filter .2s;
+}
+.btn:hover { background-color: var(--lg-tint-hover); filter: brightness(1.06); border-color: var(--lg-border-hover); }
+.btn:active { transform: scale(.955); }
+.btn.primary {
+  background-color: color-mix(in srgb, var(--ms-primary) 80%, transparent);
+  color: #fff; border-color: rgba(255,255,255,.35);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.40), 0 4px 14px color-mix(in srgb, var(--ms-primary) 30%, transparent);
+}
+body.light .btn.primary { color: #fff; }
+.btn.primary:hover { background-color: color-mix(in srgb, var(--ms-primary) 92%, transparent); }
+.btn.danger {
+  background-color: color-mix(in srgb, var(--ms-danger) 80%, transparent);
+  color: #fff; border-color: rgba(255,255,255,.35);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.40), 0 4px 14px color-mix(in srgb, var(--ms-danger) 30%, transparent);
+}
+.btn.danger:hover { background-color: color-mix(in srgb, var(--ms-danger) 92%, transparent); }
+.btn.quat { border-color: transparent; background: transparent; box-shadow: none; }
+.btn.quat:hover { background-color: var(--lg-tint-hover); }
+
+/* ── 液态玻璃多选勾选泡（与 ObjectCard.vue 一致） ── */
+.select-badge {
+  position: absolute; top: 8px; left: 8px; z-index: 4;
+  width: 24px; height: 24px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; cursor: pointer;
+  background: rgba(255, 255, 255, .10);
+  -webkit-backdrop-filter: blur(8px) saturate(180%);
+  backdrop-filter: blur(8px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, .55);
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.55), inset 0 -3px 6px rgba(0,0,0,.18), 0 2px 10px rgba(0,0,0,.30);
+  transition: transform .16s cubic-bezier(.34,1.4,.64,1), background .2s, box-shadow .2s, border-color .2s;
+}
+.select-badge::before {
+  content: ''; position: absolute; inset: 1px; border-radius: inherit;
+  background: linear-gradient(165deg, rgba(255,255,255,.65), rgba(255,255,255,.06) 42%, transparent 60%);
+  pointer-events: none;
+}
+.select-badge svg { position: relative; filter: drop-shadow(0 1px 1px rgba(0,0,0,.4)); }
+.select-badge.on {
+  background: color-mix(in srgb, var(--ms-primary) 72%, rgba(255, 255, 255, .14));
+  border-color: rgba(255, 255, 255, .75);
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.60),
+              inset 0 -3px 6px color-mix(in srgb, var(--ms-primary) 55%, rgba(0,0,0,.2)),
+              0 2px 12px color-mix(in srgb, var(--ms-primary) 45%, transparent);
+  animation: glass-pop .38s cubic-bezier(.34,1.56,.64,1);
+}
+@keyframes glass-pop { 0% { transform: scale(.6); } 55% { transform: scale(1.18); } 100% { transform: scale(1); } }
+.card:active .select-badge { transform: scale(.85); }
+
+/* ── 预览布局 ── */
+h3 { font-size: 13px; color: var(--text2); margin: 26px 0 12px; font-weight: 600; letter-spacing: 1px; }
+.wrap { padding: 24px 32px 60px; max-width: 1000px; margin: 0 auto; }
+.cards { display: flex; gap: 16px; }
+.card {
+  position: relative; width: 176px; aspect-ratio: 5/7; border-radius: 10px;
+  overflow: hidden; border: 1px solid var(--border); cursor: pointer;
+}
+.card.selected { border-color: var(--ms-primary); box-shadow: 0 0 0 2px var(--ms-primary); }
+.cover-art { position: absolute; inset: 0; }
+.row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.theme-btn { position: fixed; top: 18px; right: 24px; z-index: 50; }
+
+/* ── 详情页顶栏渐进磨砂（与 DirectoryView.vue 一致） ── */
+.demo-page {
+  margin-top: 12px; height: 420px; overflow-y: auto; position: relative;
+  border: 1px solid var(--border); border-radius: 12px;
+}
+.info-bar { position: sticky; top: 0; z-index: 20; padding: 14px 20px 26px; }
+.bar-glass {
+  position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background: linear-gradient(to bottom,
+    var(--bg) 0%, var(--bg) calc(100% - 64px),
+    color-mix(in srgb, var(--bg) 60%, transparent) calc(100% - 32px),
+    transparent 100%);
+}
+.bar-glass .gl { position: absolute; inset: 0; }
+.gl-1 { -webkit-backdrop-filter: blur(20px) saturate(170%); backdrop-filter: blur(20px) saturate(170%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 76px), transparent calc(100% - 24px));
+  mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 76px), transparent calc(100% - 24px)); }
+.gl-2 { -webkit-backdrop-filter: blur(10px) saturate(170%); backdrop-filter: blur(10px) saturate(170%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 68px), transparent calc(100% - 10px));
+  mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 68px), transparent calc(100% - 10px)); }
+.gl-3 { -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 58px), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 58px), transparent 100%); }
+/* 封面渐熔：滚动触发（.melted），--melt 注册为可过渡自定义属性 */
+@property --melt { syntax: '<length>'; inherits: false; initial-value: 0px; }
+.cover-wrap {
+  --melt: 0px;
+  position: relative; flex: none; width: 120px; aspect-ratio: 5/7;
+  border-radius: 10px; overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - var(--melt)), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - var(--melt)), transparent 100%);
+  transition: --melt .45s ease;
+}
+.demo-page.melted .cover-wrap { --melt: 38px; }
+.cover-wrap .art { position: absolute; inset: 0; background-size: cover; }
+.melt-canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  opacity: 0; transition: opacity .45s ease; pointer-events: none;
+}
+.demo-page.melted .melt-canvas { opacity: 1; }
+.info-bar > :not(.bar-glass) { position: relative; z-index: 1; }
+.info-row { display: flex; gap: 16px; margin-top: 12px; }
+.demo-cover { width: 120px; aspect-ratio: 5/7; border-radius: 10px; }
+.title { font-size: 20px; font-weight: 700; }
+.tag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--chip-bg); margin: 8px 6px 0 0; }
+.thumbs { display: grid; grid-template-columns: repeat(auto-fill, 130px); gap: 12px; padding: 20px; }
+.thumb { aspect-ratio: 1; border-radius: 8px; border: 1px solid var(--border); }
+
+/* 多选操作条 */
+.select-bar {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 20px; z-index: 30;
+  display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--card) 52%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(170%);
+  backdrop-filter: blur(18px) saturate(170%);
+  border: 1px solid var(--lg-border);
+  box-shadow: inset 0 1px 0 var(--lg-spec), 0 10px 32px var(--lg-umbra);
+  font-size: 13px;
+}
+</style>
+</head>
+<body>
+<button class="btn theme-btn" onclick="document.body.classList.toggle('light')">切换明/暗</button>
+<div class="wrap">
+
+  <h3>① 多选勾选泡（液态玻璃，点击卡片切换）</h3>
+  <div class="cards" id="cards"></div>
+
+  <h3>② 液态玻璃按钮</h3>
+  <div class="row">
+    <button class="btn">默认按钮</button>
+    <button class="btn primary">主要按钮</button>
+    <button class="btn danger">危险按钮</button>
+    <button class="btn quat">Quaternary</button>
+  </div>
+
+  <h3>③ 详情页顶栏：上 80% 纯色 → 下 20% 磨砂熔出；缩略图滚入渐熔带后封面才渐熔（滚动查看）</h3>
+  <div class="demo-page">
+    <div class="info-bar">
+      <div class="bar-glass" aria-hidden="true"><i class="gl gl-1"></i><i class="gl gl-2"></i><i class="gl gl-3"></i></div>
+      <button class="btn" style="font-size:12px;padding:4px 10px">‹ 书架</button>
+      <div class="info-row">
+        <div class="cover-wrap">
+          <div class="art" id="sharpArt"></div>
+          <canvas class="melt-canvas" id="meltCv" aria-hidden="true"></canvas>
+        </div>
+        <div>
+          <div class="title">示例漫画标题</div>
+          <span class="tag">作者：示例</span><span class="tag">系列 · 第 3 卷</span><span class="tag">全彩</span>
+        </div>
+      </div>
+    </div>
+    <div class="thumbs" id="thumbs"></div>
+  </div>
+
+  <h3>④ 多选悬浮操作条</h3>
+  <div style="position:relative;height:120px;border:1px solid var(--border);border-radius:12px;overflow:hidden">
+    <div class="cover-art" style="background:repeating-linear-gradient(45deg,#3a7bd5 0 30px,#00d2ff 30px 60px)"></div>
+    <div class="select-bar">
+      <b>已选 3 项</b>
+      <button class="btn" style="font-size:12px;padding:4px 10px">全选</button>
+      <button class="btn primary" style="font-size:12px;padding:4px 10px">批量打标签</button>
+      <button class="btn danger" style="font-size:12px;padding:4px 10px">批量删除</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const check = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'
+const palettes = [
+  ['#f6d365','#fda085'], ['#a18cd1','#fbc2eb'], ['#84fab0','#8fd3f4'],
+  ['#e66465','#9198e5'], ['#ff9a9e','#fecfef'],
+]
+const cardsEl = document.getElementById('cards')
+palettes.forEach((p, i) => {
+  const d = document.createElement('div')
+  d.className = 'card' + (i === 1 ? ' selected' : '')
+  d.innerHTML = `<div class="cover-art" style="background:linear-gradient(160deg,${p[0]},${p[1]})"></div>
+    <div class="select-badge ${i === 1 ? 'on' : ''}">${i === 1 ? check : ''}</div>`
+  d.onclick = () => {
+    const b = d.querySelector('.select-badge')
+    b.classList.toggle('on'); d.classList.toggle('selected')
+    b.innerHTML = b.classList.contains('on') ? check : ''
+  }
+  cardsEl.appendChild(d)
+})
+const thumbsEl = document.getElementById('thumbs')
+for (let i = 0; i < 30; i++) {
+  const t = document.createElement('div')
+  t.className = 'thumb'
+  t.style.background = `linear-gradient(${120 + i * 30}deg, hsl(${i * 37 % 360} 60% 55%), hsl(${(i * 37 + 60) % 360} 70% 40%))`
+  thumbsEl.appendChild(t)
+}
+// 滚动触发渐熔：缩略图滚入渐熔带才激活封面渐熔，回顶恢复
+document.querySelector('.demo-page').addEventListener('scroll', e => {
+  e.currentTarget.classList.toggle('melted', e.currentTarget.scrollTop > 12)
+}, { passive: true })
+
+// ── 真·渐进模糊封面（与 DirectoryView.vue 同算法） ──
+;(function () {
+  const dpr = Math.min(devicePixelRatio || 1, 2)
+  const W = Math.round(120 * dpr), H = Math.round(168 * dpr)
+  // 源图：渐变 + 锐利细节（细线/圆点/文字，便于观察渐进模糊）
+  const art = document.createElement('canvas'); art.width = W; art.height = H
+  const a = art.getContext('2d')
+  const g = a.createLinearGradient(0, 0, W, H)
+  g.addColorStop(0, '#e66465'); g.addColorStop(1, '#9198e5')
+  a.fillStyle = g; a.fillRect(0, 0, W, H)
+  a.strokeStyle = 'rgba(255,255,255,.8)'; a.lineWidth = Math.max(1, dpr)
+  for (let i = 0; i < 8; i++) { a.beginPath(); a.moveTo(0, i * H / 7); a.lineTo(W, i * H / 7 - W / 3); a.stroke() }
+  for (let i = 0; i < 40; i++) {
+    a.fillStyle = `hsl(${i * 47 % 360} 80% 70%)`
+    a.beginPath(); a.arc((i * 37) % W, (i * 53) % H, 3 * dpr, 0, 7); a.fill()
+  }
+  a.fillStyle = '#fff'; a.font = `bold ${16 * dpr}px sans-serif`
+  a.fillText('COVER', 12 * dpr, H - 12 * dpr)
+  document.getElementById('sharpArt').style.backgroundImage = `url(${art.toDataURL()})`
+  // 变半径条带卷积
+  const cv = document.getElementById('meltCv'); cv.width = W; cv.height = H
+  const ctx = cv.getContext('2d')
+  ctx.drawImage(art, 0, 0)
+  const smoothstep = t => t * t * (3 - 2 * t)
+  const blurStrip = (self, x, y, w, h, r) => {
+    ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip()
+    ctx.filter = `blur(${r}px)`
+    ctx.drawImage(self ? cv : art, 0, 0)
+    ctx.restore()
+  }
+  const BAND = 38 * dpr, RMAX = 7 * dpr, y0 = Math.round(H - BAND)
+  for (let y = y0; y < H; y++) {
+    const r = RMAX * smoothstep((y - y0) / BAND)
+    if (r >= 0.1) blurStrip(false, 0, y, W, 1, r)
+  }
+  const SIDE_TOP = y0 - Math.round(28 * dpr)
+  const COLW = Math.round(4 * dpr), COLS = 4, RS = 4 * dpr
+  for (let y = SIDE_TOP; y < H; y += 2) {
+    const ry = y < y0 ? RS * smoothstep((y - SIDE_TOP) / (y0 - SIDE_TOP)) : RS
+    if (ry < 0.1) continue
+    for (let c = 0; c < COLS; c++) {
+      const r = ry * (1 - c / COLS)
+      if (r < 0.1) continue
+      blurStrip(true, c * COLW, y, COLW, 2, r)
+      blurStrip(true, W - (c + 1) * COLW, y, COLW, 2, r)
+    }
+  }
+})()
+</script>
+</body>
+</html>

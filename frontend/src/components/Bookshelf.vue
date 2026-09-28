@@ -479,15 +479,18 @@ async function doDelete(obj, deleteFiles) {
 
 .empty { margin-top: 80px; }
 
+/* 多选操作条：悬浮液态玻璃——半透底色 + 背板模糊 + 折射边缘 + 内高光 */
 .select-bar {
   position: fixed; left: 50%; transform: translateX(-50%);
   bottom: 28px; z-index: 10;
   display: flex; align-items: center; gap: 10px;
   padding: 10px 16px;
-  border-radius: 10px;
-  background: var(--card);
-  border: 1px solid var(--border-strong);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, .28);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--card) 52%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(170%);
+  backdrop-filter: blur(18px) saturate(170%);
+  border: 1px solid var(--lg-border);
+  box-shadow: inset 0 1px 0 var(--lg-spec), 0 10px 32px var(--lg-umbra);
 }
 .sel-count { font-size: 13px; font-weight: 600; }
 .spacer { flex: 1; }
