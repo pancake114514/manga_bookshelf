@@ -163,6 +163,11 @@ function continueRead() {
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .bar-glass { background: var(--bg); }
 }
+/* 系统「降低透明度」开启：磨砂层关闭，顶栏退回不透明纯色 */
+@media (prefers-reduced-transparency: reduce) {
+  .bar-glass { background: var(--bg); }
+  .bar-glass .gl { display: none; }
+}
 .info-row { display: flex; gap: 16px; margin-top: 12px; }
 /* 封面：等比缩小为 140×196（5:7），底缘距栏底 70px、位于熔起点（64px）之上，
    始终处于纯色区，无需渐熔；栏高因此保持 320px 不变 */

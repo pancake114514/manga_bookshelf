@@ -492,6 +492,16 @@ async function doDelete(obj, deleteFiles) {
   border: 1px solid var(--lg-border);
   box-shadow: inset 0 1px 0 var(--lg-spec), 0 10px 32px var(--lg-umbra);
 }
+/* 背板滤镜不可用 / 系统「降低透明度」开启：退回不透明实底 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .select-bar { background: var(--card); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .select-bar {
+    background: var(--card);
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+}
 .sel-count { font-size: 13px; font-weight: 600; }
 .spacer { flex: 1; }
 

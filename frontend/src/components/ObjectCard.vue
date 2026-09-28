@@ -192,6 +192,18 @@ const timeLabel = computed(() => {
 .obj-card:active .select-badge { transform: scale(.85); }
 @media (prefers-reduced-motion: reduce) {
   .select-badge.on { animation: none; }
+  .select-badge, .obj-card:active .select-badge { transition: none; transform: none; }
+}
+/* 背板滤镜不可用 / 系统「降低透明度」开启：勾选泡退回不透明实底 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .select-badge { background: rgba(0, 0, 0, .55); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .select-badge {
+    background: rgba(0, 0, 0, .55);
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+  .select-badge.on { background: var(--ms-primary); }
 }
 
 .card-meta { gap: 6px; }

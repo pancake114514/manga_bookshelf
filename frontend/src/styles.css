@@ -46,15 +46,20 @@ img { -webkit-user-drag: none; }
   --lg-umbra: rgba(0, 0, 0, .14);
 }
 
-/* ── 液态玻璃按钮（全局覆盖 naive-ui 按钮材质） ── */
-/* 材质三层：半透底色 + 背板模糊/饱和 → 折射边缘（border+顶部内高光）→ 落影 */
+/* ── 液态玻璃按钮（覆盖 .app-shell 内 naive-ui 按钮材质） ── */
+/* 材质三层：半透底色 + 折射边缘（border+顶部内高光）→ 落影。
+   背板模糊只挂在真正悬浮于动态内容上的按钮（顶栏磨砂区/多选操作条/封面悬浮钮）——
+   静态背景上的按钮半透 tint 叠实色底视觉相同，省略 backdrop-filter 省一次背板渲染 */
 .app-shell .n-button {
   background-color: var(--lg-tint);
-  -webkit-backdrop-filter: blur(12px) saturate(170%);
-  backdrop-filter: blur(12px) saturate(170%);
   box-shadow: inset 0 1px 0 var(--lg-spec), 0 2px 10px var(--lg-umbra);
   transition: transform .16s cubic-bezier(.34, 1.4, .64, 1),
               background-color .2s, box-shadow .2s, filter .2s, color .2s;
+}
+/* 动态背板上的玻璃按钮才挂背板模糊 */
+.info-bar .n-button, .select-bar .n-button {
+  -webkit-backdrop-filter: blur(12px) saturate(170%);
+  backdrop-filter: blur(12px) saturate(170%);
 }
 /* 边缘折射：仅对有边框变体改色（quaternary/tertiary 无边框，不动） */
 .app-shell .n-button:not(.n-button--quaternary-type):not(.n-button--tertiary-type) .n-button__border {
@@ -108,8 +113,23 @@ img { -webkit-user-drag: none; }
 
 /* 背板滤镜不可用时整体降级为不透明材质，保证可读性 */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .app-shell .n-button { background-color: var(--surface); }
+  .info-bar .n-button, .select-bar .n-button { background-color: var(--surface); }
   .hover-overlay .n-button { background-color: rgba(0, 0, 0, .55); }
+}
+
+/* 系统「降低透明度」开启：玻璃退回不透明材质，保证可读性 */
+@media (prefers-reduced-transparency: reduce) {
+  .app-shell .n-button,
+  .info-bar .n-button, .select-bar .n-button {
+    background-color: var(--surface);
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+  .app-shell .n-button--primary-type { background-color: var(--ms-primary); }
+  .app-shell .n-button--error-type { background-color: var(--ms-danger); }
+  .hover-overlay .n-button {
+    background-color: rgba(0, 0, 0, .55);
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
 }
 
 /* ── 卡片增删过渡（与设计稿一致：整批右出 → 左入；动画施加见 Bookshelf） ── */
@@ -123,6 +143,9 @@ img { -webkit-user-drag: none; }
 @media (prefers-reduced-motion: reduce) {
   .shelf-grid.leaving .obj-card,
   .shelf-grid.entering .obj-card { animation: none !important; }
+  /* 玻璃按钮：按压内缩与材质过渡一并关闭 */
+  .app-shell .n-button { transition: none; }
+  .app-shell .n-button:not(.n-button--disabled-type):active { transform: none; }
 }
 
 /* ── 对象卡片 ── */
