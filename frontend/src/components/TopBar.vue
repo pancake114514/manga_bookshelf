@@ -2,13 +2,9 @@
   <!-- 整条顶栏均可拖动：按下后移交系统原生拖动（还原最大化/贴靠由系统处理），
        交互控件以 mousedown.stop 排除 -->
   <div class="topbar" @mousedown="barMouseDown">
-    <!-- 虚拟框一：与左侧栏等宽，logo 保持左对齐（与侧栏分隔线位置分割，不画线）。
-         收起态下侧栏仅剩 28px 细条，logo 被裁切只留侧栏切换钮 -->
+    <!-- 虚拟框一：固定与默认侧栏等宽（228px），logo 左对齐；
+         与侧栏收起/拖动状态解耦，顶栏布局恒定 -->
     <div class="tb-logo-box">
-      <n-button quaternary size="small" class="sb-toggle" title="切换侧栏（Ctrl+B）"
-                @mousedown.stop @click="toggleSidebar(sidebarView)">
-        <template #icon><IconPanelLeft :size="15" /></template>
-      </n-button>
       <span class="logo">MangaShelf</span>
       <!-- 删除进行中提示：字号与搜索框文字一致（14px） -->
       <span v-if="store.deleting" class="del-busy">
@@ -55,17 +51,13 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { NInput, NButton, NSwitch, NSpin } from 'naive-ui'
 import { store, toggleTheme } from '../store'
-import { toggleSidebar } from '../sidebar'
 import { catLabel } from '../constants'
 import { debounce } from '../utils'
 import { barMouseDown } from '../windowState'
 import WindowControls from './WindowControls.vue'
 import {
-  IconSearch, IconMoon, IconSun, IconLibrary, IconFolderPlus, IconPanelLeft,
+  IconSearch, IconMoon, IconSun, IconLibrary, IconFolderPlus,
 } from './icons'
-
-// 侧栏切换钮作用的视图（阅读器视图不显示顶栏，无需兜底）
-const sidebarView = computed(() => store.view.name)
 
 const kw = ref(store.keyword)
 const searchEl = ref(null)
@@ -118,15 +110,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   border-bottom: 1px solid var(--border);
 }
 .tb-logo-box {
-  flex: none; width: var(--sidebar-w);
-  display: flex; align-items: center; gap: 6px;
-  padding-left: 8px;
+  flex: none; width: var(--sidebar-w);   /* 固定 228px，与侧栏宽度解耦（顶栏布局不随侧栏收起/拖动变化） */
+  display: flex; align-items: center;
+  padding-left: 18px;
   user-select: none;
-  /* 侧栏收起/拖动时宽度随动：超出的 logo 文字裁掉，切换钮始终可见 */
-  overflow: hidden; white-space: nowrap;
-  transition: width .22s ease;
 }
-.sb-toggle { flex: none; }
 .tb-search-box {
   flex: 1; min-width: 0;
   display: flex; align-items: center; gap: 12px;

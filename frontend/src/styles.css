@@ -17,7 +17,8 @@ img { -webkit-user-drag: none; }
 
 .app-shell {
   height: 100vh; display: flex; flex-direction: column;
-  /* 布局令牌：侧栏宽度 / 内容区水平留白，顶栏虚拟框分割与侧栏分隔线、首列卡片左缘对齐 */
+  /* 布局令牌：--sidebar-w 为顶栏 logo 虚拟框固定宽（228px，与侧栏实际宽度解耦——
+     侧栏可收起/拖动调宽，顶栏布局恒定）；--content-pad 为内容区水平留白 */
   --sidebar-w: 228px;
   --content-pad: 26px;
   background: var(--bg); color: var(--text);
@@ -28,8 +29,7 @@ img { -webkit-user-drag: none; }
 /* ── 侧栏收起/拖动（TagSidebar 与 DirectorySidebar 共用） ── */
 /* 宽度行内绑定 + 过渡；拖动分隔条期间（.sidebar-dragging）全局禁用过渡避免拖尾 */
 .sidebar, .dir-side { transition: width .22s ease; }
-.sidebar-dragging .sidebar, .sidebar-dragging .dir-side,
-.sidebar-dragging .tb-logo-box { transition: none !important; }
+.sidebar-dragging .sidebar, .sidebar-dragging .dir-side { transition: none !important; }
 /* 内容列：收起时淡出并禁交互（保留 DOM 与滚动位置） */
 .side-inner { transition: opacity .15s ease; }
 .sidebar.collapsed .side-inner, .dir-side.collapsed .side-inner {
@@ -69,7 +69,7 @@ img { -webkit-user-drag: none; }
 }
 .side-divider:hover::after, .sidebar-dragging .side-divider::after { background: var(--ms-primary); }
 @media (prefers-reduced-motion: reduce) {
-  .sidebar, .dir-side, .tb-logo-box, .side-inner { transition: none !important; }
+  .sidebar, .dir-side, .side-inner { transition: none !important; }
 }
 
 /* 主题令牌（--bg/--text/...）由 theme.js 的 cssVars() 注入 .app-shell，此处不再重复定义 */

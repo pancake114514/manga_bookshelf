@@ -3,7 +3,7 @@
     <n-message-provider>
       <n-dialog-provider>
         <div class="app-shell" :class="[`theme-${store.theme}`, { 'sidebar-dragging': !!store.sidebarDragging }]"
-             :style="[cssVars(store.theme), { '--sidebar-w': sidebarW + 'px' }]">
+             :style="cssVars(store.theme)">
           <TitleBar v-if="showTitleBar" />
           <EdgeResize />
           <template v-if="store.ready">
@@ -40,7 +40,7 @@ import { computed, onMounted, onUnmounted } from 'vue'
 import { NConfigProvider, NMessageProvider, NDialogProvider, NSpin, NResult, NButton } from 'naive-ui'
 import { store, boot } from './store'
 import { naiveTheme, themeOverrides, cssVars } from './theme'
-import { sidebarWidth, toggleSidebar } from './sidebar'
+import { toggleSidebar } from './sidebar'
 import SetupGate from './components/SetupGate.vue'
 import TitleBar from './components/TitleBar.vue'
 import TopBar from './components/TopBar.vue'
@@ -56,12 +56,6 @@ import LibraryDialog from './components/LibraryDialog.vue'
 // 主界面侧栏：书架用标签筛选；详情页用对象侧栏（组件内部按内容动态隐藏）
 const showSidebar = computed(() => store.view.name === 'shelf')
 const showTitleBar = computed(() => !store.ready || !store.storageRoot)
-
-// 当前视图侧栏有效宽度 → 行内 --sidebar-w：顶栏虚拟框分割/卡片左缘对齐随动
-const sidebarW = computed(() => {
-  const v = store.view.name
-  return (v === 'shelf' || v === 'directory') ? sidebarWidth(v) : 228
-})
 
 // Ctrl+B：切换当前视图侧栏（输入框内不劫持）
 function onKey(e) {
