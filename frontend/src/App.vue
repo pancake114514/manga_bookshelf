@@ -2,7 +2,10 @@
   <n-config-provider :theme="naiveTheme(store.theme)" :theme-overrides="themeOverrides(store.theme)">
     <n-message-provider>
       <n-dialog-provider>
-        <div class="app-shell" :class="[`theme-${store.theme}`, { 'sidebar-dragging': !!store.sidebarDragging }]"
+        <div class="app-shell" :class="[`theme-${store.theme}`, {
+               'sidebar-dragging': !!store.sidebarDragging,
+               'scroll-edge': store.view.name === 'shelf',
+             }]"
              :style="cssVars(store.theme)">
           <TitleBar v-if="showTitleBar" />
           <EdgeResize />
