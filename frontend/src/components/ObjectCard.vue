@@ -148,18 +148,62 @@ const timeLabel = computed(() => {
 }
 .actions { display: flex; gap: 4px; margin-top: 6px; }
 
+/* 多选勾选泡：液态玻璃材质——背板模糊+饱和、折射描边、顶部内高光、落影 */
 .select-badge {
   position: absolute; top: 8px; left: 8px; z-index: 4;
-  width: 22px; height: 22px; border-radius: 50%;
+  width: 24px; height: 24px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  border: 2px solid rgba(255, 255, 255, .9);
-  background: rgba(0, 0, 0, .35);
   color: #fff;
-  transition: background .15s, border-color .15s;
+  background: rgba(255, 255, 255, .10);
+  -webkit-backdrop-filter: blur(8px) saturate(180%);
+  backdrop-filter: blur(8px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, .55);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, .55),
+    inset 0 -3px 6px rgba(0, 0, 0, .18),
+    0 2px 10px rgba(0, 0, 0, .30);
+  transition: transform .16s cubic-bezier(.34, 1.4, .64, 1),
+              background .2s, box-shadow .2s, border-color .2s;
 }
+/* 顶部高光弧：玻璃受光面 */
+.select-badge::before {
+  content: ''; position: absolute; inset: 1px; border-radius: inherit;
+  background: linear-gradient(165deg,
+    rgba(255, 255, 255, .65), rgba(255, 255, 255, .06) 42%, transparent 60%);
+  pointer-events: none;
+}
+.select-badge svg { position: relative; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .4)); }
+/* 选中：主色着色玻璃 + 弹性落入 */
 .select-badge.on {
-  background: var(--ms-primary);
-  border-color: var(--ms-primary);
+  background: color-mix(in srgb, var(--ms-primary) 72%, rgba(255, 255, 255, .14));
+  border-color: rgba(255, 255, 255, .75);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, .60),
+    inset 0 -3px 6px color-mix(in srgb, var(--ms-primary) 55%, rgba(0, 0, 0, .2)),
+    0 2px 12px color-mix(in srgb, var(--ms-primary) 45%, transparent);
+  animation: glass-pop .38s cubic-bezier(.34, 1.56, .64, 1);
+}
+@keyframes glass-pop {
+  0% { transform: scale(.6); }
+  55% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+/* 卡片按压时勾选泡同步内缩（点击卡片即切换选中） */
+.obj-card:active .select-badge { transform: scale(.85); }
+@media (prefers-reduced-motion: reduce) {
+  .select-badge.on { animation: none; }
+  .select-badge, .obj-card:active .select-badge { transition: none; transform: none; }
+}
+/* 背板滤镜不可用 / 系统「降低透明度」开启：勾选泡退回不透明实底 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .select-badge { background: rgba(0, 0, 0, .55); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .select-badge {
+    background: rgba(0, 0, 0, .55);
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+  .select-badge.on { background: var(--ms-primary); }
 }
 
 .card-meta { gap: 6px; }

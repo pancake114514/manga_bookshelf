@@ -43,6 +43,8 @@ export const IconStarFill = icon('<polygon points="12 2 15.09 8.26 22 9.27 17 14
 export const IconArrowUp = icon('<line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>')
 export const IconArrowDown = icon('<line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/>')
 export const IconBookmark = icon('<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>')
+// 侧栏切换（面板+左竖条）
+export const IconPanelLeft = icon('<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/>')
 // 自定义标题栏窗口控制按钮
 export const IconMinus = icon('<line x1="5" y1="12" x2="19" y2="12"/>')
 export const IconWinMax = icon('<rect x="5" y="5" width="14" height="14" rx="1"/>')

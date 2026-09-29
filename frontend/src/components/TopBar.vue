@@ -2,7 +2,8 @@
   <!-- 整条顶栏均可拖动：按下后移交系统原生拖动（还原最大化/贴靠由系统处理），
        交互控件以 mousedown.stop 排除 -->
   <div class="topbar" @mousedown="barMouseDown">
-    <!-- 虚拟框一：与左侧栏等宽，logo 保持左对齐（与侧栏分隔线位置分割，不画线） -->
+    <!-- 虚拟框一：固定与默认侧栏等宽（228px），logo 左对齐；
+         与侧栏收起/拖动状态解耦，顶栏布局恒定 -->
     <div class="tb-logo-box">
       <span class="logo">MangaShelf</span>
       <!-- 删除进行中提示：字号与搜索框文字一致（14px） -->
@@ -109,7 +110,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   border-bottom: 1px solid var(--border);
 }
 .tb-logo-box {
-  flex: none; width: var(--sidebar-w);
+  flex: none; width: var(--sidebar-w);   /* 固定 228px，与侧栏宽度解耦（顶栏布局不随侧栏收起/拖动变化） */
   display: flex; align-items: center;
   padding-left: 18px;
   user-select: none;
