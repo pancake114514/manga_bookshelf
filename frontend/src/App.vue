@@ -2,7 +2,8 @@
   <n-config-provider :theme="naiveTheme(store.theme)" :theme-overrides="themeOverrides(store.theme)">
     <n-message-provider>
       <n-dialog-provider>
-        <div class="app-shell" :class="`theme-${store.theme}`" :style="cssVars(store.theme)">
+        <div class="app-shell" :class="[`theme-${store.theme}`, { 'sidebar-dragging': !!store.sidebarDragging }]"
+             :style="[cssVars(store.theme), { '--sidebar-w': sidebarW + 'px' }]">
           <TitleBar v-if="showTitleBar" />
           <EdgeResize />
           <template v-if="store.ready">
@@ -35,10 +36,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { NConfigProvider, NMessageProvider, NDialogProvider, NSpin, NResult, NButton } from 'naive-ui'
 import { store, boot } from './store'
 import { naiveTheme, themeOverrides, cssVars } from './theme'
+import { sidebarWidth, toggleSidebar } from './sidebar'
 import SetupGate from './components/SetupGate.vue'
 import TitleBar from './components/TitleBar.vue'
 import TopBar from './components/TopBar.vue'
@@ -55,8 +57,24 @@ import LibraryDialog from './components/LibraryDialog.vue'
 const showSidebar = computed(() => store.view.name === 'shelf')
 const showTitleBar = computed(() => !store.ready || !store.storageRoot)
 
+// 当前视图侧栏有效宽度 → 行内 --sidebar-w：顶栏虚拟框分割/卡片左缘对齐随动
+const sidebarW = computed(() => {
+  const v = store.view.name
+  return (v === 'shelf' || v === 'directory') ? sidebarWidth(v) : 228
+})
+
+// Ctrl+B：切换当前视图侧栏（输入框内不劫持）
+function onKey(e) {
+  if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'b') return
+  const t = e.target
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+  const v = store.view.name
+  if (v === 'shelf' || v === 'directory') { e.preventDefault(); toggleSidebar(v) }
+}
+
 function retry() { boot() }
-onMounted(() => boot())
+onMounted(() => { boot(); window.addEventListener('keydown', onKey) })
+onUnmounted(() => window.removeEventListener('keydown', onKey))
 </script>
 
 <style scoped>

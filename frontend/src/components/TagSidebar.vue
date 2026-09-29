@@ -1,43 +1,60 @@
 <template>
-  <aside class="sidebar">
-    <div class="r18-row">
-      <span class="r18-label">显示 R-18</span>
-      <n-switch size="small" :value="store.r18" @update:value="setR18" />
-    </div>
-
-    <div class="group">
-      <div class="group-title">评分</div>
-      <div class="stars">
-        <span v-for="n in 5" :key="n" class="star" :class="{ on: n <= minRating }"
-              :title="`${n} 星及以上`" @click="setRatingFilter(n)">
-          <IconStarFill :size="17" />
-        </span>
-        <span v-if="minRating" class="star-clear" @click="clearRatingFilter">清除</span>
+  <!-- 书架筛选侧栏：可收起为细条（收起钮 / 拖动分隔条 / Ctrl+B），宽度 180–400 拖动可调 -->
+  <aside class="sidebar" :class="{ collapsed }" :style="{ width: width + 'px' }">
+    <div class="side-inner">
+      <div class="side-head">
+        <button class="side-toggle" title="收起侧栏（Ctrl+B）" @click="toggleSidebar('shelf')">
+          <IconChevronLeft :size="13" />
+        </button>
       </div>
-    </div>
-
-    <!-- 系列筛选（非标签类别，走 filters.series 由后端按系列名查询） -->
-    <div v-if="seriesNames.length" class="group">
-      <div class="group-title">系列</div>
-      <div class="chips">
-        <span v-for="v in seriesNames" :key="v" class="chip"
-              :class="{ active: (store.filters.series || []).includes(v) }"
-              @click="toggle('series', v)">{{ v }}</span>
+      <div class="r18-row">
+        <span class="r18-label">显示 R-18</span>
+        <n-switch size="small" :value="store.r18" @update:value="setR18" />
       </div>
-    </div>
 
-    <div v-for="(values, cat) in store.tagValues" :key="cat" class="group">
-      <div class="group-title">{{ catLabel(cat) }}</div>
-      <div class="chips">
-        <span v-for="v in values" :key="v" class="chip"
-              :class="{ active: (store.filters[cat] || []).includes(v) }"
-              @click="toggle(cat, v)">{{ v }}</span>
+      <div class="group">
+        <div class="group-title">评分</div>
+        <div class="stars">
+          <span v-for="n in 5" :key="n" class="star" :class="{ on: n <= minRating }"
+                :title="`${n} 星及以上`" @click="setRatingFilter(n)">
+            <IconStarFill :size="17" />
+          </span>
+          <span v-if="minRating" class="star-clear" @click="clearRatingFilter">清除</span>
+        </div>
       </div>
+
+      <!-- 系列筛选（非标签类别，走 filters.series 由后端按系列名查询） -->
+      <div v-if="seriesNames.length" class="group">
+        <div class="group-title">系列</div>
+        <div class="chips">
+          <span v-for="v in seriesNames" :key="v" class="chip"
+                :class="{ active: (store.filters.series || []).includes(v) }"
+                @click="toggle('series', v)">{{ v }}</span>
+        </div>
+      </div>
+
+      <div v-for="(values, cat) in store.tagValues" :key="cat" class="group">
+        <div class="group-title">{{ catLabel(cat) }}</div>
+        <div class="chips">
+          <span v-for="v in values" :key="v" class="chip"
+                :class="{ active: (store.filters[cat] || []).includes(v) }"
+                @click="toggle(cat, v)">{{ v }}</span>
+        </div>
+      </div>
+
+      <n-button v-if="selectedCount" quaternary size="small" class="clear" @click="clearAll">
+        清除全部筛选
+      </n-button>
     </div>
 
-    <n-button v-if="selectedCount" quaternary size="small" class="clear" @click="clearAll">
-      清除全部筛选
-    </n-button>
+    <!-- 收起态细条：点击任意处展开 -->
+    <div class="side-rail" title="展开侧栏（Ctrl+B）" @click="toggleSidebar('shelf')">
+      <button class="side-toggle"><IconChevronRight :size="13" /></button>
+      <span class="rail-label">筛选</span>
+    </div>
+    <div class="side-divider" title="拖动调整宽度，双击收起/展开"
+         @pointerdown="e => startSidebarDrag('shelf', e)"
+         @dblclick="toggleSidebar('shelf')" />
   </aside>
 </template>
 
@@ -46,7 +63,11 @@ import { computed } from 'vue'
 import { NSwitch, NButton } from 'naive-ui'
 import { store, setR18 } from '../store'
 import { catLabel, RATING_CAT } from '../constants'
-import { IconStarFill } from './icons'
+import { sidebarWidth, toggleSidebar, startSidebarDrag } from '../sidebar'
+import { IconStarFill, IconChevronLeft, IconChevronRight } from './icons'
+
+const collapsed = computed(() => store.ui.sidebar.shelf)
+const width = computed(() => sidebarWidth('shelf'))
 
 const selectedCount = computed(() =>
   Object.values(store.filters).reduce((n, v) => n + v.length, 0))
@@ -87,11 +108,12 @@ function clearAll() { store.filters = {} }
 
 <style scoped>
 .sidebar {
-  width: var(--sidebar-w); flex: none;
-  padding: 18px 16px;
+  position: relative; flex: none;   /* 宽度由行内 style 绑定（收起/拖动联动 --sidebar-w） */
+  padding: 12px 16px 18px;
   border-right: 1px solid var(--border);
   overflow-y: auto;
 }
+.sidebar.collapsed { overflow: hidden; padding: 0; }
 .r18-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
 .r18-label { color: var(--ms-danger); font-size: 13px; font-weight: 600; }
 .group { margin-bottom: 16px; }

@@ -1,44 +1,61 @@
 <template>
   <!-- 详情页对象侧栏（常驻）：同系列分卷导航 + 书签列表 + 信息脚注。
-       分卷/书签段按内容显隐；脚注永远保留，避免整栏消失的突兀感。 -->
-  <aside class="dir-side">
-    <div v-if="vols.length > 1" class="side-group">
-      <div class="side-title">系列 · {{ obj.series_name }}</div>
-      <div class="vol-list">
-        <div v-for="v in vols" :key="v.id" class="vol-row"             :class="{ current: v.id === obj.id }"
-             :title="v.id === obj.id ? v.name : `打开「${v.name}」`"
-             @click="v.id !== obj.id && openVol(v)">
-          <img class="vol-cover" :src="v.cover_url" alt=""
-               @error="e => e.target.style.visibility = 'hidden'">
-          <div class="vol-meta">
-            <div class="vol-label">{{ v.volume != null ? `第 ${v.volume} 卷` : v.name }}</div>
-            <div class="vol-sub">{{ v.image_count }} 张</div>
+       分卷/书签段按内容显隐；脚注永远保留，避免整栏消失的突兀感。
+       可收起为细条（收起钮 / 拖动分隔条 / Ctrl+B），宽度 180–400 拖动可调 -->
+  <aside class="dir-side" :class="{ collapsed }" :style="{ width: width + 'px' }">
+    <div class="side-inner">
+      <div class="side-head">
+        <button class="side-toggle" title="收起侧栏（Ctrl+B）" @click="toggleSidebar('directory')">
+          <IconChevronLeft :size="13" />
+        </button>
+      </div>
+      <div v-if="vols.length > 1" class="side-group">
+        <div class="side-title">系列 · {{ obj.series_name }}</div>
+        <div class="vol-list">
+          <div v-for="v in vols" :key="v.id" class="vol-row"             :class="{ current: v.id === obj.id }"
+               :title="v.id === obj.id ? v.name : `打开「${v.name}」`"
+               @click="v.id !== obj.id && openVol(v)">
+            <img class="vol-cover" :src="v.cover_url" alt=""
+                 @error="e => e.target.style.visibility = 'hidden'">
+            <div class="vol-meta">
+              <div class="vol-label">{{ v.volume != null ? `第 ${v.volume} 卷` : v.name }}</div>
+              <div class="vol-sub">{{ v.image_count }} 张</div>
+            </div>
           </div>
         </div>
       </div>
-    </div>
 
-    <div v-if="bookmarks.length" class="side-group">
-      <div class="side-title">书签</div>
-      <div class="bm-list">
-        <div v-for="b in bookmarks" :key="b.id" class="bm-row"
-             :title="b.note ? `P${b.page_idx + 1}：${b.note}` : `跳到第 ${b.page_idx + 1} 页`"
-             @click="goBookmark(b)">
-          <span class="bm-ico"><IconBookmark :size="11" /></span>
-          <span class="bm-page">P{{ b.page_idx + 1 }}</span>
-          <span class="bm-note">{{ b.note || obj.images[b.page_idx]?.filename || '' }}</span>
+      <div v-if="bookmarks.length" class="side-group">
+        <div class="side-title">书签</div>
+        <div class="bm-list">
+          <div v-for="b in bookmarks" :key="b.id" class="bm-row"
+               :title="b.note ? `P${b.page_idx + 1}：${b.note}` : `跳到第 ${b.page_idx + 1} 页`"
+               @click="goBookmark(b)">
+            <span class="bm-ico"><IconBookmark :size="11" /></span>
+            <span class="bm-page">P{{ b.page_idx + 1 }}</span>
+            <span class="bm-note">{{ b.note || obj.images[b.page_idx]?.filename || '' }}</span>
+          </div>
         </div>
+      </div>
+
+      <div class="side-foot">
+        <span class="foot-stats">
+          {{ obj.image_count }} 张<template v-if="progressPct"> · 已读 {{ progressPct }}%</template>
+        </span>
+        <button class="foot-btn" title="在资源管理器中打开存储目录" @click="openFolder">
+          <IconFolder :size="13" />
+        </button>
       </div>
     </div>
 
-    <div class="side-foot">
-      <span class="foot-stats">
-        {{ obj.image_count }} 张<template v-if="progressPct"> · 已读 {{ progressPct }}%</template>
-      </span>
-      <button class="foot-btn" title="在资源管理器中打开存储目录" @click="openFolder">
-        <IconFolder :size="13" />
-      </button>
+    <!-- 收起态细条：点击任意处展开 -->
+    <div class="side-rail" title="展开侧栏（Ctrl+B）" @click="toggleSidebar('directory')">
+      <button class="side-toggle"><IconChevronRight :size="13" /></button>
+      <span class="rail-label">分卷·书签</span>
     </div>
+    <div class="side-divider" title="拖动调整宽度，双击收起/展开"
+         @pointerdown="e => startSidebarDrag('directory', e)"
+         @dblclick="toggleSidebar('directory')" />
   </aside>
 </template>
 
@@ -47,11 +64,15 @@ import { ref, computed, watch } from 'vue'
 import { NButton } from 'naive-ui'
 import { api } from '../api'
 import { store } from '../store'
-import { IconBookmark, IconFolder } from './icons'
+import { sidebarWidth, toggleSidebar, startSidebarDrag } from '../sidebar'
+import { IconBookmark, IconFolder, IconChevronLeft, IconChevronRight } from './icons'
 import { useMessage } from 'naive-ui'
 
 const props = defineProps({ obj: { type: Object, required: true } })
 const message = useMessage()
+
+const collapsed = computed(() => store.ui.sidebar.directory)
+const width = computed(() => sidebarWidth('directory'))
 
 const vols = ref([])
 const bookmarks = ref([])
@@ -106,11 +127,16 @@ async function openFolder() {
 
 <style scoped>
 .dir-side {
-  width: var(--sidebar-w); flex: none;
-  padding: 18px 16px;
+  position: relative; flex: none;   /* 宽度由行内 style 绑定（收起/拖动联动 --sidebar-w） */
+  padding: 12px 16px 18px;
   border-right: 1px solid var(--border);
   overflow-y: auto;
+}
+.dir-side.collapsed { overflow: hidden; padding: 0; }
+/* 内容列：承载原 .dir-side 的纵向流式布局，脚注用 margin-top:auto 压底 */
+.dir-side .side-inner {
   display: flex; flex-direction: column; gap: 18px;
+  min-height: 100%;
 }
 .side-title {
   font-size: 11px; font-weight: 700; letter-spacing: 1.5px;

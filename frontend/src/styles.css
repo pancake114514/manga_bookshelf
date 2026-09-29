@@ -25,6 +25,53 @@ img { -webkit-user-drag: none; }
 }
 .app-main { flex: 1; display: flex; min-height: 0; }
 
+/* ── 侧栏收起/拖动（TagSidebar 与 DirectorySidebar 共用） ── */
+/* 宽度行内绑定 + 过渡；拖动分隔条期间（.sidebar-dragging）全局禁用过渡避免拖尾 */
+.sidebar, .dir-side { transition: width .22s ease; }
+.sidebar-dragging .sidebar, .sidebar-dragging .dir-side,
+.sidebar-dragging .tb-logo-box { transition: none !important; }
+/* 内容列：收起时淡出并禁交互（保留 DOM 与滚动位置） */
+.side-inner { transition: opacity .15s ease; }
+.sidebar.collapsed .side-inner, .dir-side.collapsed .side-inner {
+  opacity: 0; visibility: hidden; pointer-events: none;
+}
+/* 头部收起钮行（右对齐） */
+.side-head { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+/* 收起/展开小按钮：quaternary 风格（无框，hover 出底色） */
+.side-toggle {
+  border: none; background: transparent; cursor: pointer;
+  color: var(--text2, inherit); opacity: .65;
+  padding: 5px; border-radius: 7px; display: inline-flex;
+  transition: background .15s, opacity .15s;
+}
+.side-toggle:hover { background: var(--chip-bg); opacity: 1; }
+/* 收起态细条：整条可点展开，竖排标签提示内容 */
+.side-rail {
+  display: none; position: absolute; inset: 0; z-index: 2;
+  flex-direction: column; align-items: center; gap: 10px; padding-top: 10px;
+  cursor: pointer; user-select: none;
+}
+.sidebar.collapsed .side-rail, .dir-side.collapsed .side-rail { display: flex; }
+.rail-label {
+  writing-mode: vertical-rl; font-size: 11px; letter-spacing: 3px;
+  opacity: .55;
+}
+.side-rail:hover .rail-label { opacity: .9; }
+/* 分隔条：1px 视觉边 + 7px 内向热区（aside 有 overflow，热区不能外扩否则被裁）；
+   hover/拖动时高亮 */
+.side-divider {
+  position: absolute; top: 0; bottom: 0; right: 0; width: 7px; z-index: 30;
+  cursor: col-resize; touch-action: none;
+}
+.side-divider::after {
+  content: ''; position: absolute; right: 0; top: 0; bottom: 0; width: 1px;
+  background: transparent; transition: background .15s;
+}
+.side-divider:hover::after, .sidebar-dragging .side-divider::after { background: var(--ms-primary); }
+@media (prefers-reduced-motion: reduce) {
+  .sidebar, .dir-side, .tb-logo-box, .side-inner { transition: none !important; }
+}
+
 /* 主题令牌（--bg/--text/...）由 theme.js 的 cssVars() 注入 .app-shell，此处不再重复定义 */
 
 /* ── 液态玻璃（Liquid Glass）令牌 ── */
