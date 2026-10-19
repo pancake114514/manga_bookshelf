@@ -47,3 +47,26 @@ git_commit_result.txt
 # 本地 AI 协作约定（不入库）
 agents.md
 AGENTS.md
+
+# AI 工具本地配置目录
+.agents/
+.augment/
+.claude/
+.codebuddy/
+.codewhale/
+.continue/
+.cursor/
+.factory/
+.gemini/
+.github/prompts/
+.kilocode/
+.kiro/
+.opencode/
+.qoder/
+.roo/
+.trae/
+.warp/
+.windsurf/
+
+# 设计对照 demo 截图（本地参考，不入库）
+liquid-glass-demo*.png
