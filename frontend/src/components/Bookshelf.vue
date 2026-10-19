@@ -471,7 +471,9 @@ async function doDelete(obj, deleteFiles) {
 </script>
 
 <style scoped>
-.shelf { flex: 1; overflow-y: auto; padding: 22px 26px 40px; position: relative; }
+/* 顶栏 scroll edge effect：滚动区向上延伸到悬浮顶栏下方，
+   padding-top = 58(顶栏) + 26(渐隐带) + 2(缓冲)，首屏内容始于磨砂带之外 */
+.shelf { flex: 1; overflow-y: auto; padding: 86px 26px 40px; position: relative; }
 .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
 .result-hint { font-size: 12px; opacity: .55; }
 .toolbar-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }

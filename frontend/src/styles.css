@@ -179,6 +179,55 @@ img { -webkit-user-drag: none; }
   }
 }
 
+/* ── 顶栏 scroll edge effect（书架视图，.scroll-edge 由 App.vue 加注） ──
+   顶栏悬浮于内容之上：margin 负值使 .app-main 上移 58px 与顶栏重叠，
+   书架/侧栏内容滚动时从顶栏下方穿过，被磨砂层模糊遮挡。
+   注意：必须写在此全局样式表——scoped 的 :global() 嵌套写法会丢失后代选择器。 */
+.scroll-edge .topbar {
+  margin-bottom: -58px;
+  border-bottom-color: transparent;
+}
+/* 磨砂层默认不渲染：非书架视图顶栏保持实底（继承 shell 背景） */
+.tb-glass { display: none; }
+/* 材质层向下延伸 26px 渐隐带（总高 84px）：0–46px 实色护住控件区，46→84 渐溶 */
+.scroll-edge .tb-glass {
+  display: block; position: absolute; top: 0; left: 0; right: 0; bottom: -26px;
+  pointer-events: none;
+  background: linear-gradient(to bottom,
+    var(--bg) 0, var(--bg) 46px,
+    color-mix(in srgb, var(--bg) 55%, transparent) 66px,
+    transparent 84px);
+}
+.scroll-edge .tb-glass .gl { position: absolute; inset: 0; }
+/* 三层递减模糊，各自用渐隐遮罩限定作用带：叠出「上强下弱」的连续磨砂 */
+.scroll-edge .tb-glass .gl-1 {
+  -webkit-backdrop-filter: blur(20px) saturate(170%);
+  backdrop-filter: blur(20px) saturate(170%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 40px, transparent 72px);
+  mask-image: linear-gradient(to bottom, #000 0, #000 40px, transparent 72px);
+}
+.scroll-edge .tb-glass .gl-2 {
+  -webkit-backdrop-filter: blur(10px) saturate(170%);
+  backdrop-filter: blur(10px) saturate(170%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 48px, transparent 78px);
+  mask-image: linear-gradient(to bottom, #000 0, #000 48px, transparent 78px);
+}
+.scroll-edge .tb-glass .gl-3 {
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 58px, transparent 84px);
+  mask-image: linear-gradient(to bottom, #000 0, #000 58px, transparent 84px);
+}
+/* 背板滤镜不可用 / 系统「降低透明度」开启：退回不透明实底栏，取消渐隐延伸带 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .scroll-edge .tb-glass { background: var(--bg); bottom: 0; }
+  .scroll-edge .tb-glass .gl { display: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .scroll-edge .tb-glass { background: var(--bg); bottom: 0; }
+  .scroll-edge .tb-glass .gl { display: none; }
+}
+
 /* ── 卡片增删过渡（与设计稿一致：整批右出 → 左入；动画施加见 Bookshelf） ── */
 @keyframes card-in {
   from { opacity: 0; transform: translateX(-64px); }
