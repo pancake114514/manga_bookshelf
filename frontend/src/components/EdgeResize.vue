@@ -2,17 +2,12 @@
   <!-- 无边框窗口的边缘缩放热区（仅桌面模式渲染）。
        按下即调用 Tauri 原生缩放循环，由 OS 驱动
        （DPI、最小尺寸、平滑度与系统边框行为一致，避免 JS 手算坐标的竞态）。 -->
-  <template v-if="ready">
-    <div v-for="e in EDGES" :key="e" :class="['edge', `edge-${e}`]"
-         @mousedown.prevent="begin(e)" />
-  </template>
+  <div v-for="e in EDGES" :key="e" :class="['edge', `edge-${e}`]"
+       @mousedown.prevent="begin(e)" />
 </template>
 
 <script setup>
-import { ref } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-
-const ready = ref(true) // Tauri 模式下始终可用
 
 const EDGES = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
 const DIRECTIONS = {

@@ -1,5 +1,6 @@
 import { reactive } from 'vue'
 import { api } from './api'
+import { SIDEBAR_MIN, SIDEBAR_MAX } from './constants'
 
 // UI 偏好的 config 键
 const CFG = {
@@ -15,7 +16,6 @@ const CFG = {
   sidebarWDir: 'ui_sidebar_w_directory',
 }
 const DENSITIES = ['compact', 'standard', 'large']
-const SIDEBAR_W_MIN = 180, SIDEBAR_W_MAX = 400
 const DEFAULT_SORT = { key: 'created_at', desc: true }
 
 function readConfig(key) {
@@ -55,6 +55,7 @@ export const store = reactive({
 
 export async function boot() {
   store.bootError = null
+  store.ready = false          // 重试时回到加载态，避免沿用上一轮的 ready 直接渲染空书架
   try {
     const st = await api.state()
     store.storageRoot = st.valid ? st.storage_root : null
@@ -77,9 +78,9 @@ export async function boot() {
     store.ui.sidebar.shelf = sbShelf === '1'
     store.ui.sidebar.directory = sbDir === '1'
     const wShelf = parseInt(sbWShelf, 10)
-    if (wShelf >= SIDEBAR_W_MIN && wShelf <= SIDEBAR_W_MAX) store.sidebarW.shelf = wShelf
+    if (wShelf >= SIDEBAR_MIN && wShelf <= SIDEBAR_MAX) store.sidebarW.shelf = wShelf
     const wDir = parseInt(sbWDir, 10)
-    if (wDir >= SIDEBAR_W_MIN && wDir <= SIDEBAR_W_MAX) store.sidebarW.directory = wDir
+    if (wDir >= SIDEBAR_MIN && wDir <= SIDEBAR_MAX) store.sidebarW.directory = wDir
     if (store.storageRoot) {
       store.tagValues = await api.tagValues().catch(() => ({}))
       await loadSeries()
@@ -131,7 +132,7 @@ export function setSidebarCollapsed(view, v) {
   api.setConfig(view === 'shelf' ? CFG.sidebarShelf : CFG.sidebarDir, v ? '1' : '0').catch(() => {})
 }
 export function setSidebarWidth(view, w) {
-  w = Math.round(Math.min(SIDEBAR_W_MAX, Math.max(SIDEBAR_W_MIN, w)))
+  w = Math.round(Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, w)))
   store.sidebarW[view] = w
   api.setConfig(view === 'shelf' ? CFG.sidebarWShelf : CFG.sidebarWDir, String(w)).catch(() => {})
 }

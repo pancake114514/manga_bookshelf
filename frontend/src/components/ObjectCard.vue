@@ -1,5 +1,5 @@
 <template>
-  <div class="obj-card" :class="{ 'is-r18': isR18, selected }" :style="animStyle"
+  <div class="obj-card" :class="{ 'is-r18': isR18 && !revealed, selected }" :style="animStyle"
        @click="selectMode && $emit('toggle-select', obj.id)"
        @dblclick.stop="!selectMode && $emit('open', obj)"
        @contextmenu.prevent="onContextMenu">
@@ -8,9 +8,9 @@
       <img v-if="coverOk" :src="coverUrl" loading="lazy" alt="" @error="coverOk = false">
       <template v-if="isR18 && !revealed">
         <span class="r18-badge">R-18</span>
-        <div class="r18-lock">
+        <div class="r18-lock" title="点击显示封面" @click.stop="$emit('reveal', obj)">
           <IconLock :size="20" />
-          <span>内容已隐藏</span>
+          <span>内容已隐藏，点击显示</span>
         </div>
       </template>
       <div v-if="selectMode" class="select-badge" :class="{ on: selected }">
@@ -57,6 +57,7 @@
 import { computed, reactive, ref, watch, h } from 'vue'
 import { NButton, NRate, NDropdown, useMessage } from 'naive-ui'
 import { api } from '../api'
+import { readProgressPct } from '../utils'
 import { IconLock, IconPlay, IconEdit, IconImage, IconTrash, IconCheck, IconStarFill, IconFolder } from './icons'
 
 const props = defineProps({
@@ -66,7 +67,7 @@ const props = defineProps({
   selectMode: { type: Boolean, default: false },
   selected: { type: Boolean, default: false },
 })
-const emit = defineEmits(['open', 'read', 'edit', 'cover', 'del', 'rate', 'toggle-select'])
+const emit = defineEmits(['open', 'read', 'edit', 'cover', 'del', 'rate', 'toggle-select', 'reveal'])
 const message = useMessage()
 
 // ── 右键菜单 ─────────────────────────────────────────────
@@ -108,12 +109,7 @@ const rating = computed(() => Number(props.obj.tags?.rating?.[0] || 0))
 const coverOk = ref(true)
 watch(() => props.obj.cover_url, () => { coverOk.value = true })
 // 阅读进度：last_read_idx 为 0 视为未读（无指示）；读至最后一页视为读完
-const progressPct = computed(() => {
-  const n = props.obj.image_count || 0
-  const idx = props.obj.last_read_idx || 0
-  if (n < 2 || idx <= 0) return 0
-  return Math.min(100, Math.round((idx / (n - 1)) * 100))
-})
+const progressPct = computed(() => readProgressPct(props.obj))
 const finished = computed(() => {
   const n = props.obj.image_count || 0
   return n > 0 && (props.obj.last_read_idx || 0) >= n - 1

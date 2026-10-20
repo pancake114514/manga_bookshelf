@@ -14,9 +14,6 @@
         <n-button type="primary" block :disabled="!path" :loading="saving" @click="confirm">
           确定并开始使用
         </n-button>
-        <n-text v-if="!bridgeOk" depth="3" class="hint">
-          当前为浏览器调试模式：无法打开系统目录选择框，可手动输入路径后回车
-        </n-text>
       </template>
     </n-card>
   </div>
@@ -24,7 +21,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import { NCard, NButton, NInput, NInputGroup, NAlert, NText, useMessage } from 'naive-ui'
+import { NCard, NButton, NInput, NInputGroup, NAlert, useMessage } from 'naive-ui'
 import { api, dialog } from '../api'
 import { store } from '../store'
 
@@ -32,7 +29,6 @@ const message = useMessage()
 const path = ref('')
 const warn = ref('')
 const saving = ref(false)
-const bridgeOk = ref(true)
 
 async function browse() {
   const dir = await dialog.pickDir('选择图库根目录')
@@ -43,7 +39,13 @@ async function confirm() {
   if (!path.value) return
   saving.value = true
   try {
-    await api.setup(path.value)
+    // 后端对不可写目录返回 Ok({ok:false})，不是 reject：必须查 ok 字段，
+    // 否则只读目录会被当作设置成功，重启后又回到本页
+    const res = await api.setup(path.value)
+    if (!res.ok) {
+      warn.value = res.error || '该目录不可写，请换一个目录'
+      return
+    }
     store.storageRoot = path.value
     message.success('图库目录已设置')
   } catch (e) {
@@ -62,5 +64,4 @@ async function confirm() {
 .setup-card { width: 520px; }
 .desc { margin-bottom: 16px; line-height: 1.7; }
 .warn { margin-top: 12px; }
-.hint { display: block; margin-top: 10px; font-size: 12px; }
 </style>

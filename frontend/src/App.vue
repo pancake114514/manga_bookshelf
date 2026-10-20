@@ -8,7 +8,14 @@
              :style="cssVars(store.theme)">
           <TitleBar v-if="showTitleBar" />
           <EdgeResize />
-          <template v-if="store.ready">
+          <div v-if="store.bootError" class="boot-error">
+            <n-result status="error" title="启动失败" :description="store.bootError">
+              <template #footer>
+                <n-button type="primary" @click="retry">重试</n-button>
+              </template>
+            </n-result>
+          </div>
+          <template v-else-if="store.ready">
             <SetupGate v-if="!store.storageRoot" />
             <template v-else>
               <TopBar v-if="store.view.name !== 'reader'" />
@@ -23,13 +30,6 @@
               <LibraryDialog v-model:show="store.ui.library" />
             </template>
           </template>
-          <div v-else-if="store.bootError" class="boot-error">
-            <n-result status="error" title="启动失败" :description="store.bootError">
-              <template #footer>
-                <n-button type="primary" @click="retry">重试</n-button>
-              </template>
-            </n-result>
-          </div>
           <div v-else class="boot-loading"><n-spin size="large" /></div>
         </div>
       </n-dialog-provider>

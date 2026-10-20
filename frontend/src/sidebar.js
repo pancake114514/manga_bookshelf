@@ -2,11 +2,7 @@
 // 状态存于 store（ui.sidebar / sidebarW），持久化由 store 的 setter 负责；
 // 拖动过程中只改内存态，松手才落盘（避免拖动期间高频写配置）
 import { store, setSidebarCollapsed, setSidebarWidth } from './store'
-
-export const SIDEBAR_RAIL = 28     // 收起后的细条宽
-export const SIDEBAR_MIN = 180     // 拖动调宽下限
-export const SIDEBAR_MAX = 400     // 拖动调宽上限
-export const SIDEBAR_SNAP = 110    // 拖到此宽度以下松手 → 吸附为收起态
+import { SIDEBAR_RAIL, SIDEBAR_MIN, SIDEBAR_MAX, SIDEBAR_SNAP } from './constants'
 
 // 当前视图侧栏的有效宽度（收起 → 细条宽）
 export function sidebarWidth(view) {

@@ -68,7 +68,10 @@
           <n-checkbox v-model:checked="e.checked" :disabled="batchRunning" />
           <div class="batch-item-main">
             <n-input v-model:value="e.name" size="small" placeholder="对象名称" :disabled="batchRunning" />
-            <span class="batch-sub">{{ e.folder }} · {{ e.image_count }} 张{{ e.image_count === 0 ? '（无图片，不建议导入）' : '' }}</span>
+            <span class="batch-sub">
+              <template v-if="e.count_error">{{ e.folder }} · 读取失败：{{ e.count_error }}（已默认不勾选）</template>
+              <template v-else>{{ e.folder }} · {{ e.image_count }} 张{{ e.image_count === 0 ? '（无图片，不建议导入）' : '' }}</template>
+            </span>
           </div>
         </div>
       </div>
@@ -114,8 +117,7 @@ import { store, refreshTagValues, loadSeries } from '../store'
 import TagFields from './TagFields.vue'
 import { IconFolder, IconLibrary, IconImage } from './icons'
 import { parseMangaName, applyParsedTags } from '../naming'
-
-const TAG_MERGE_CATS = ['work', 'author', 'character', 'cm', 'censored']
+import { CATS } from '../constants'
 
 const props = defineProps({ show: Boolean })
 const emit = defineEmits(['update:show', 'done'])
@@ -232,13 +234,21 @@ async function addEntries(paths) {
     if (existing.has(p)) continue
     existing.add(p)
     let count = 0
-    try { count = await api.countImages(p) } catch { /* 目录读不了按 0 处理 */ }
+    // 读取失败（无权限/网络盘断开）必须显式呈现，不能静默按 0 处理：
+    // 后端此时会创建 0 图对象并返回成功，用户看不到任何异常
+    let count_error = null
+    try {
+      count = await api.countImages(p)
+    } catch (e) {
+      count_error = e.message || String(e)
+    }
     const folder = p.split(/[\\/]/).filter(Boolean).pop() || p
     const parsed = parseMangaName(folder)
     added.push({
       path: p,
       folder,
       image_count: count,
+      count_error,
       name: parsed.full || folder,  // 对象名 = 全名（去数字编号），命名规则解析预填
       checked: count > 0,
     })
@@ -251,7 +261,7 @@ async function addEntries(paths) {
 function mergeBatchTags(entry) {
   const parsed = parseMangaName(entry.folder)
   const tags = {}
-  for (const cat of TAG_MERGE_CATS) {
+  for (const cat of CATS) {
     const merged = new Set()
     if (parsed[cat]) merged.add(parsed[cat])
     for (const v of newTags.value[cat] || []) merged.add(v)

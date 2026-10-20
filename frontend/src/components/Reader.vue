@@ -443,10 +443,10 @@ function onKey(e) {
 onMounted(() => {
   window.addEventListener('keydown', onKey)
   pokeChrome()
-  // 恢复阅读器偏好
-  api.getConfig(CFG_DOUBLE).then(r => { if (r.value === '1') double.value = true }).catch(() => {})
-  api.getConfig(CFG_ZOOM).then(r => { if (ZOOMS.includes(r.value)) zoom.value = r.value }).catch(() => {})
-  api.getConfig(CFG_DIR).then(r => { if (r.value === 'ltr') rtl.value = false }).catch(() => {})
+  // 恢复阅读器偏好（api.getConfig 已解包 ConfigResponse.value，这里直接拿字符串）
+  api.getConfig(CFG_DOUBLE).then(v => { if (v === '1') double.value = true }).catch(() => {})
+  api.getConfig(CFG_ZOOM).then(v => { if (ZOOMS.includes(v)) zoom.value = v }).catch(() => {})
+  api.getConfig(CFG_DIR).then(v => { if (v === 'ltr') rtl.value = false }).catch(() => {})
   preload(index.value)   // 进入时预热相邻页
   loadBookmarks()        // 加载当前对象书签
 })
@@ -457,13 +457,10 @@ onUnmounted(() => {
   clearTimeout(scrubTimer)
   win.exitFullscreen()                                         // 兜底还原全屏
   api.lastRead(reader.obj.id, index.value).catch(() => {})   // 退出前兜底落库
-  bookmarks.value = []                                        // 离开清理书签
 })
 
 function back() {
-  clearTimeout(saveTimer)
-  win.exitFullscreen()
-  api.lastRead(reader.obj.id, index.value).catch(() => {})
+  // 落库与全屏还原由 onUnmounted 统一兜底：覆盖返回、Escape、外部切换视图所有退出路径
   // 回到来处：详情页进入则回详情页，书架直达则回书架
   // （直达时 store.directory 未设置，固定跳 directory 会因渲染空数据而卡死）
   const to = reader.from === 'directory' && store.directory ? 'directory' : 'shelf'

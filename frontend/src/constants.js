@@ -13,5 +13,10 @@ export const CAT_LABELS = {
 
 export const catLabel = c => CAT_LABELS[c] || c
 
-export const R18_CAT = 'r18'
 export const RATING_CAT = 'rating'
+
+// 侧栏几何（单一真源）：store 校验持久化宽度与 sidebar 拖动共用同一上下限
+export const SIDEBAR_RAIL = 28     // 收起后的细条宽
+export const SIDEBAR_MIN = 180     // 拖动调宽下限
+export const SIDEBAR_MAX = 400     // 拖动调宽上限
+export const SIDEBAR_SNAP = 110    // 拖到此宽度以下松手 → 吸附为收起态

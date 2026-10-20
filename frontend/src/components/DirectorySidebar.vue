@@ -64,6 +64,7 @@ import { ref, computed, watch } from 'vue'
 import { api } from '../api'
 import { store } from '../store'
 import { sidebarWidth, toggleSidebar, startSidebarDrag } from '../sidebar'
+import { readProgressPct } from '../utils'
 import { IconBookmark, IconFolder, IconChevronLeft, IconChevronRight } from './icons'
 import { useMessage } from 'naive-ui'
 
@@ -92,12 +93,7 @@ async function load() {
   }
 }
 
-const progressPct = computed(() => {
-  const n = props.obj.image_count || 0
-  const idx = props.obj.last_read_idx || 0
-  if (n < 2 || idx <= 0) return 0
-  return Math.min(100, Math.round((idx / (n - 1)) * 100))
-})
+const progressPct = computed(() => readProgressPct(props.obj))
 
 // 跳转同系列其他卷：整册详情载入后替换 store.directory（保持 directory 视图）
 async function openVol(v) {

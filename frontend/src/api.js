@@ -11,7 +11,6 @@ export const api = {
   // 状态 / 初始化
   state: () => invoke('get_state'),
   setup: (path) => invoke('setup', { body: { path } }),
-  checkWritable: (path) => invoke('check_writable', { body: { path } }),
   validateName: (name) => invoke('validate_name', { body: { name } }),
 
   // 对象查询
@@ -44,8 +43,6 @@ export const api = {
   // 系列 / 分卷
   series: () => invoke('get_series'),
   seriesVolumes: (sid) => invoke('get_series_volumes', { sid }),
-  renameSeries: (id, newName) => invoke('rename_series', { id, body: { new_name: newName } }),
-  deleteSeries: (id) => invoke('delete_series', { id }),
 
   // 书签
   bookmarks: (oid) => invoke('list_bookmarks', { oid }),
@@ -121,16 +118,3 @@ export const dialog = {
     return Array.isArray(result) ? result : [result]
   },
 }
-
-// ── 常量 ─────────────────────────────────────────────────────────────────
-
-export const TAG_CATEGORIES = {
-  work: '作品',
-  author: '作者',
-  character: '角色',
-  cm: 'CM',
-  censored: '修正',
-  r18: 'R-18',
-}
-
-export const TAG_CATEGORY_ORDER = ['work', 'author', 'character', 'cm', 'censored', 'r18']

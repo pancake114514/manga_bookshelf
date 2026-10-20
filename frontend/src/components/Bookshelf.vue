@@ -41,7 +41,7 @@
         :revealed="revealedSet.has(o.id)"
         :select-mode="selectMode" :selected="selected.has(o.id)"
         @open="openDir" @read="openReader" @edit="editObj" @cover="changeCover" @del="delObj"
-        @rate="rateObj" @toggle-select="toggleSelect" />
+        @rate="rateObj" @toggle-select="toggleSelect" @reveal="revealObj" />
     </div>
 
     <!-- 系列分组视图 -->
@@ -58,7 +58,7 @@
             :revealed="revealedSet.has(o.id)"
             :select-mode="selectMode" :selected="selected.has(o.id)"
             @open="openDir" @read="openReader" @edit="editObj" @cover="changeCover" @del="delObj"
-            @rate="rateObj" @toggle-select="toggleSelect" />
+            @rate="rateObj" @toggle-select="toggleSelect" @reveal="revealObj" />
         </div>
       </section>
     </template>
@@ -141,6 +141,7 @@ function later(fn, ms) {
   animTimers.add(t)
   return t
 }
+// R-18 封面遮罩解除集合：会话内按卡片记录，点击遮罩即解除该卡片模糊（不落库）
 const revealedSet = ref(new Set())
 const editShow = ref(false)
 const editTarget = ref(null)
@@ -437,6 +438,11 @@ async function openReader(obj) {
 function editObj(obj) {
   editTarget.value = obj
   editShow.value = true
+}
+
+function revealObj(obj) {
+  if (revealedSet.value.has(obj.id)) return
+  revealedSet.value = new Set([...revealedSet.value, obj.id])
 }
 
 async function changeCover(obj) {

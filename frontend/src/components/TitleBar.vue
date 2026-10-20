@@ -7,12 +7,8 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
 import { barMouseDown } from '../windowState'
-import { syncMaximized } from '../windowState'
 import WindowControls from './WindowControls.vue'
-
-onMounted(() => syncMaximized())
 </script>
 
 <style scoped>

@@ -181,10 +181,11 @@ img { -webkit-user-drag: none; }
   font-size: 10px; font-weight: 800; letter-spacing: 1px;
 }
 .r18-lock {
-  position: absolute; inset: 0; z-index: 2;
+  position: absolute; inset: 0; z-index: 4;   /* 压在 hover-overlay(3) 之上：遮罩期只允许点击解除 */
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
   color: rgba(255,255,255,.92); font-size: 12px;
   background: rgba(0,0,0,.25);
+  cursor: pointer;
 }
 .hover-overlay {
   position: absolute; inset: 0; z-index: 3;
@@ -210,17 +211,7 @@ img { -webkit-user-drag: none; }
   margin-top: 4px; font-size: 11px;
 }
 
-/* 阅读器 */
-.reader-stage {
-  flex: 1; min-height: 0;
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer; position: relative;
-}
-.reader-stage img {
-  max-width: 100%; max-height: 100%;
-  object-fit: contain;
-  user-select: none; -webkit-user-drag: none;
-}
+/* 阅读器样式见 Reader.vue（.reader-stage 及缩放模式，组件 scoped 内自成一体的真源） */
 
 /* 滚动条 */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
