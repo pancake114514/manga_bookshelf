@@ -1,6 +1,6 @@
 [package]
 name = "mangashelf"
-version = "0.1.0"
+version = "0.1.1"
 description = "本地漫画管理器"
 authors = ["pancake114514"]
 edition = "2021"
