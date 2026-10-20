@@ -1,7 +1,13 @@
 # MangaShelf — 本地漫画管理器
 
-基于 **Tauri 2 + Rust + Vue3 + Naive UI** 的本地漫画/图片管理工具。
+基于 **Tauri 2 + Rust + Vue 3 + Naive UI** 的本地漫画/图片管理工具。
 原 Python (FastAPI + pywebview) 版本的核心逻辑已完全用 Rust 重写，窗口壳迁移到 Tauri 2 无边框窗口。
+
+## 界面
+
+Minimalism & Swiss Style：纯黑白单色 + 瑞士红单一强调色，直角、无阴影/渐变/模糊；
+字体 Inter（回退 Helvetica Neue / Segoe UI / 微软雅黑）。
+深/浅主题令牌统一在 `frontend/src/theme.js`，同一批值同时驱动 Naive UI 主题与 CSS 变量。
 
 ## 功能
 
@@ -9,6 +15,7 @@
 - 封面等尺寸网格（5:7），紧凑/标准/大图三档密度，固定列宽不随窗口伸缩
 - 搜索（对象名/标签值/系列名）+ 搜索建议（标注命中类别：作品/作者/系列…）
 - 侧栏筛选：标签类别多选、评分（N 星及以上）、系列名，可组合
+- 侧栏可收起为细条、拖动调宽（180–400px，Ctrl+B 切换），宽度与收起状态分视图持久化
 - 排序：添加时间/名称/页数/评分/阅读进度；渐进渲染，大库流畅
 - 系列与分卷：对象归入系列并编号，同系列卷号查重，书架平铺/系列分组双视图（可折叠）
 - 卡片阅读进度可视化：在读进度条 / 读完角标 / 未读无标记；悬浮一键续读（直达上次进度）
@@ -41,11 +48,12 @@
 ## 项目结构
 
 ```
-manga_bookshelf/
+manga_shelf/
 ├── src-tauri/                  # Rust 后端 + Tauri 配置
 │   ├── tauri.conf.json         # 窗口/打包配置（版本号）
 │   ├── capabilities/           # Tauri 权限配置
 │   └── src/
+│       ├── main.rs             # 程序入口
 │       ├── lib.rs              # 应用初始化、图片协议（异步缩略图）、单实例、关闭拦截
 │       ├── config.rs           # 常量配置
 │       ├── db.rs               # SQLite 数据层（版本化 schema 迁移 v1→v3）
@@ -53,16 +61,18 @@ manga_bookshelf/
 │       ├── library_manager.rs  # 库迁移三阶段
 │       ├── commands.rs         # Tauri commands（IPC 入口）
 │       ├── file_ops.rs         # 文件操作（保留原文件名、重名递增、.thumb 识别）
-│       └── thumbnail.rs        # 缩略图（并发限流 + 大比率快速路径）
-├── frontend/                   # Vue3 + Vite + Naive UI
-│   ├── naming.js               # 文件夹名解析（独立模块，带单测）
-│   └── src/
-│       ├── api.js              # Tauri IPC 封装
-│       ├── store.js            # 全局状态（主题/筛选/视图/系列）
-│       └── components/         # 书架/详情/阅读器/侧栏/各对话框等组件
+│       └── thumbnail.rs        # 缩略图（并发限流 + 大比率快速路径 + EXIF 方向）
+├── frontend/                   # Vue 3 + Vite 6 + Naive UI
+│   ├── src/
+│   │   ├── api.js              # Tauri IPC 封装
+│   │   ├── store.js            # 全局状态（主题/筛选/视图/系列）
+│   │   ├── theme.js            # 设计令牌单一真源（Naive UI + CSS 变量）
+│   │   ├── naming.js           # 文件夹名解析（独立模块，带单测）
+│   │   └── components/         # 书架/详情/阅读器/侧栏/各对话框等组件
+│   └── test/                   # naming.js 单测（node --test）
+├── design/                     # 设计稿与风格对照 demo
 ├── dev.mjs                     # 开发模式随机端口启动器（20000-60000）
-├── frontend/test/              # naming.js 单测（node 直接运行）
-└── .github/workflows/          # CI（构建+测试）与 Release（tag 自动打包）
+└── .github/workflows/          # CI（构建+测试）与 Release（tag/手动触发打包）
 ```
 
 ## 数据库
@@ -74,11 +84,11 @@ manga_bookshelf/
 
 ## 开发
 
-前置要求：[Rust stable](https://rustup.rs/)、[Node.js](https://nodejs.org/) ≥ 18
+前置要求：[Rust stable](https://rustup.rs/)、[Node.js](https://nodejs.org/) ≥ 20（与 CI 一致）
 
 ```bash
-# 前端依赖（npmmirror 镜像）
-cd frontend && npm install --registry=https://registry.npmmirror.com
+# 前端依赖（有锁文件，推荐 npm ci；国内网络可加 --registry=https://registry.npmmirror.com）
+cd frontend && npm ci && cd ..
 
 # 开发模式（随机端口启动器，规避 vite 端口残留冲突）
 node dev.mjs
@@ -88,22 +98,11 @@ node dev.mjs
 
 # 检查与测试
 cd src-tauri && cargo clippy --all-targets -- -D warnings && cargo test
-node --test frontend/test/naming.test.mjs
+cd .. && node --test frontend/test/naming.test.mjs
 
 # 生产构建（本地）
 ./frontend/node_modules/.bin/tauri build
 # 产物：src-tauri/target/release/bundle/{nsis,msi}/
-```
-
-## 发布
-
-CI 自动打包：推送 `v*` tag（如 `v0.1.0`）后，GitHub Actions 自动构建并发布
-NSIS 安装器与 MSI 到 [Releases](https://github.com/pancake114514/manga_bookshelf/releases)。
-tag 版本须与 `tauri.conf.json` / `Cargo.toml` / `package.json` 三处一致（工作流内置校验）。
-
-```bash
-# 更新三处版本号后：
-git tag v0.1.0 && git push origin v0.1.0
 ```
 
 ## 支持格式
