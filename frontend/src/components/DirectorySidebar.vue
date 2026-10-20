@@ -61,7 +61,6 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { NButton } from 'naive-ui'
 import { api } from '../api'
 import { store } from '../store'
 import { sidebarWidth, toggleSidebar, startSidebarDrag } from '../sidebar'
@@ -169,7 +168,7 @@ async function openFolder() {
   font-size: 12px; font-weight: 600;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.vol-row.current .vol-label { color: var(--ms-primary); }
+.vol-row.current .vol-label { color: var(--ms-accent-text); }
 .vol-sub { font-size: 11px; opacity: .55; margin-top: 2px; }
 
 /* 书签列表 */
@@ -180,7 +179,7 @@ async function openFolder() {
   font-size: 12px; transition: background .15s;
 }
 .bm-row:hover { background: var(--chip-bg); }
-.bm-ico { color: var(--ms-primary); display: inline-flex; flex: none; }
+.bm-ico { color: var(--ms-accent-text); display: inline-flex; flex: none; }
 .bm-page { flex: none; font-weight: 600; opacity: .85; }
 .bm-note {
   min-width: 0; opacity: .6;

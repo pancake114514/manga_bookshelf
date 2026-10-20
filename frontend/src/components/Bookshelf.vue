@@ -50,7 +50,7 @@
         <div class="group-header" @click="toggleCollapse(g.key)">
           <IconChevronRight class="chev" :class="{ open: !collapsed.has(g.key) }" :size="14" />
           <span class="g-name">{{ g.name }}</span>
-          <span class="g-count">共 {{ g.members.length }} 卷</span>
+          <span class="g-count">共 {{ g.total }} 卷</span>
         </div>
         <div v-show="!collapsed.has(g.key)" class="shelf-grid" :class="[phase, `density-${store.density}`]">
           <ObjectCard v-for="(o, i) in g.members" :key="o.id" :obj="o"
@@ -134,6 +134,13 @@ function onShelfScroll(e) {
 // 超过此数量跳过整批右出左入过渡（几百张卡片的级联动画本身即卡顿源）
 const ANIM_MAX = 300
 const phase = ref('')            // '' | 'leaving' | 'entering'
+// 过渡动画定时器统一登记，卸载时清理（防止回调在组件销毁后仍写 phase）
+const animTimers = new Set()
+function later(fn, ms) {
+  const t = setTimeout(() => { animTimers.delete(t); fn() }, ms)
+  animTimers.add(t)
+  return t
+}
 const revealedSet = ref(new Set())
 const editShow = ref(false)
 const editTarget = ref(null)
@@ -199,14 +206,23 @@ const groups = computed(() => {
       ungrouped.push(o)
     }
   }
-  const out = []
+  const full = []
   for (const [name, members] of [...map.entries()].sort((a, b) => a[0].localeCompare(b[0], 'zh'))) {
-    out.push({ key: name, name, members: sortInGroup(members) })
+    full.push({ key: name, name, members: sortInGroup(members) })
   }
   if (ungrouped.length) {
-    out.push({ key: NONE_KEY, name: '未分组', members: sortInGroup(ungrouped) })
+    full.push({ key: NONE_KEY, name: '未分组', members: sortInGroup(ungrouped) })
   }
-  return out
+  // 与平铺视图同源的渐进渲染预算：按组顺序分配 renderCount，折叠组不占预算。
+  // total 保留全量计数（头部「共 N 卷」），members 仅截断后的渲染列表。
+  let budget = renderCount.value
+  return full.map(g => {
+    const take = collapsed.value.has(g.key)
+      ? 0
+      : Math.min(g.members.length, Math.max(0, budget))
+    budget -= take
+    return { key: g.key, name: g.name, total: g.members.length, members: g.members.slice(0, take) }
+  })
 })
 
 // 多选
@@ -242,17 +258,17 @@ watch(() => [store.filters, store.keyword, store.r18], async () => {
   if (!shown.value.length) {           // 首次或从空态恢复：直接入场动画
     shown.value = sorted
     phase.value = 'entering'
-    setTimeout(() => { if (my === seq) phase.value = '' }, 900)
+    later(() => { if (my === seq) phase.value = '' }, 900)
     return
   }
 
   phase.value = 'leaving'
   const wait = OUT_MS + shown.value.length * 12
-  setTimeout(() => {
+  later(() => {
     if (my !== seq) return
     shown.value = sorted
     phase.value = 'entering'
-    setTimeout(() => { if (my === seq) phase.value = '' }, 900)
+    later(() => { if (my === seq) phase.value = '' }, 900)
   }, wait)
 })
 
@@ -274,10 +290,13 @@ async function silentReload() {
 watch(() => store.reloadTick, () => { silentReload() })
 
 onMounted(async () => {
-  shown.value = applySort(await fetchObjects().catch(() => []))
+  const my = ++seq
+  const list = await fetchObjects().catch(() => [])
+  if (my !== seq) return                      // 启动请求期间筛选已变化，丢弃旧结果
+  shown.value = applySort(list)
   if (shown.value.length > ANIM_MAX) return   // 大库首屏不做入场动画
   phase.value = 'entering'
-  setTimeout(() => { phase.value = '' }, 900)
+  later(() => { if (my === seq) phase.value = '' }, 900)
 })
 
 // ── 多选 ──
@@ -386,7 +405,11 @@ function onKey(e) {
   if (e.key === 'Escape' && selectMode.value && !batchShow.value) exitSelect()
 }
 onMounted(() => window.addEventListener('keydown', onKey))
-onUnmounted(() => window.removeEventListener('keydown', onKey))
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKey)
+  for (const t of animTimers) clearTimeout(t)
+  animTimers.clear()
+})
 
 // ── 卡片操作 ──
 async function openDir(obj) {
@@ -417,12 +440,10 @@ function editObj(obj) {
 }
 
 async function changeCover(obj) {
-  let path = await fileDialog.pickFiles('选择封面图片')
-  if (path === null) {                 // 浏览器模式降级
-    path = window.prompt('输入封面图片完整路径：')
-    if (!path) return
-  }
-  if (!path) return
+  // pickFiles 恒返回数组（[] 或 [path]），cover_image 后端为 String，必须取首元素
+  const paths = await fileDialog.pickFiles('选择封面图片')
+  if (!paths.length) return
+  const path = paths[0]
   try {
     await api.updateObject(obj.id, { cover_image: path })
     message.success('封面已更新')

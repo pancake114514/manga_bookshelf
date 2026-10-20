@@ -79,7 +79,7 @@ const menuOptions = [
   { label: '编辑对象信息', key: 'edit', icon: renderIcon(IconEdit) },
   { label: '设置封面图', key: 'cover', icon: renderIcon(IconImage) },
   { type: 'divider' },
-  { label: '删除', key: 'del', icon: renderIcon(IconTrash), props: { style: 'color: #d03050;' } },
+  { label: '删除', key: 'del', icon: renderIcon(IconTrash), props: { style: 'color: var(--ms-accent-text);' } },
 ]
 
 function onContextMenu(e) {

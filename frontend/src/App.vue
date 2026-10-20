@@ -38,7 +38,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, watchEffect } from 'vue'
 import { NConfigProvider, NMessageProvider, NDialogProvider, NSpin, NResult, NButton } from 'naive-ui'
 import { store, boot } from './store'
 import { naiveTheme, themeOverrides, cssVars } from './theme'
@@ -54,6 +54,13 @@ import DirectoryView from './components/DirectoryView.vue'
 import Reader from './components/Reader.vue'
 import ImportDialog from './components/ImportDialog.vue'
 import LibraryDialog from './components/LibraryDialog.vue'
+
+// 设计令牌同步到 <html>：Naive UI 的下拉菜单/气泡等会 teleport 到 body，
+// 只绑定在 .app-shell 上的 --ms-* 变量在那些弹层里取不到值（颜色会回退成继承色）
+watchEffect(() => {
+  const root = document.documentElement
+  for (const [k, v] of Object.entries(cssVars(store.theme))) root.style.setProperty(k, v)
+})
 
 // 主界面侧栏：书架用标签筛选；详情页用对象侧栏（组件内部按内容动态隐藏）
 const showSidebar = computed(() => store.view.name === 'shelf')

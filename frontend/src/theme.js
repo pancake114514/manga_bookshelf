@@ -19,7 +19,8 @@ export const darkCommon = {
   chipBgColor: '#262626',
   overlayColor: 'rgba(0,0,0,.72)',
   r18Color: '#D2232F',
-  starColor: '#D2232F',
+  starColor: '#F0626B',
+  accentTextColor: '#F0626B',   // 红字/图标在深底上需提亮（#D2232F 对比度仅 ~3.5:1）
   textColorBase: '#f2f2f2',
   textColor1: '#f2f2f2',
   textColor2: '#a8a8a8',
@@ -43,6 +44,7 @@ export const lightCommon = {
   overlayColor: 'rgba(255,255,255,.85)',
   r18Color: '#D2232F',
   starColor: '#D2232F',
+  accentTextColor: '#B81C27',   // 红字在浅底上略加深以提升可读性
   textColorBase: '#000000',
   textColor1: '#000000',
   textColor2: '#555555',
@@ -66,6 +68,7 @@ const CSS_VARS = {
   '--ms-overlay': 'overlayColor',
   '--ms-danger': 'r18Color',
   '--ms-star': 'starColor',
+  '--ms-accent-text': 'accentTextColor',
 }
 
 export function naiveTheme(theme) {

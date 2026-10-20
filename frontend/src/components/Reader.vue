@@ -62,7 +62,7 @@
     </div>
 
     <div ref="stageEl" class="reader-stage" :class="[`zoom-${zoom}`, { panning: isPanning }]"
-         @wheel="onWheel" @pointerdown="onStagePointerDown" @pointermove="onStagePointerMove"
+         @pointerdown="onStagePointerDown" @pointermove="onStagePointerMove"
          @pointerup="onStagePointerUp" @pointercancel="onStagePointerUp" @dblclick="onStageDblClick">
       <!-- 空对象兜底：0 图时给出明确空态而非无限转圈（正常入口已拦截，此处防御外部删图等异常数据） -->
       <div v-if="!total" class="empty-page">该对象没有内容</div>

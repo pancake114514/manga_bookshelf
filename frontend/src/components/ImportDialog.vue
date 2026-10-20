@@ -393,5 +393,5 @@ async function run() {
   font-size: 12px;
 }
 .batch-result.ok { color: var(--ms-primary); }
-.batch-result.err { color: var(--ms-danger); word-break: break-word; }
+.batch-result.err { color: var(--ms-accent-text); word-break: break-word; }
 </style>

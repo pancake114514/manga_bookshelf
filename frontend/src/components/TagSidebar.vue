@@ -115,7 +115,7 @@ function clearAll() { store.filters = {} }
 }
 .sidebar.collapsed { overflow: hidden; padding: 0; }
 .r18-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
-.r18-label { color: var(--ms-danger); font-size: 13px; font-weight: 600; }
+.r18-label { color: var(--ms-accent-text); font-size: 13px; font-weight: 600; }
 .group { margin-bottom: 16px; }
 .group-title {
   font-size: 11px; font-weight: 700; letter-spacing: 1.5px;

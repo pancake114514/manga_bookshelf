@@ -169,13 +169,16 @@ async function onSeriesChange(val) {
   if (!name) { volume.value = null; return }
   const s = (store.series || []).find(x => x.name === name)
   if (!s) { volume.value = 1; return }
+  // 请求期间用户可能已手动改卷号：仅当值未被改动时才回填，尊重用户输入
+  const snapshot = volume.value
   try {
     const vols = await api.seriesVolumes(s.id)
+    if (volume.value !== snapshot) return
     const own = s.id === props.obj.series_id ? props.obj.volume : null
     const nums = vols.map(v => v.volume).filter(v => v != null && v !== own)
     volume.value = nums.length ? Math.max(...nums) + 1 : 1
   } catch {
-    volume.value = 1
+    if (volume.value === snapshot) volume.value = 1
   }
 }
 
@@ -242,7 +245,7 @@ async function save() {
 /* R-18 行内布局：标签与开关同行居中，避免开关独占一行视觉错位 */
 .r18-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .r18-row .field-label { margin-top: 0; }
-.r18-label { color: var(--ms-danger); }
+.r18-label { color: var(--ms-accent-text); }
 .volume-input { width: 160px; }
 .footer { display: flex; justify-content: flex-end; gap: 10px; }
 </style>

@@ -45,7 +45,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch, onMounted } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { NButton, NRate } from 'naive-ui'
 import { api } from '../api'
 import { store } from '../store'
@@ -55,14 +55,17 @@ import { IconBack, IconPlay, IconBookmark } from './icons'
 const props = defineProps({ obj: { type: Object, required: true } })
 const detail = computed(() => props.obj)
 
-// 书签页集合：卡片右上角显示标记（从阅读器返回时组件重建会重新拉取）
+// 书签页集合：卡片右上角显示标记。
+// 侧栏切换同系列分卷时组件不重建（仅 props.obj 变化），必须随 id 重载，
+// 否则新卷会沿用上一卷的书签标记
 const bmSet = ref(new Set())
-onMounted(async () => {
+async function loadBookmarks() {
   try {
     const list = await api.bookmarks(props.obj.id)
     bmSet.value = new Set(list.map(b => b.page_idx))
-  } catch { /* 书签拉取失败不阻塞详情页 */ }
-})
+  } catch { bmSet.value = new Set() }
+}
+watch(() => props.obj.id, loadBookmarks, { immediate: true })
 
 // 封面可用性：加载失败置 false 隐藏 img；封面 URL 变化（换图）时复位重试
 const coverOk = ref(true)
