@@ -274,6 +274,18 @@ where
     d.deserialize_option(OptOptVisitor(std::marker::PhantomData))
 }
 
+/// 封面缓存版本：由生效封面的路径派生。
+/// WebView 对相同 URL 复用缓存，换封面后路径必变而 URL 不变会继续显示旧图，
+/// 故把路径摘要作为查询参数，路径一变 URL 即变（设置封面/封面失效回退首图都覆盖）。
+fn cover_version(o: &AssembledObject) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(o.cover_image.as_deref().unwrap_or("").as_bytes());
+    hasher.update(b"|");
+    hasher.update(o.first_image.as_deref().unwrap_or("").as_bytes());
+    hex::encode(&hasher.finalize()[..6])
+}
+
 fn serialize_object(o: &AssembledObject) -> ObjectSummary {
     ObjectSummary {
         id: o.id.clone(),
@@ -283,7 +295,7 @@ fn serialize_object(o: &AssembledObject) -> ObjectSummary {
         image_count: o.image_count,
         last_read_idx: o.last_read_idx,
         created_at: o.created_at.clone(),
-        cover_url: asset_url(&format!("object/{}/cover", o.id)),
+        cover_url: asset_url(&format!("object/{}/cover?v={}", o.id, cover_version(o))),
         series_id: o.series_id.clone(),
         series_name: o.series_name.clone(),
         volume: o.volume,
@@ -420,7 +432,11 @@ pub fn get_object_detail(
         image_count,
         last_read_idx: obj.last_read_idx,
         created_at: obj.created_at.clone(),
-        cover_url: asset_url(&format!("object/{}/cover", obj.id)),
+        cover_url: asset_url(&format!(
+            "object/{}/cover?v={}",
+            obj.id,
+            cover_version(&obj)
+        )),
         storage_path: obj.storage_path.clone(),
         images: images
             .iter()
@@ -661,10 +677,13 @@ pub fn set_config_value(
 ///   macOS/Linux: mangashelf://localhost/object/{oid}/cover
 /// 统一提取 /object/{oid}/... 路径部分进行解析。
 pub fn resolve_image_url(svc: &LibraryService, url: &str) -> Result<(String, Option<(u32, u32)>), String> {
+    // 先剥离查询串/片段：封面 URL 带 ?v=<版本> 用于绕过 WebView 缓存，
+    // 若直接按完整 URL 分割路径，"cover?v=xxx" 会被当成 kind 而匹配失败
+    let bare = url.split(['?', '#']).next().unwrap_or(url);
     // 提取 path 部分：找到 "/object/" 的位置
-    let path = url
+    let path = bare
         .find("/object/")
-        .map(|i| &url[i + 1..])  // 去掉前导 '/'
+        .map(|i| &bare[i + 1..])  // 去掉前导 '/'
         .ok_or("无效的 URL: 缺少 /object/ 路径")?;
 
     // 分割路径
@@ -815,7 +834,68 @@ pub fn open_in_explorer(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sample(cover: Option<&str>) -> crate::db::AssembledObject {
+        crate::db::AssembledObject {
+            id: "oid".into(),
+            obj_type: "directory".into(),
+            name: "作品".into(),
+            source_path: None,
+            storage_path: None,
+            cover_image: cover.map(|s| s.to_string()),
+            last_read_idx: 0,
+            created_at: Some("2026-01-01".into()),
+            series_id: None,
+            series_name: None,
+            volume: None,
+            tags: crate::db::Tags(Default::default()),
+            image_count: 0,
+            first_image: Some("/lib/封面目录/0001.png".into()),
+        }
+    }
+
+    /// 封面 URL 的版本参数必须随封面路径变化，否则 WebView 会一直显示缓存旧图
+    #[test]
+    fn cover_version_changes_with_cover_path() {
+        let v1 = cover_version(&sample(Some("/lib/封面目录/a.png")));
+        let v2 = cover_version(&sample(Some("/lib/封面目录/b.png")));
+        assert_ne!(v1, v2, "换封面路径必须改变缓存版本");
+        assert_eq!(v1, cover_version(&sample(Some("/lib/封面目录/a.png"))), "同路径版本应稳定");
+        assert_ne!(v1, cover_version(&sample(None)), "无显式封面（回退首图）版本应不同");
+    }
     use std::fs;
+
+    /// 封面 URL 的缓存参数（?v=...）不能被路径解析当成 kind，
+    /// 否则所有封面请求都会 404（封面整片不显示）
+    #[test]
+    fn resolve_image_url_ignores_cache_buster_query() {
+        let d = std::env::temp_dir().join(format!("ms_url_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(d.join("src")).unwrap();
+        image::RgbImage::from_pixel(40, 60, image::Rgb([120, 30, 30]))
+            .save(d.join("src/p.png"))
+            .unwrap();
+        fs::create_dir_all(d.join("storage")).unwrap();
+        let svc = LibraryService::new(d.join("lib.db").to_str().unwrap()).unwrap();
+        let oid = uuid::Uuid::new_v4().to_string();
+        svc.import_directory(
+            &oid,
+            "封面对象",
+            &crate::db::Tags(Default::default()),
+            d.join("src").to_str().unwrap(),
+            d.join("storage").to_str().unwrap(),
+            true,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let base = format!("http://mangashelf.localhost/object/{oid}/cover");
+        let (with_q, _) = resolve_image_url(&svc, &format!("{base}?v=abc123"))
+            .expect("带缓存参数的封面 URL 应能解析");
+        let (without_q, _) = resolve_image_url(&svc, &base).expect("无查询串应能解析");
+        assert_eq!(with_q, without_q, "缓存参数不应影响解析结果");
+        assert!(std::path::Path::new(&with_q).is_file(), "应解析到真实封面文件");
+    }
 
     #[test]
     fn count_images_counts_supported_only() {

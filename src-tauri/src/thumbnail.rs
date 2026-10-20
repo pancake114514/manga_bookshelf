@@ -19,10 +19,15 @@ pub fn get_thumb_cache_dir(base_dir: &str) -> String {
     cache.to_string_lossy().to_string()
 }
 
-/// 缓存前缀（基于源路径+尺寸的 hash，不含 mtime），用于按路径精确清理所有版本
+/// 缩略图生成算法版本。算法语义变化时递增，使全部旧缓存自动失效。
+/// v2：解码时应用 EXIF 方向（v1 生成的带旋转标记照片缩略图方向错误）
+const THUMB_GEN_VERSION: u32 = 2;
+
+/// 缓存前缀（基于生成器版本+源路径+尺寸的 hash，不含 mtime），
+/// 用于按路径精确清理所有版本；版本参与哈希保证算法升级后旧缓存不再命中
 fn thumb_prefix(cache_dir: &str, source_path: &str, size: (u32, u32)) -> PathBuf {
     let mut hasher = Sha256::new();
-    hasher.update(format!("{source_path}{size:?}").as_bytes());
+    hasher.update(format!("v{THUMB_GEN_VERSION}:{source_path}{size:?}").as_bytes());
     let h = hex::encode(&hasher.finalize()[..16]);
     Path::new(cache_dir).join(h)
 }
@@ -151,14 +156,15 @@ pub fn clear_cached_thumbs(cache_dir: &str, source_paths: &[String]) -> usize {
         Err(_) => return 0,
     };
 
-    // 构建前缀集合
+    // 构建前缀集合：必须复用 thumb_prefix，保证与生成侧同一套哈希
+    // （含生成器版本；两处各算一份会在版本变化时静默失配，清理失效）
     use std::collections::HashSet;
     let mut prefixes: HashSet<String> = HashSet::new();
     for src in source_paths {
         for size in &[THUMBNAIL_SIZE, GRID_THUMB_SIZE, COVER_THUMB_SIZE] {
-            let mut hasher = Sha256::new();
-            hasher.update(format!("{src}{size:?}").as_bytes());
-            prefixes.insert(hex::encode(&hasher.finalize()[..16]));
+            if let Some(name) = thumb_prefix(cache_dir, src, *size).file_name() {
+                prefixes.insert(name.to_string_lossy().to_string());
+            }
         }
     }
 
@@ -271,6 +277,47 @@ mod tests {
         let d = std::env::temp_dir().join(format!("ms_test_th_{tag}_{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    /// 生成器版本必须参与缓存键：算法升级（如 EXIF 方向修复）后，
+    /// 旧版本生成的缓存不能被复用，否则整片缩略图仍显示旧方向
+    #[test]
+    fn legacy_cache_without_version_is_ignored() {
+        use sha2::{Digest, Sha256};
+        let d = tmp("legacy");
+        let src = d.join("a.png");
+        image::RgbImage::from_pixel(120, 180, image::Rgb([7, 7, 7]))
+            .save(&src)
+            .unwrap();
+        let cache = d.join("cache");
+        fs::create_dir_all(&cache).unwrap();
+
+        // 复刻 v1 的缓存文件名（哈希不含版本，mtime/size 与真实源一致）
+        let mut h = Sha256::new();
+        h.update(format!("{}{:?}", src.to_string_lossy(), crate::config::THUMBNAIL_SIZE).as_bytes());
+        let legacy_hash = hex::encode(&h.finalize()[..16]);
+        let meta = fs::metadata(&src).unwrap();
+        let mtime = meta
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let legacy = cache.join(format!("{legacy_hash}__{mtime}_{}.jpg", meta.len()));
+        fs::write(&legacy, b"stale-thumb").unwrap();
+
+        let out = generate_thumbnail(
+            src.to_str().unwrap(),
+            cache.to_str().unwrap(),
+            crate::config::THUMBNAIL_SIZE,
+        )
+        .expect("应重新生成缩略图");
+        assert_ne!(
+            PathBuf::from(&out),
+            legacy,
+            "旧版本缓存不应被命中，必须按新键重新生成"
+        );
+        assert!(image::image_dimensions(&out).is_ok(), "新生成的文件应是有效图片");
     }
 
     #[test]
