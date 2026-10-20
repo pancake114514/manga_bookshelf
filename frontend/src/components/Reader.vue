@@ -418,7 +418,7 @@ function onWheel(e) {
   if (e.ctrlKey) return ctrlZoom(e)   // Ctrl+滚轮：自由缩放（各模式通用）
   if (zoom.value !== 'fit') return       // 滚动模式下滚轮用于滚动页面
   const now = performance.now()
-  if (now - lastWheelNav < 100) return
+  if (now - lastWheelNav < 75) return
   if (e.deltaY !== 0) { lastWheelNav = now; e.deltaY > 0 ? next() : prev(); return }
   if (e.deltaX === 0) return
   lastWheelNav = now
@@ -596,6 +596,7 @@ function onBarUp() {
 .filled { top: 18px; height: 4px; background: var(--ms-primary); }
 .knob {
   top: 12px; width: 16px; height: 16px;
+  border-radius: 50%;
   transform: translateX(50%);
   background: var(--card); border: 2px solid var(--ms-primary);
 }
