@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MangaShelf — Minimalism & Swiss Style Demo</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+  /* ── 设计令牌：Minimalism & Swiss Style ──
+     单色黑白 + 单一强调色；直角；无阴影无渐变；hairline 网格 */
+  :root {
+    --bg: #FFFFFF;
+    --ink: #000000;
+    --ink-2: #555555;
+    --ink-3: #999999;
+    --line: #E0E0E0;
+    --line-strong: #000000;
+    --accent: #E30613;          /* Swiss red：唯一强调色 */
+    --surface: #F5F5F5;
+    --radius: 0px;              /* 直角纪律 */
+    --shadow: none;             /* 无阴影纪律 */
+  }
+  html[data-theme="dark"] {
+    --bg: #000000;
+    --ink: #FFFFFF;
+    --ink-2: #AAAAAA;
+    --ink-3: #666666;
+    --line: #2A2A2A;
+    --line-strong: #FFFFFF;
+    --surface: #111111;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Inter', 'Helvetica Neue', 'Microsoft YaHei UI', sans-serif;
+    background: var(--bg); color: var(--ink);
+    display: flex; flex-direction: column;
+    transition: background .2s, color .2s;
+  }
+
+  /* ── 顶栏：大字标题 + 功能行 ── */
+  header {
+    border-bottom: 1px solid var(--line-strong);
+    padding: 28px 40px 0;
+  }
+  .masthead { display: flex; align-items: baseline; justify-content: space-between; }
+  .wordmark {
+    font-size: 42px; font-weight: 800; letter-spacing: -1.5px; line-height: 1;
+    text-transform: uppercase;
+  }
+  .wordmark em { font-style: normal; color: var(--accent); }
+  .theme-toggle {
+    width: 28px; height: 28px; border: 1px solid var(--ink);
+    background: var(--ink); cursor: pointer; border-radius: var(--radius);
+    position: relative; transition: background .2s;
+  }
+  .theme-toggle::after {
+    content: ''; position: absolute; inset: 6px;
+    background: var(--bg); transition: inherit;
+  }
+  html[data-theme="dark"] .theme-toggle { background: var(--bg); border-color: var(--bg); }
+  html[data-theme="dark"] .theme-toggle::after { background: var(--ink); }
+
+  .toolbar {
+    display: flex; align-items: center; gap: 24px;
+    padding: 20px 0 16px; margin-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+  .search {
+    flex: 1; max-width: 420px;
+    border: none; border-bottom: 2px solid var(--ink);
+    background: transparent; color: var(--ink);
+    font: inherit; font-size: 15px; padding: 6px 2px;
+    outline: none; border-radius: 0;
+  }
+  .search::placeholder { color: var(--ink-3); }
+  .tb-group { display: flex; align-items: center; gap: 16px; margin-left: auto; }
+  .tb-link {
+    font-size: 13px; font-weight: 500; color: var(--ink-2);
+    cursor: pointer; user-select: none; letter-spacing: .5px;
+    text-transform: uppercase; transition: color .2s;
+  }
+  .tb-link:hover, .tb-link.active { color: var(--ink); }
+  .tb-link.active { border-bottom: 2px solid var(--accent); padding-bottom: 2px; }
+  .btn {
+    font: inherit; font-size: 13px; font-weight: 600; letter-spacing: .5px;
+    text-transform: uppercase; cursor: pointer;
+    padding: 10px 20px; border-radius: var(--radius);
+    border: 1px solid var(--ink);
+    background: var(--ink); color: var(--bg);
+    transition: background .2s, color .2s;
+  }
+  .btn:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.ghost { background: transparent; color: var(--ink); }
+  .btn.ghost:hover { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+
+  /* ── 主体：侧栏 + 网格，hairline 分区 ── */
+  main { flex: 1; display: flex; min-height: 0; }
+  aside {
+    width: 240px; flex: none;
+    border-right: 1px solid var(--line-strong);
+    padding: 32px 28px;
+    overflow-y: auto;
+  }
+  .side-num {
+    font-size: 72px; font-weight: 800; line-height: 1;
+    color: transparent; -webkit-text-stroke: 1px var(--line);
+    margin-bottom: 24px; user-select: none;
+  }
+  .filter-group { margin-bottom: 32px; }
+  .filter-title {
+    font-size: 11px; font-weight: 700; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--ink-3);
+    padding-bottom: 8px; margin-bottom: 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .filter-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 0; font-size: 14px; cursor: pointer; user-select: none;
+    color: var(--ink-2); transition: color .2s, padding-left .2s;
+  }
+  .filter-item:hover { color: var(--ink); padding-left: 6px; }
+  .filter-item.active { color: var(--ink); font-weight: 600; padding-left: 12px; position: relative; }
+  .filter-item.active::before {
+    content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+    width: 6px; height: 6px; background: var(--accent);
+  }
+  .filter-item .count { font-size: 11px; color: var(--ink-3); font-weight: 400; }
+
+  /* ── 网格区 ── */
+  .content { flex: 1; overflow-y: auto; padding: 32px 40px 64px; }
+  .content-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 28px;
+  }
+  .content-title { font-size: 24px; font-weight: 700; letter-spacing: -.5px; }
+  .content-meta { font-size: 12px; color: var(--ink-3); letter-spacing: 1px; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 24px;
+  }
+  .card {
+    border: 1px solid var(--line);
+    background: var(--bg);
+    cursor: pointer;
+    transition: border-color .2s;
+  }
+  .card:hover { border-color: var(--ink); }
+  .card:hover .card-title { color: var(--accent); }
+  .cover {
+    aspect-ratio: 5 / 7;
+    display: flex; flex-direction: column; justify-content: space-between;
+    padding: 16px;
+    border-bottom: 1px solid var(--line);
+    transition: background .2s;
+  }
+  /* 封面占位：灰阶 + 卷号大字排版（瑞士海报式） */
+  .cover .vol {
+    font-size: 64px; font-weight: 800; line-height: .9; letter-spacing: -2px;
+    color: var(--ink);
+  }
+  .cover .vol small { display: block; font-size: 11px; font-weight: 500; letter-spacing: 2px; color: var(--ink-3); margin-top: 6px; }
+  .cover .glyph { align-self: flex-end; width: 24px; height: 24px; border: 2px solid var(--ink); }
+  .tone-1 { background: var(--surface); }
+  .tone-2 { background: var(--surface); }
+  .tone-2 .glyph { border-radius: 50%; }
+  .tone-3 { background: var(--ink); }
+  .tone-3 .vol, .tone-3 .vol small { color: var(--bg); -webkit-text-stroke: 0; }
+  .tone-3 .glyph { border-color: var(--bg); background: var(--accent); }
+  .tone-4 { background: var(--surface); }
+  .tone-4 .vol { color: transparent; -webkit-text-stroke: 1.5px var(--ink); }
+  html[data-theme="dark"] .tone-3 { background: var(--surface); }
+  html[data-theme="dark"] .tone-3 .vol, html[data-theme="dark"] .tone-3 .vol small { color: var(--ink); }
+  html[data-theme="dark"] .tone-3 .glyph { border-color: var(--ink); }
+
+  .card-body { padding: 12px 14px 14px; }
+  .card-title { font-size: 14px; font-weight: 600; line-height: 1.3; transition: color .2s; }
+  .card-sub {
+    margin-top: 5px; font-size: 11px; color: var(--ink-3);
+    display: flex; justify-content: space-between; letter-spacing: .5px;
+  }
+  .card-sub .rating { color: var(--accent); font-weight: 700; }
+
+  /* ── 页脚标尺 ── */
+  footer {
+    border-top: 1px solid var(--line-strong);
+    padding: 14px 40px;
+    display: flex; justify-content: space-between;
+    font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="masthead">
+    <div class="wordmark">Manga<em>Shelf</em></div>
+    <button class="theme-toggle" title="切换明暗" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? '' : 'dark'"></button>
+  </div>
+  <div class="toolbar">
+    <input class="search" placeholder="搜索对象名或标签…">
+    <div class="tb-group">
+      <span class="tb-link active">平铺</span>
+      <span class="tb-link">系列分组</span>
+      <span class="tb-link">排序 ↓</span>
+      <button class="btn ghost">库管理</button>
+      <button class="btn">导入</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <aside>
+    <div class="side-num">01</div>
+    <div class="filter-group">
+      <div class="filter-title">评分</div>
+      <div class="filter-item active">全部 <span class="count">128</span></div>
+      <div class="filter-item">★ 4 及以上 <span class="count">36</span></div>
+      <div class="filter-item">★ 5 <span class="count">12</span></div>
+    </div>
+    <div class="filter-group">
+      <div class="filter-title">系列</div>
+      <div class="filter-item">孤高之人 <span class="count">8</span></div>
+      <div class="filter-item">蓝色时期 <span class="count">14</span></div>
+      <div class="filter-item">间谍过家家 <span class="count">11</span></div>
+      <div class="filter-item">未分组 <span class="count">95</span></div>
+    </div>
+    <div class="filter-group">
+      <div class="filter-title">作者</div>
+      <div class="filter-item">山口飞翔 <span class="count">14</span></div>
+      <div class="filter-item">远藤达哉 <span class="count">11</span></div>
+      <div class="filter-item">新田次郎 <span class="count">8</span></div>
+    </div>
+  </aside>
+
+  <div class="content">
+    <div class="content-head">
+      <div class="content-title">全部对象</div>
+      <div class="content-meta">共 128 个 · 按添加时间 ↓</div>
+    </div>
+    <div class="grid" id="grid"></div>
+  </div>
+</main>
+
+<footer>
+  <span>MangaShelf / Minimalism & Swiss Style Demo</span>
+  <span>Grid 12 · Radius 0 · Shadow None</span>
+</footer>
+
+<script>
+  // 假数据：瑞士风格封面 = 灰阶底 + 卷号大字排版
+  const items = [
+    { name: '蓝色时期 第14卷', author: '山口飞翔', pages: 192, vol: '14', tone: 1, rating: 5 },
+    { name: '孤高之人 第08卷', author: '新田次郎', pages: 208, vol: '08', tone: 2, rating: 4 },
+    { name: '间谍过家家 第11卷', author: '远藤达哉', pages: 186, vol: '11', tone: 3, rating: 5 },
+    { name: '黄昏流星群 第03卷', author: '弘兼宪史', pages: 224, vol: '03', tone: 4, rating: 3 },
+    { name: '蓝色时期 第13卷', author: '山口飞翔', pages: 190, vol: '13', tone: 3, rating: 4 },
+    { name: '孤高之人 第07卷', author: '新田次郎', pages: 210, vol: '07', tone: 4, rating: 4 },
+    { name: '间谍过家家 第10卷', author: '远藤达哉', pages: 184, vol: '10', tone: 1, rating: 5 },
+    { name: '混沌游戏 第01卷', author: '山本英夫', pages: 232, vol: '01', tone: 2, rating: 0 },
+  ];
+  document.getElementById('grid').innerHTML = items.map(o => `
+    <div class="card">
+      <div class="cover tone-${o.tone}">
+        <div class="vol">${o.vol}<small>VOL.</small></div>
+        <div class="glyph"></div>
+      </div>
+      <div class="card-body">
+        <div class="card-title">${o.name}</div>
+        <div class="card-sub">
+          <span>${o.author} · ${o.pages}P</span>
+          <span class="rating">${o.rating ? '★'.repeat(o.rating) : '—'}</span>
+        </div>
+      </div>
+    </div>`).join('');
+</script>
+</body>
+</html>

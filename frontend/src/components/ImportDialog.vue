@@ -374,13 +374,13 @@ async function run() {
 .file-tags {
   display: flex; flex-wrap: wrap; gap: 6px;
   max-height: 160px; overflow-y: auto;
-  padding: 6px; border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px; border: 1px solid var(--border);
   background: var(--chip-bg);
 }
 .batch-summary { font-size: 12px; font-weight: 700; opacity: .7; margin-top: 12px; display: flex; align-items: center; gap: 8px; }
 .batch-list {
   max-height: 220px; overflow-y: auto; margin-top: 10px;
-  padding: 6px; border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px; border: 1px solid var(--border);
   display: flex; flex-direction: column; gap: 8px;
 }
 .batch-item { display: flex; align-items: center; gap: 10px; }
@@ -388,10 +388,10 @@ async function run() {
 .batch-sub { font-size: 11px; opacity: .55; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .batch-results {
   margin-top: 10px; max-height: 180px; overflow-y: auto;
-  padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 10px; border: 1px solid var(--border);
   display: flex; flex-direction: column; gap: 4px;
   font-size: 12px;
 }
-.batch-result.ok { color: var(--ms-primary, #18a058); }
-.batch-result.err { color: #d03050; word-break: break-all; }
+.batch-result.ok { color: var(--ms-primary); }
+.batch-result.err { color: var(--ms-danger); word-break: break-word; }
 </style>
