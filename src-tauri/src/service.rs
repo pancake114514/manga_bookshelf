@@ -7,7 +7,8 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use crate::db::{AssembledObject, BookmarkRow, Database, ImageRow, SeriesRow, Tags, new_uuid};
@@ -15,9 +16,22 @@ use crate::file_ops::{
     collect_images, copy_image_keep_name, find_thumb_cover,
 };
 use crate::thumbnail::{clear_cached_thumbs, get_thumb_cache_dir};
+use crate::library_manager::normalize_path;
 
 pub struct LibraryService {
     pub db: Mutex<Database>,
+    /// 迁移进行中标志。迁移在移目录阶段释放 DB 锁，此标志用来在该窗口内拒绝
+    /// 会写文件的命令（导入/删除/修复），否则它们会按旧 storage_root 落盘。
+    pub migrating: AtomicBool,
+}
+
+/// 迁移独占守卫：置位成功才返回，离开作用域自动复位（含 panic 展开路径）
+pub struct MigrationGuard<'a>(&'a LibraryService);
+
+impl Drop for MigrationGuard<'_> {
+    fn drop(&mut self) {
+        self.0.migrating.store(false, Ordering::SeqCst);
+    }
 }
 
 // ── 库校验 ──────────────────────────────────────────────────────────────────
@@ -74,7 +88,24 @@ impl LibraryService {
         let db = Database::open(db_path)?;
         Ok(Self {
             db: Mutex::new(db),
+            migrating: AtomicBool::new(false),
         })
+    }
+
+    /// 占用迁移独占位；已有迁移在跑则拒绝（防并发迁移）。守卫析构时释放。
+    pub fn begin_migration(&self) -> Result<MigrationGuard<'_>, String> {
+        self.migrating
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .map_err(|_| "图库迁移正在进行中，请等待其完成".to_string())
+            .map(|_| MigrationGuard(self))
+    }
+
+    /// 会写文件的命令入口守卫：迁移期间一律拒绝，避免按即将废弃的旧根落盘
+    fn ensure_not_migrating(&self) -> Result<(), String> {
+        if self.migrating.load(Ordering::SeqCst) {
+            return Err("图库迁移正在进行中，暂时不能修改图库".to_string());
+        }
+        Ok(())
     }
 
     // ── 配置 ───────────────────────────────────────────────────────────────
@@ -296,6 +327,7 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
     /// 应用库校验修复。三类操作均为幂等（执行时以磁盘/DB 现状复查为准），
     /// 顺序：移除失效记录 → 补登记 → 删除空对象（空判定基于前两步之后的状态）。
     pub fn apply_verify_fixes(&self, plan: &VerifyFixPlan) -> Result<VerifyFixResult, String> {
+        self.ensure_not_migrating()?;
         let mut removed_rows = 0usize;
         let mut registered = 0usize;
         let mut removed_objects = 0usize;
@@ -439,15 +471,6 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
         self.db.lock().unwrap_or_else(|p| p.into_inner()).list_series()
     }
 
-    pub fn rename_series(&self, id: &str, name: &str) -> Result<(), String> {
-        self.db.lock().unwrap_or_else(|p| p.into_inner()).rename_series(id, name)
-    }
-
-    /// 删除系列；成员对象的 series_id 靠 ON DELETE SET NULL 自动置空
-    pub fn delete_series(&self, id: &str) -> Result<(), String> {
-        self.db.lock().unwrap_or_else(|p| p.into_inner()).delete_series(id)
-    }
-
     /// 设置对象所属系列与卷号。
     /// series_name 为 None/空串 → series_id 置 NULL；非空 → 按名查找或创建系列。
     /// 调用方若只想改卷号，应先读取当前 series_name 一并传入以保持不变。
@@ -535,6 +558,7 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
         delete_files: bool,
         storage_root: Option<&str>,
     ) -> Result<Vec<String>, String> {
+        self.ensure_not_migrating()?;
         let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
         let obj = db.get_object_opt(obj_id)?;
 
@@ -645,6 +669,7 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
         if !Path::new(source_dir).is_dir() {
             return Err(format!("源目录不存在：{source_dir}"));
         }
+        self.ensure_not_migrating()?;
 
         let mut created_object = false;
         let mut created_dir = false;
@@ -823,6 +848,7 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
         paths: &[String],
         storage_root: &str,
     ) -> Result<(i64, i64), String> {
+        self.ensure_not_migrating()?;
         let mut created_images: Vec<(String, String)> = Vec::new();
         let mut copied_files: Vec<String> = Vec::new();
 
@@ -897,16 +923,7 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
 
 // ── 辅助函数 ──────────────────────────────────────────────────────────────────
 
-fn normalize_path(path: &str) -> String {
-    let p = PathBuf::from(path);
-    // normcase + abspath 等价
-    let canonical = fs::canonicalize(&p).unwrap_or(p);
-    let mut s = canonical.to_string_lossy().to_string();
-    if cfg!(target_os = "windows") {
-        s = s.to_lowercase();
-    }
-    s
-}
+// normalize_path 统一由 library_manager 提供（路径比较/占用判定必须与迁移用同一套规范化规则）
 
 // ── 单元测试（对标原 Python 版 test_library_service 语义）────────────────────
 #[cfg(test)]
@@ -1368,7 +1385,7 @@ mod tests {
     }
 
     #[test]
-    fn series_crud_rename_delete_and_volume_order() {
+    fn series_grouping_idempotent_with_count_and_first_cover() {
         let (svc, d, oid1) = seeded("series1", "卷一", tags(vec![]));
         let src = d.join("src");
         let root = d.join("storage");
@@ -1400,26 +1417,6 @@ mod tests {
         let sid_again = svc.db.lock().unwrap()
             .get_or_create_series_by_name("系列A").unwrap();
         assert_eq!(sid_again, sid);
-
-        // 重命名后成员对象显示新名
-        svc.rename_series(&sid, "系列B").unwrap();
-        let obj1 = svc.get_object(&oid1).unwrap().unwrap();
-        assert_eq!(obj1.series_name.as_deref(), Some("系列B"), "成员对象应显示新名");
-
-        // 重名 UNIQUE 拒绝：先建第二个系列，再把第一个改成它的名字
-        svc.set_series_for_object(&oid3, Some("其他系列"), None).unwrap();
-        assert!(svc.rename_series(&sid, "其他系列").is_err(), "重名应被拒绝");
-
-        // 删除系列 → 对象 series_id 置 NULL（volume 不受影响）
-        svc.delete_series(&sid).unwrap();
-        let obj1_after = svc.get_object(&oid1).unwrap().unwrap();
-        assert!(obj1_after.series_id.is_none(), "删除系列后 series_id 应置 NULL");
-        assert!(obj1_after.series_name.is_none());
-        assert_eq!(obj1_after.volume, Some(3), "volume 不受系列删除影响");
-        // 剩余系列
-        let remaining = svc.list_series().unwrap();
-        assert_eq!(remaining.len(), 1);
-        assert_eq!(remaining[0].name, "其他系列");
     }
 
     #[test]

@@ -694,30 +694,6 @@ impl Database {
             .map_err(|e| format!("查回系列失败: {e}"))
     }
 
-    /// 重命名系列（UNIQUE 冲突时返回中文错误）
-    pub fn rename_series(&self, id: &str, new_name: &str) -> Result<(), String> {
-        match self.conn.execute(
-            "UPDATE series SET name=? WHERE id=?",
-            params![new_name, id],
-        ) {
-            Ok(_) => Ok(()),
-            Err(rusqlite::Error::SqliteFailure(err, _))
-                if err.code == rusqlite::ErrorCode::ConstraintViolation =>
-            {
-                Err(format!("系列名已存在: {new_name}"))
-            }
-            Err(e) => Err(format!("重命名系列失败: {e}")),
-        }
-    }
-
-    /// 删除系列（对象 series_id 靠 ON DELETE SET NULL 自动置空）
-    pub fn delete_series(&self, id: &str) -> Result<(), String> {
-        self.conn
-            .execute("DELETE FROM series WHERE id=?", params![id])
-            .map_err(|e| format!("删除系列失败: {e}"))?;
-        Ok(())
-    }
-
     /// 列出全部系列，含成员数与首封面。
     /// first_cover 取该系列内 volume 最小（NULLS LAST）对象的封面。
     pub fn list_series(&self) -> Result<Vec<SeriesRow>, String> {

@@ -83,8 +83,6 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .manage(service)
         .register_asynchronous_uri_scheme_protocol("mangashelf", move |ctx, request, responder| {
@@ -136,7 +134,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_state,
             commands::setup,
-            commands::check_writable,
             commands::validate_name,
             commands::get_objects,
             commands::get_object_detail,
@@ -144,8 +141,6 @@ pub fn run() {
             commands::update_object,
             commands::set_last_read,
             commands::get_series,
-            commands::rename_series,
-            commands::delete_series,
             commands::list_bookmarks,
             commands::add_bookmark,
             commands::remove_bookmark,
@@ -168,13 +163,25 @@ pub fn run() {
             let exiting = std::sync::Arc::new(AtomicBool::new(false));
             move |window, event| {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    // 删除与迁移都要挡退出：迁移在移动目录的中途被打断，会把库留在
+                    // "文件已到新根、DB 仍指旧根"的分裂状态（.bak 只能恢复 DB）
+                    let migrating = window
+                        .app_handle()
+                        .try_state::<LibraryService>()
+                        .map(|s| s.migrating.load(Ordering::SeqCst))
+                        .unwrap_or(false);
                     // 已确认退出（或无任务在跑）：放行
                     if exiting.load(Ordering::SeqCst)
-                        || commands::deletions_in_progress() == 0
+                        || (commands::deletions_in_progress() == 0 && !migrating)
                     {
                         return;
                     }
                     api.prevent_close();
+                    let message = if migrating {
+                        "正在迁移图库，确定退出吗？\n中途退出可能让图库目录与数据库记录不一致。"
+                    } else {
+                        "正在删除，确定退出吗？"
+                    };
                     let win = window.clone();
                     let exiting = exiting.clone();
                     // 原生模态框会阻塞，放独立线程跑，避免卡死主线程事件循环
@@ -183,7 +190,7 @@ pub fn run() {
                         let confirmed = win
                             .app_handle()
                             .dialog()
-                            .message("正在删除，确定退出吗？")
+                            .message(message)
                             .title("MangaShelf")
                             .buttons(MessageDialogButtons::OkCancelCustom(
                                 "退出".into(),

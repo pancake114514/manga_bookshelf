@@ -24,11 +24,6 @@ pub struct SetupBody {
 }
 
 #[derive(Deserialize)]
-pub struct PathBody {
-    pub path: String,
-}
-
-#[derive(Deserialize)]
 pub struct ObjectPatch {
     pub name: Option<String>,
     pub tags: Option< serde_json::Value>,
@@ -84,11 +79,6 @@ pub struct NameBody {
 }
 
 #[derive(Deserialize)]
-pub struct RenameSeriesBody {
-    pub new_name: String,
-}
-
-#[derive(Deserialize)]
 pub struct AddBookmarkBody {
     pub obj_id: String,
     pub page_idx: i64,
@@ -130,7 +120,6 @@ pub struct ObjectDetail {
     pub last_read_idx: i64,
     pub created_at: Option<String>,
     pub cover_url: String,
-    pub storage_path: Option<String>,
     pub images: Vec<ImageSummary>,
     pub series_id: Option<String>,
     pub series_name: Option<String>,
@@ -141,7 +130,6 @@ pub struct ObjectDetail {
 pub struct ImageSummary {
     pub id: String,
     pub filename: String,
-    pub sort_order: i64,
     pub thumb_url: String,
     pub image_url: String,
 }
@@ -306,7 +294,6 @@ fn serialize_image(img: &ImageRow, obj_id: &str) -> ImageSummary {
     ImageSummary {
         id: img.id.clone(),
         filename: img.filename.clone(),
-        sort_order: img.sort_order,
         thumb_url: asset_url(&format!("object/{}/thumb/{}", obj_id, img.id)),
         image_url: asset_url(&format!("object/{}/image/{}", obj_id, img.id)),
     }
@@ -349,14 +336,6 @@ pub fn setup(svc: State<'_, LibraryService>, body: SetupBody) -> Result<SimpleRe
     }
     svc.set_config("storage_root", &body.path)?;
     Ok(SimpleResult { ok: true, error: None })
-}
-
-#[tauri::command]
-pub fn check_writable(body: PathBody) -> Result<SimpleResult, String> {
-    match library_manager::check_writable(&body.path) {
-        Ok(()) => Ok(SimpleResult { ok: true, error: None }),
-        Err(e) => Ok(SimpleResult { ok: false, error: Some(e) }),
-    }
 }
 
 #[tauri::command]
@@ -437,7 +416,6 @@ pub fn get_object_detail(
             obj.id,
             cover_version(&obj)
         )),
-        storage_path: obj.storage_path.clone(),
         images: images
             .iter()
             .map(|i| serialize_image(i, &obj.id))
@@ -510,25 +488,6 @@ pub fn get_series(
     svc: State<'_, LibraryService>,
 ) -> Result<Vec<SeriesRow>, String> {
     svc.list_series()
-}
-
-#[tauri::command]
-pub fn rename_series(
-    svc: State<'_, LibraryService>,
-    id: String,
-    body: RenameSeriesBody,
-) -> Result<SimpleResult, String> {
-    svc.rename_series(&id, &body.new_name)?;
-    Ok(SimpleResult { ok: true, error: None })
-}
-
-#[tauri::command]
-pub fn delete_series(
-    svc: State<'_, LibraryService>,
-    id: String,
-) -> Result<SimpleResult, String> {
-    svc.delete_series(&id)?;
-    Ok(SimpleResult { ok: true, error: None })
 }
 
 // ── 书签 ──────────────────────────────────────────────────────────────────────

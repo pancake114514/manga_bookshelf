@@ -9,12 +9,10 @@ use std::path::{Path, PathBuf};
 use image::{DynamicImage, ImageDecoder, ImageFormat};
 use sha2::{Digest, Sha256};
 
-use crate::config::{COVER_THUMB_SIZE, GRID_THUMB_SIZE, THUMBNAIL_SIZE, is_supported_image};
-
-pub const THUMB_CACHE_DIR_NAME: &str = ".thumbcache";
+use crate::config::{COVER_THUMB_SIZE, GRID_THUMB_SIZE, THUMBNAIL_SIZE, THUMB_CACHE_DIR, is_supported_image};
 
 pub fn get_thumb_cache_dir(base_dir: &str) -> String {
-    let cache = Path::new(base_dir).join(THUMB_CACHE_DIR_NAME);
+    let cache = Path::new(base_dir).join(THUMB_CACHE_DIR);
     let _ = fs::create_dir_all(&cache);
     cache.to_string_lossy().to_string()
 }
