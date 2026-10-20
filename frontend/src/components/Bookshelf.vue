@@ -471,9 +471,7 @@ async function doDelete(obj, deleteFiles) {
 </script>
 
 <style scoped>
-/* 顶栏 scroll edge effect：滚动区向上延伸到悬浮顶栏下方，
-   padding-top = 58(顶栏) + 26(渐隐带) + 2(缓冲)，首屏内容始于磨砂带之外 */
-.shelf { flex: 1; overflow-y: auto; padding: 86px 26px 40px; position: relative; }
+.shelf { flex: 1; overflow-y: auto; padding: 22px 26px 40px; position: relative; }
 .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
 .result-hint { font-size: 12px; opacity: .55; }
 .toolbar-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
@@ -481,28 +479,14 @@ async function doDelete(obj, deleteFiles) {
 
 .empty { margin-top: 80px; }
 
-/* 多选操作条：悬浮液态玻璃——半透底色 + 背板模糊 + 折射边缘 + 内高光 */
+/* 多选操作条：瑞士扁平——实底 + 强对比 hairline，直角无阴影 */
 .select-bar {
   position: fixed; left: 50%; transform: translateX(-50%);
   bottom: 28px; z-index: 10;
   display: flex; align-items: center; gap: 10px;
   padding: 10px 16px;
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--card) 52%, transparent);
-  -webkit-backdrop-filter: blur(18px) saturate(170%);
-  backdrop-filter: blur(18px) saturate(170%);
-  border: 1px solid var(--lg-border);
-  box-shadow: inset 0 1px 0 var(--lg-spec), 0 10px 32px var(--lg-umbra);
-}
-/* 背板滤镜不可用 / 系统「降低透明度」开启：退回不透明实底 */
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .select-bar { background: var(--card); }
-}
-@media (prefers-reduced-transparency: reduce) {
-  .select-bar {
-    background: var(--card);
-    -webkit-backdrop-filter: none; backdrop-filter: none;
-  }
+  background: var(--card);
+  border: 1px solid var(--border-strong);
 }
 .sel-count { font-size: 13px; font-weight: 600; }
 .spacer { flex: 1; }
@@ -524,7 +508,7 @@ async function doDelete(obj, deleteFiles) {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 10px; margin-bottom: 10px;
   cursor: pointer; user-select: none;
-  border-radius: 8px;
+  border-radius: 0;
   background: var(--chip-bg);
   transition: background .15s;
 }

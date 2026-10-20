@@ -2,11 +2,6 @@
   <!-- 整条顶栏均可拖动：按下后移交系统原生拖动（还原最大化/贴靠由系统处理），
        交互控件以 mousedown.stop 排除 -->
   <div class="topbar" @mousedown="barMouseDown">
-    <!-- 磨砂材质层：仅书架视图（.scroll-edge）启用，上实下溶 + 向下延伸渐隐带，
-         滚动内容从顶栏下方穿过时被模糊遮挡（scroll edge effect） -->
-    <div class="tb-glass" aria-hidden="true">
-      <div class="gl gl-1" /><div class="gl gl-2" /><div class="gl gl-3" />
-    </div>
     <!-- 虚拟框一：固定与默认侧栏等宽（228px），logo 左对齐；
          与侧栏收起/拖动状态解耦，顶栏布局恒定 -->
     <div class="tb-logo-box">
@@ -109,16 +104,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 
 <style scoped>
 .topbar {
-  position: relative; z-index: 40;
+  /* relative 为搜索建议面板的绝对定位提供锚点 */
+  position: relative;
   height: 58px; flex: none;
   display: flex; align-items: stretch;
   /* 窗口按钮贴住窗口右缘，不预留右侧空白 */
   border-bottom: 1px solid var(--border);
 }
-/* 文字与控件抬到材质层之上 */
-.topbar > :not(.tb-glass) { position: relative; z-index: 1; }
-/* scroll-edge（书架视图顶栏悬浮磨砂）样式在 styles.css 全局定义：
-   scoped 的 :global() 嵌套写法会丢失后代选择器，不可使用 */
 .tb-logo-box {
   flex: none; width: var(--sidebar-w);   /* 固定 228px，与侧栏宽度解耦（顶栏布局不随侧栏收起/拖动变化） */
   display: flex; align-items: center;
@@ -140,13 +132,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 /* 搜索框：限制最宽 380，同时保底 200——窗口压到最小宽度时被压缩到不可用的程度 */
 .search-wrap { position: relative; flex: 1; max-width: 380px; min-width: 200px; }
 .search { width: 100%; }
-/* 搜索建议面板：悬于搜索框正下方 */
+/* 搜索建议面板：悬于搜索框正下方（瑞士扁平：直角、无阴影、强 hairline） */
 .suggest-panel {
   position: absolute; top: 100%; left: 0; right: 0; margin-top: 6px; z-index: 60;
   background: var(--card, #fff);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, .18);
+  border: 1px solid var(--border-strong);
   overflow: hidden;
   user-select: none;
 }
@@ -156,7 +146,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 }
 .suggest-item:hover { background: var(--chip-bg); }
 .suggest-type {
-  flex: none; font-size: 11px; padding: 1px 6px; border-radius: 4px;
+  flex: none; font-size: 11px; padding: 1px 6px;
   background: var(--chip-bg); opacity: .85;
 }
 .suggest-value { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

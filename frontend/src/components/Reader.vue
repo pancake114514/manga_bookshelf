@@ -589,13 +589,13 @@ function onBarUp() {
 .progress { position: relative; height: 40px; cursor: pointer; }
 .track, .filled, .knob { position: absolute; pointer-events: none; }
 .track {
-  top: 18px; left: 20px; right: 20px; height: 4px; border-radius: 2px;
+  top: 18px; left: 20px; right: 20px; height: 4px;
   background: rgba(128,128,128,.35);
 }
 /* 锚定侧（right/left）由内联样式按阅读方向提供 */
-.filled { top: 18px; height: 4px; border-radius: 2px; background: var(--ms-primary); }
+.filled { top: 18px; height: 4px; background: var(--ms-primary); }
 .knob {
-  top: 12px; width: 16px; height: 16px; border-radius: 50%;
+  top: 12px; width: 16px; height: 16px;
   transform: translateX(50%);
   background: var(--card); border: 2px solid var(--ms-primary);
 }
@@ -609,8 +609,8 @@ function onBarUp() {
 /* 书签刻度：通高细线，定位公式同 knob */
 .bm-tick {
   position: absolute; top: 2px; bottom: 2px; width: 3px;
-  border-radius: 1.5px; cursor: pointer;
-  background: #f5a623;
+  cursor: pointer;
+  background: var(--ms-primary);
   z-index: 1;
 }
 .bm-tick:hover { filter: brightness(1.2); }
@@ -620,7 +620,7 @@ function onBarUp() {
 .bm-empty { font-size: 13px; opacity: .5; padding: 12px 4px; text-align: center; }
 .bm-row {
   display: flex; align-items: center; gap: 6px;
-  padding: 6px 8px; border-radius: 6px; cursor: pointer;
+  padding: 6px 8px; cursor: pointer;
   transition: background .15s;
 }
 .bm-row:hover { background: var(--chip-bg); }

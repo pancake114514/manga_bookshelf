@@ -3,7 +3,7 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body, #app { height: 100%; }
 body {
-  font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  font-family: "Inter", "Helvetica Neue", "Segoe UI", "Microsoft YaHei UI", sans-serif;
   overflow: hidden;
   /* 桌面应用交互：左键拖动不产生文字/元素选中；输入框除外 */
   user-select: none;
@@ -41,7 +41,7 @@ img { -webkit-user-drag: none; }
 .side-toggle {
   border: none; background: transparent; cursor: pointer;
   color: var(--text2, inherit); opacity: .65;
-  padding: 5px; border-radius: 7px; display: inline-flex;
+  padding: 5px; display: inline-flex;
   transition: background .15s, opacity .15s;
 }
 .side-toggle:hover { background: var(--chip-bg); opacity: 1; }
@@ -73,160 +73,51 @@ img { -webkit-user-drag: none; }
 }
 
 /* 主题令牌（--bg/--text/...）由 theme.js 的 cssVars() 注入 .app-shell，此处不再重复定义 */
+/* 风格：Minimalism & Swiss Style——纯黑白单色 + 瑞士红单一强调，直角，无阴影/渐变/模糊 */
 
-/* ── 液态玻璃（Liquid Glass）令牌 ── */
-/* 高光 spec / 边缘 border / 落影 umbra 按主题分套；tint 为材质底色（半透） */
-.app-shell.theme-dark {
-  --lg-tint: rgba(255, 255, 255, .08);
-  --lg-tint-hover: rgba(255, 255, 255, .13);
-  --lg-border: rgba(255, 255, 255, .18);
-  --lg-border-hover: rgba(255, 255, 255, .32);
-  --lg-spec: rgba(255, 255, 255, .22);
-  --lg-umbra: rgba(0, 0, 0, .32);
-}
-.app-shell.theme-light {
-  --lg-tint: rgba(255, 255, 255, .52);
-  --lg-tint-hover: rgba(255, 255, 255, .72);
-  --lg-border: rgba(0, 0, 0, .07);
-  --lg-border-hover: rgba(0, 0, 0, .12);
-  --lg-spec: rgba(255, 255, 255, .95);
-  --lg-umbra: rgba(0, 0, 0, .14);
-}
-
-/* ── 液态玻璃按钮（覆盖 .app-shell 内 naive-ui 按钮材质） ── */
-/* 材质三层：半透底色 + 折射边缘（border+顶部内高光）→ 落影。
-   背板模糊只挂在真正悬浮于动态内容上的按钮（顶栏磨砂区/多选操作条/封面悬浮钮）——
-   静态背景上的按钮半透 tint 叠实色底视觉相同，省略 backdrop-filter 省一次背板渲染 */
+/* ── 瑞士扁平按钮（覆盖 .app-shell 内 naive-ui 按钮材质） ──
+   纪律：直角、无阴影、无模糊。默认描边透明底；hover 反色（ink/bg 互换）；
+   primary/error 为强调色实底；按压不做位移缩放，仅以颜色反馈 */
 .app-shell .n-button {
-  background-color: var(--lg-tint);
-  box-shadow: inset 0 1px 0 var(--lg-spec), 0 2px 10px var(--lg-umbra);
-  transition: transform .16s cubic-bezier(.34, 1.4, .64, 1),
-              background-color .2s, box-shadow .2s, filter .2s, color .2s;
+  border-radius: 0;
+  background-color: transparent;
+  box-shadow: none;
+  transition: background-color .2s, color .2s, border-color .2s;
 }
-/* 动态背板上的玻璃按钮才挂背板模糊 */
-.info-bar .n-button, .select-bar .n-button {
-  -webkit-backdrop-filter: blur(12px) saturate(170%);
-  backdrop-filter: blur(12px) saturate(170%);
-}
-/* 边缘折射：仅对有边框变体改色（quaternary/tertiary 无边框，不动） */
 .app-shell .n-button:not(.n-button--quaternary-type):not(.n-button--tertiary-type) .n-button__border {
-  border-color: var(--lg-border);
+  border-color: var(--border-strong);
   transition: border-color .2s;
 }
-.app-shell .n-button:not(.n-button--disabled-type):hover {
-  background-color: var(--lg-tint-hover);
-  filter: brightness(1.06);
+.app-shell .n-button:not(.n-button--disabled-type):not(.n-button--quaternary-type):not(.n-button--tertiary-type):hover {
+  background-color: var(--text);
+  color: var(--bg);
 }
 .app-shell .n-button:not(.n-button--disabled-type):not(.n-button--quaternary-type):not(.n-button--tertiary-type):hover .n-button__border {
-  border-color: var(--lg-border-hover);
+  border-color: var(--text);
 }
-/* 按压反馈：整体内缩，不改变布局边界 */
-.app-shell .n-button:not(.n-button--disabled-type):active { transform: scale(.955); }
+.app-shell .n-button:not(.n-button--disabled-type):active { transform: none; }
 .app-shell .n-button--disabled-type { opacity: .45; }
 
-/* 主按钮：主色着色玻璃（保持半透可见背板，增强着色投影） */
-.app-shell .n-button--primary-type {
-  background-color: color-mix(in srgb, var(--ms-primary) 80%, transparent);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .40),
-              0 4px 14px color-mix(in srgb, var(--ms-primary) 30%, transparent);
-}
-.app-shell .n-button--primary-type:not(.n-button--disabled-type):hover {
-  background-color: color-mix(in srgb, var(--ms-primary) 92%, transparent);
-}
-/* 危险按钮：危险色着色玻璃 */
-.app-shell .n-button--error-type {
-  background-color: color-mix(in srgb, var(--ms-danger) 80%, transparent);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .40),
-              0 4px 14px color-mix(in srgb, var(--ms-danger) 30%, transparent);
-}
-.app-shell .n-button--error-type:not(.n-button--disabled-type):hover {
-  background-color: color-mix(in srgb, var(--ms-danger) 92%, transparent);
-}
-/* 主/危险按钮的折射边缘与本体同色，避免灰边切割色块 */
+/* 主/危险按钮：强调色实底白字，hover 仅提亮 */
+.app-shell .n-button--primary-type { background-color: var(--ms-primary); color: #fff; }
 .app-shell .n-button--primary-type .n-button__border,
-.app-shell .n-button--error-type .n-button__border {
-  border-color: rgba(255, 255, 255, .35);
+.app-shell .n-button--error-type .n-button__border { border-color: transparent; }
+.app-shell .n-button--primary-type:not(.n-button--disabled-type):hover {
+  background-color: var(--ms-primary); color: #fff; filter: brightness(1.12);
+}
+.app-shell .n-button--error-type { background-color: var(--ms-danger); color: #fff; }
+.app-shell .n-button--error-type:not(.n-button--disabled-type):hover {
+  background-color: var(--ms-danger); color: #fff; filter: brightness(1.12);
 }
 
-/* 封面悬浮操作钮（quaternary 图标钮）：常时即为玻璃泡，叠在封面上清晰可见 */
+/* 封面悬浮操作钮（quaternary 图标钮）：半透明黑实底直角，叠在封面上清晰可见 */
 .hover-overlay .n-button {
-  background-color: rgba(255, 255, 255, .14);
-  -webkit-backdrop-filter: blur(10px) saturate(170%);
-  backdrop-filter: blur(10px) saturate(170%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35), 0 1px 6px rgba(0, 0, 0, .25);
-  border-radius: 7px;
+  background-color: rgba(0, 0, 0, .55);
+  border-radius: 0;
+  box-shadow: none;
+  color: #fff;
 }
-.hover-overlay .n-button:hover { background-color: rgba(255, 255, 255, .26); }
-
-/* 背板滤镜不可用时整体降级为不透明材质，保证可读性 */
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .info-bar .n-button, .select-bar .n-button { background-color: var(--surface); }
-  .hover-overlay .n-button { background-color: rgba(0, 0, 0, .55); }
-}
-
-/* 系统「降低透明度」开启：玻璃退回不透明材质，保证可读性 */
-@media (prefers-reduced-transparency: reduce) {
-  .app-shell .n-button,
-  .info-bar .n-button, .select-bar .n-button {
-    background-color: var(--surface);
-    -webkit-backdrop-filter: none; backdrop-filter: none;
-  }
-  .app-shell .n-button--primary-type { background-color: var(--ms-primary); }
-  .app-shell .n-button--error-type { background-color: var(--ms-danger); }
-  .hover-overlay .n-button {
-    background-color: rgba(0, 0, 0, .55);
-    -webkit-backdrop-filter: none; backdrop-filter: none;
-  }
-}
-
-/* ── 顶栏 scroll edge effect（书架视图，.scroll-edge 由 App.vue 加注） ──
-   顶栏悬浮于内容之上：margin 负值使 .app-main 上移 58px 与顶栏重叠，
-   书架/侧栏内容滚动时从顶栏下方穿过，被磨砂层模糊遮挡。
-   注意：必须写在此全局样式表——scoped 的 :global() 嵌套写法会丢失后代选择器。 */
-.scroll-edge .topbar {
-  margin-bottom: -58px;
-  border-bottom-color: transparent;
-}
-/* 磨砂层默认不渲染：非书架视图顶栏保持实底（继承 shell 背景） */
-.tb-glass { display: none; }
-/* 材质层向下延伸 26px 渐隐带（总高 84px）：0–46px 实色护住控件区，46→84 渐溶 */
-.scroll-edge .tb-glass {
-  display: block; position: absolute; top: 0; left: 0; right: 0; bottom: -26px;
-  pointer-events: none;
-  background: linear-gradient(to bottom,
-    var(--bg) 0, var(--bg) 46px,
-    color-mix(in srgb, var(--bg) 55%, transparent) 66px,
-    transparent 84px);
-}
-.scroll-edge .tb-glass .gl { position: absolute; inset: 0; }
-/* 三层递减模糊，各自用渐隐遮罩限定作用带：叠出「上强下弱」的连续磨砂 */
-.scroll-edge .tb-glass .gl-1 {
-  -webkit-backdrop-filter: blur(20px) saturate(170%);
-  backdrop-filter: blur(20px) saturate(170%);
-  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 40px, transparent 72px);
-  mask-image: linear-gradient(to bottom, #000 0, #000 40px, transparent 72px);
-}
-.scroll-edge .tb-glass .gl-2 {
-  -webkit-backdrop-filter: blur(10px) saturate(170%);
-  backdrop-filter: blur(10px) saturate(170%);
-  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 48px, transparent 78px);
-  mask-image: linear-gradient(to bottom, #000 0, #000 48px, transparent 78px);
-}
-.scroll-edge .tb-glass .gl-3 {
-  -webkit-backdrop-filter: blur(4px);
-  backdrop-filter: blur(4px);
-  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 58px, transparent 84px);
-  mask-image: linear-gradient(to bottom, #000 0, #000 58px, transparent 84px);
-}
-/* 背板滤镜不可用 / 系统「降低透明度」开启：退回不透明实底栏，取消渐隐延伸带 */
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .scroll-edge .tb-glass { background: var(--bg); bottom: 0; }
-  .scroll-edge .tb-glass .gl { display: none; }
-}
-@media (prefers-reduced-transparency: reduce) {
-  .scroll-edge .tb-glass { background: var(--bg); bottom: 0; }
-  .scroll-edge .tb-glass .gl { display: none; }
-}
+.hover-overlay .n-button:hover { background-color: rgba(0, 0, 0, .78); color: #fff; }
 
 /* ── 卡片增删过渡（与设计稿一致：整批右出 → 左入；动画施加见 Bookshelf） ── */
 @keyframes card-in {
@@ -239,9 +130,8 @@ img { -webkit-user-drag: none; }
 @media (prefers-reduced-motion: reduce) {
   .shelf-grid.leaving .obj-card,
   .shelf-grid.entering .obj-card { animation: none !important; }
-  /* 玻璃按钮：按压内缩与材质过渡一并关闭 */
+  /* 扁平按钮：材质过渡一并关闭 */
   .app-shell .n-button { transition: none; }
-  .app-shell .n-button:not(.n-button--disabled-type):active { transform: none; }
 }
 
 /* ── 对象卡片 ── */
@@ -262,18 +152,17 @@ img { -webkit-user-drag: none; }
 }
 .obj-card {
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 0;
   overflow: hidden;
   cursor: pointer;
   background: var(--surface);
   display: flex;
   flex-direction: column;
-  transition: transform .18s, border-color .18s, box-shadow .18s, background .25s;
+  transition: border-color .18s, background .25s;
 }
+/* hover 不浮起不落影：hairline 加粗为强对比线 */
 .obj-card:hover {
-  transform: translateY(-3px);
-  border-color: var(--ms-primary);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, .18);
+  border-color: var(--border-strong);
 }
 .obj-card.selected {
   border-color: var(--ms-primary);
@@ -287,7 +176,7 @@ img { -webkit-user-drag: none; }
 .obj-card.is-r18 .cover-box img { filter: blur(14px) saturate(.7); transform: scale(1.06); }
 .r18-badge {
   position: absolute; top: 10px; right: 10px; z-index: 2;
-  padding: 2px 8px; border-radius: 5px;
+  padding: 2px 8px; border-radius: 0;
   background: var(--ms-danger); color: #fff;
   font-size: 10px; font-weight: 800; letter-spacing: 1px;
 }
@@ -335,5 +224,5 @@ img { -webkit-user-drag: none; }
 
 /* 滚动条 */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: rgba(128,128,128,.35); border-radius: 4px; }
+::-webkit-scrollbar-thumb { background: rgba(128,128,128,.35); }
 ::-webkit-scrollbar-track { background: transparent; }

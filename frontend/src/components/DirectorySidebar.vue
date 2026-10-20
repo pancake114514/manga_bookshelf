@@ -153,7 +153,7 @@ async function openFolder() {
 }
 .vol-row {
   display: flex; align-items: center; gap: 8px;
-  padding: 4px; border-radius: 8px; cursor: pointer;
+  padding: 4px; cursor: pointer;
   /* 常驻透明边框：选中态只换颜色——描边画在盒内不被滚动容器裁切，且布局零位移 */
   border: 1px solid transparent;
   transition: background .15s, border-color .15s;
@@ -161,7 +161,7 @@ async function openFolder() {
 .vol-row:hover { background: var(--chip-bg); }
 .vol-row.current { background: var(--chip-bg); border-color: var(--ms-primary); }
 .vol-cover {
-  width: 38px; aspect-ratio: 5 / 7; object-fit: cover; border-radius: 4px;
+  width: 38px; aspect-ratio: 5 / 7; object-fit: cover;
   background: var(--chip-bg); flex: none;
 }
 .vol-meta { min-width: 0; }
@@ -176,11 +176,11 @@ async function openFolder() {
 .bm-list { display: flex; flex-direction: column; gap: 4px; }
 .bm-row {
   display: flex; align-items: center; gap: 7px;
-  padding: 4px 6px; border-radius: 6px; cursor: pointer;
+  padding: 4px 6px; cursor: pointer;
   font-size: 12px; transition: background .15s;
 }
 .bm-row:hover { background: var(--chip-bg); }
-.bm-ico { color: #f5a623; display: inline-flex; flex: none; }
+.bm-ico { color: var(--ms-primary); display: inline-flex; flex: none; }
 .bm-page { flex: none; font-weight: 600; opacity: .85; }
 .bm-note {
   min-width: 0; opacity: .6;
@@ -197,7 +197,7 @@ async function openFolder() {
 .foot-btn {
   border: none; background: transparent; cursor: pointer;
   color: var(--text2, inherit); opacity: .7;
-  padding: 4px; border-radius: 6px; display: inline-flex;
+  padding: 4px; display: inline-flex;
   transition: background .15s, opacity .15s;
 }
 .foot-btn:hover { background: var(--chip-bg); opacity: 1; }

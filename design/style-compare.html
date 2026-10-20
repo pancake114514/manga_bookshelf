@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>风格对照 — Liquid Glass × Soft UI Evolution — MangaShelf</title>
+<style>
+/* ═══════════════ 页面骨架（中立底色，不参与对照） ═══════════════ */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: "Varela Round", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  background: #0b0b10; color: #ececf1; padding: 24px 28px 64px;
+  transition: background .25s;
+}
+body.light { background: #e9eaf0; }
+.page-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 18px; }
+.page-head h1 { font-size: 18px; }
+.page-head span { font-size: 12px; opacity: .55; }
+.theme-btn {
+  position: fixed; top: 18px; right: 24px; z-index: 50;
+  font: inherit; font-size: 12px; padding: 6px 14px; border-radius: 8px; cursor: pointer;
+  background: rgba(128,128,128,.18); color: inherit; border: 1px solid rgba(128,128,128,.3);
+}
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: start; }
+.pane { border-radius: 16px; overflow: hidden; min-width: 0;
+  outline: 1px solid rgba(128,128,128,.25); }
+.pane-head { padding: 14px 20px 10px; }
+.pane-head b { font-size: 14px; }
+.pane-head p { font-size: 11px; opacity: .6; margin-top: 3px; }
+.pane-body { padding: 4px 20px 22px; }
+h3 { font-size: 12px; margin: 18px 0 10px; font-weight: 600; letter-spacing: 1px; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.cards { display: flex; gap: 14px; }
+.mcard { position: relative; width: 120px; aspect-ratio: 5/7; border-radius: 10px; overflow: hidden; cursor: pointer; }
+.mcard .art { position: absolute; inset: 0; }
+.demo { position: relative; height: 400px; overflow-y: auto; border-radius: 12px; }
+.thumbs { display: grid; grid-template-columns: repeat(auto-fill, 96px); gap: 10px; padding: 16px; }
+.thumb { aspect-ratio: 1; border-radius: 8px; }
+.mini-bar { position: sticky; top: 0; z-index: 20; padding: 12px 16px 20px; }
+.mini-row { display: flex; gap: 12px; margin-top: 10px; }
+.mini-cover { width: 84px; aspect-ratio: 5/7; border-radius: 8px; overflow: hidden; flex: none; position: relative; }
+.mini-cover .art { position: absolute; inset: 0; }
+.mini-title { font-size: 15px; font-weight: 700; }
+.mtag { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 9px; margin: 6px 5px 0 0; }
+.sel-bar { position: sticky; bottom: 14px; z-index: 30; margin: 0 auto 2px; width: max-content;
+  display: flex; align-items: center; gap: 9px; padding: 8px 14px; font-size: 12px;
+  border-radius: 12px; }
+.sel-bar .b { font-size: 11px; padding: 3px 9px; }
+
+/* ═══════════════ 左栏：Liquid Glass（当前实现，复刻 styles.css 令牌） ═══════════════ */
+.lg { --bg: #101014; --surface: #17171c; --card: #1e1e26;
+  --text: #ececf1; --text2: #a0a0ac; --border: rgba(255,255,255,.09);
+  --chip-bg: rgba(255,255,255,.06);
+  --ms-primary: #63e2b7; --ms-danger: #d03050;
+  --lg-tint: rgba(255,255,255,.08); --lg-tint-hover: rgba(255,255,255,.13);
+  --lg-border: rgba(255,255,255,.18); --lg-border-hover: rgba(255,255,255,.32);
+  --lg-spec: rgba(255,255,255,.22); --lg-umbra: rgba(0,0,0,.32);
+  background: var(--bg); color: var(--text); }
+body.light .lg { --bg: #f5f6f8; --surface: #fff; --card: #fff;
+  --text: #1f1f25; --text2: #55555e; --border: rgba(0,0,0,.09);
+  --chip-bg: rgba(0,0,0,.045); --ms-primary: #18a058;
+  --lg-tint: rgba(255,255,255,.52); --lg-tint-hover: rgba(255,255,255,.72);
+  --lg-border: rgba(0,0,0,.07); --lg-border-hover: rgba(0,0,0,.12);
+  --lg-spec: rgba(255,255,255,.95); --lg-umbra: rgba(0,0,0,.14); }
+.lg h3 { color: var(--text2); }
+/* 按钮：半透 tint + 折射边 + 内高光 + 落影；背板模糊只在动态内容场景 */
+.lg .b {
+  font: inherit; font-size: 12px; color: var(--text); cursor: pointer;
+  padding: 5px 13px; border-radius: 8px;
+  background-color: var(--lg-tint); border: 1px solid var(--lg-border);
+  box-shadow: inset 0 1px 0 var(--lg-spec), 0 2px 10px var(--lg-umbra);
+  transition: transform .16s cubic-bezier(.34,1.4,.64,1), background-color .2s, box-shadow .2s, filter .2s;
+}
+.lg .b:hover { background-color: var(--lg-tint-hover); filter: brightness(1.06); border-color: var(--lg-border-hover); }
+.lg .b:active { transform: scale(.955); }
+.lg .b.primary { background-color: color-mix(in srgb, var(--ms-primary) 80%, transparent);
+  color: #fff; border-color: rgba(255,255,255,.35);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.40), 0 4px 14px color-mix(in srgb, var(--ms-primary) 30%, transparent); }
+.lg .b.danger { background-color: color-mix(in srgb, var(--ms-danger) 80%, transparent);
+  color: #fff; border-color: rgba(255,255,255,.35);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.40), 0 4px 14px color-mix(in srgb, var(--ms-danger) 30%, transparent); }
+.lg .b.ghost { border-color: transparent; background: transparent; box-shadow: none; }
+.lg .b.ghost:hover { background-color: var(--lg-tint-hover); }
+/* 动态背板上的按钮才挂模糊 */
+.lg .mini-bar .b, .lg .sel-bar .b { -webkit-backdrop-filter: blur(12px) saturate(170%); backdrop-filter: blur(12px) saturate(170%); }
+/* 勾选泡 */
+.lg .badge {
+  position: absolute; top: 7px; left: 7px; z-index: 4; width: 22px; height: 22px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; color: #fff;
+  background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.55);
+  -webkit-backdrop-filter: blur(8px) saturate(180%); backdrop-filter: blur(8px) saturate(180%);
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.55), inset 0 -3px 6px rgba(0,0,0,.18), 0 2px 10px rgba(0,0,0,.30);
+  transition: transform .16s cubic-bezier(.34,1.4,.64,1), background .2s, box-shadow .2s, border-color .2s;
+}
+.lg .badge::before { content: ''; position: absolute; inset: 1px; border-radius: inherit;
+  background: linear-gradient(165deg, rgba(255,255,255,.65), rgba(255,255,255,.06) 42%, transparent 60%); pointer-events: none; }
+.lg .badge svg { position: relative; filter: drop-shadow(0 1px 1px rgba(0,0,0,.4)); }
+.lg .badge.on { background: color-mix(in srgb, var(--ms-primary) 72%, rgba(255,255,255,.14));
+  border-color: rgba(255,255,255,.75);
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.60),
+    inset 0 -3px 6px color-mix(in srgb, var(--ms-primary) 55%, rgba(0,0,0,.2)),
+    0 2px 12px color-mix(in srgb, var(--ms-primary) 45%, transparent);
+  animation: glass-pop .38s cubic-bezier(.34,1.56,.64,1); }
+@keyframes glass-pop { 0% { transform: scale(.6); } 55% { transform: scale(1.18); } 100% { transform: scale(1); } }
+.lg .mcard { border: 1px solid var(--border); }
+.lg .mcard.selected { border-color: var(--ms-primary); box-shadow: 0 0 0 2px var(--ms-primary); }
+/* 详情顶栏：纯色 → 磨砂熔出（三层递减），封面已缩小不做渐熔 */
+.lg .demo { background: var(--bg); border: 1px solid var(--border); }
+.lg .bar-glass { position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) calc(100% - 56px),
+    color-mix(in srgb, var(--bg) 60%, transparent) calc(100% - 26px), transparent 100%); }
+.lg .bar-glass .gl { position: absolute; inset: 0; }
+.lg .gl-1 { -webkit-backdrop-filter: blur(20px) saturate(170%); backdrop-filter: blur(20px) saturate(170%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 66px), transparent calc(100% - 20px));
+  mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 66px), transparent calc(100% - 20px)); }
+.lg .gl-2 { -webkit-backdrop-filter: blur(10px) saturate(170%); backdrop-filter: blur(10px) saturate(170%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 58px), transparent calc(100% - 8px));
+  mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 58px), transparent calc(100% - 8px)); }
+.lg .gl-3 { -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 48px), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 48px), transparent 100%); }
+.lg .mini-bar > :not(.bar-glass) { position: relative; z-index: 1; }
+.lg .mini-cover { background: var(--chip-bg); }
+.lg .mtag { background: var(--chip-bg); }
+.lg .thumb { border: 1px solid var(--border); }
+.lg .sel-bar { background: color-mix(in srgb, var(--card) 52%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(170%); backdrop-filter: blur(18px) saturate(170%);
+  border: 1px solid var(--lg-border);
+  box-shadow: inset 0 1px 0 var(--lg-spec), 0 10px 32px var(--lg-umbra); }
+
+/* ═══════════════ 右栏：Soft UI Evolution（生成的设计系统落地） ═══════════════ */
+.soft {
+  --bg: #F5F3FF; --card: #FFFFFF; --text: #312E81; --text2: #475569;
+  --border: #E0E7FF; --muted: #EBEFF9;
+  --primary: #6366F1; --secondary: #818CF8; --accent: #059669; --danger: #DC2626;
+  --ring: #6366F1;
+  /* 柔和多层投影令牌：比扁平软、比新拟物清晰 */
+  --sh-sm: 0 1px 2px rgba(49,46,129,.07), 0 2px 8px rgba(49,46,129,.06);
+  --sh-md: 0 2px 4px rgba(49,46,129,.08), 0 8px 20px rgba(49,46,129,.10);
+  --sh-lg: 0 2px 6px rgba(49,46,129,.10), 0 14px 32px rgba(49,46,129,.16);
+  background: var(--bg); color: var(--text); }
+body:not(.light) .soft {
+  --bg: #191726; --card: #242137; --text: #E7E5F7; --text2: #9B98BC;
+  --border: #38355A; --muted: #2C2947;
+  --primary: #6366F1; --secondary: #818CF8; --ring: #818CF8;   /* 主色不提亮：白字压 #818CF8 仅 ~2.6:1，保持 #6366F1 才过 4.5:1 */
+  --sh-sm: 0 1px 2px rgba(0,0,0,.30), 0 2px 8px rgba(0,0,0,.24);
+  --sh-md: 0 2px 4px rgba(0,0,0,.32), 0 8px 20px rgba(0,0,0,.30);
+  --sh-lg: 0 2px 6px rgba(0,0,0,.36), 0 14px 32px rgba(0,0,0,.42); }
+.soft h3 { color: var(--text2); }
+/* 按钮：不透明表面 + 柔和多层投影；200ms；焦点环 3px 可见 */
+.soft .b {
+  font: inherit; font-size: 12px; cursor: pointer;
+  padding: 5px 13px; border-radius: 10px;
+  background: var(--card); color: var(--text); border: 1px solid var(--border);
+  box-shadow: var(--sh-sm);
+  transition: box-shadow .2s, transform .2s, background-color .2s, border-color .2s;
+}
+.soft .b:hover { box-shadow: var(--sh-md); transform: translateY(-1px); border-color: var(--secondary); }
+.soft .b:active { transform: translateY(0) scale(.98); transition-duration: .15s; }
+.soft .b:focus-visible { outline: none; box-shadow: var(--sh-sm), 0 0 0 3px color-mix(in srgb, var(--ring) 45%, transparent); }
+.soft .b.primary { background: var(--primary); border-color: var(--primary); color: #fff;
+  box-shadow: 0 2px 4px rgba(0,0,0,.10), 0 6px 16px color-mix(in srgb, var(--primary) 40%, transparent); }
+.soft .b.primary:hover { box-shadow: 0 2px 6px rgba(0,0,0,.12), 0 10px 22px color-mix(in srgb, var(--primary) 48%, transparent); }
+.soft .b.danger { background: var(--danger); border-color: var(--danger); color: #fff;
+  box-shadow: 0 2px 4px rgba(0,0,0,.10), 0 6px 16px color-mix(in srgb, var(--danger) 38%, transparent); }
+.soft .b.ghost { background: transparent; border-color: transparent; box-shadow: none; color: var(--text2); }
+.soft .b.ghost:hover { background: var(--muted); box-shadow: none; transform: none; }
+/* 勾选泡：实底白圈 + 柔和投影；选中 = 主色实底白勾 */
+.soft .badge {
+  position: absolute; top: 7px; left: 7px; z-index: 4; width: 22px; height: 22px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--card); border: 1px solid var(--border); color: transparent;
+  box-shadow: var(--sh-sm);
+  transition: background-color .2s, border-color .2s, box-shadow .2s, transform .15s;
+}
+.soft .badge.on { background: var(--primary); border-color: var(--primary); color: #fff;
+  box-shadow: 0 2px 4px rgba(0,0,0,.14), 0 4px 12px color-mix(in srgb, var(--primary) 42%, transparent); }
+.soft .badge:active { transform: scale(.9); }
+.soft .mcard { background: var(--card); border: 1px solid var(--border); box-shadow: var(--sh-sm);
+  transition: box-shadow .25s, transform .25s; }
+.soft .mcard:hover { box-shadow: var(--sh-md); transform: translateY(-2px); }
+.soft .mcard.selected { border-color: var(--primary); box-shadow: var(--sh-sm), 0 0 0 2px color-mix(in srgb, var(--primary) 55%, transparent); }
+/* 详情顶栏：不透明实底 + 滚动时柔和投影浮现（靠影分层，不靠模糊） */
+.soft .demo { background: var(--bg); border: 1px solid var(--border); box-shadow: var(--sh-sm); }
+.soft .mini-bar { background: var(--card); border-bottom: 1px solid transparent;
+  transition: box-shadow .25s, border-color .25s; }
+.soft .demo.scrolled .mini-bar { border-bottom-color: var(--border); box-shadow: 0 6px 16px rgba(49,46,129,.10); }
+body:not(.light) .soft .demo.scrolled .mini-bar { box-shadow: 0 6px 16px rgba(0,0,0,.36); }
+.soft .mini-cover { background: var(--muted); box-shadow: var(--sh-sm); }
+.soft .mtag { background: var(--muted); color: var(--text2); }
+.soft .thumb { border: 1px solid var(--border); box-shadow: var(--sh-sm); }
+.soft .sel-bar { background: var(--card); border: 1px solid var(--border); box-shadow: var(--sh-lg); }
+</style>
+</head>
+<body>
+<button class="theme-btn" onclick="document.body.classList.toggle('light')">切换明/暗</button>
+<div class="page-head">
+  <h1>风格对照</h1>
+  <span>左：Liquid Glass（当前实现） · 右：Soft UI Evolution（设计系统候选） · 同一组场景</span>
+</div>
+<div class="compare">
+
+  <!-- ═══ 左：Liquid Glass ═══ -->
+  <section class="pane lg">
+    <div class="pane-head"><b>Liquid Glass</b><p>材质驱动：半透明 · 折射边缘 · 背板模糊 · 弹性动效</p></div>
+    <div class="pane-body">
+      <h3>书架卡片 / 多选勾选（点击卡片切换）</h3>
+      <div class="cards" data-cards></div>
+      <h3>按钮</h3>
+      <div class="row">
+        <button class="b">默认</button><button class="b primary">主要</button>
+        <button class="b danger">危险</button><button class="b ghost">Ghost</button>
+      </div>
+      <h3>详情顶栏（滚动看磨砂熔出）＋ 悬浮操作条（选中后出现）</h3>
+      <div class="demo" data-demo>
+        <div class="mini-bar">
+          <div class="bar-glass" aria-hidden="true"><i class="gl gl-1"></i><i class="gl gl-2"></i><i class="gl gl-3"></i></div>
+          <button class="b" style="font-size:11px;padding:3px 9px">‹ 书架</button>
+          <div class="mini-row">
+            <div class="mini-cover"><div class="art" data-cover></div></div>
+            <div>
+              <div class="mini-title">示例漫画标题</div>
+              <span class="mtag">作者：示例</span><span class="mtag">系列 · 第 3 卷</span><span class="mtag">全彩</span>
+            </div>
+          </div>
+        </div>
+        <div class="thumbs" data-thumbs></div>
+        <div class="sel-bar" data-selbar hidden>
+          <b data-selcount>已选 0 项</b>
+          <button class="b">全选</button>
+          <button class="b primary">批量打标签</button>
+          <button class="b danger">批量删除</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 右：Soft UI Evolution ═══ -->
+  <section class="pane soft">
+    <div class="pane-head"><b>Soft UI Evolution</b><p>阴影驱动：不透明表面 · 柔和多层投影 · 200ms 动效 · 可见焦点环</p></div>
+    <div class="pane-body">
+      <h3>书架卡片 / 多选勾选（点击卡片切换）</h3>
+      <div class="cards" data-cards></div>
+      <h3>按钮（Tab 键试试焦点环）</h3>
+      <div class="row">
+        <button class="b">默认</button><button class="b primary">主要</button>
+        <button class="b danger">危险</button><button class="b ghost">Ghost</button>
+      </div>
+      <h3>详情顶栏（滚动看投影分层）＋ 悬浮操作条（选中后出现）</h3>
+      <div class="demo" data-demo>
+        <div class="mini-bar">
+          <button class="b ghost" style="font-size:11px;padding:3px 9px">‹ 书架</button>
+          <div class="mini-row">
+            <div class="mini-cover"><div class="art" data-cover></div></div>
+            <div>
+              <div class="mini-title">示例漫画标题</div>
+              <span class="mtag">作者：示例</span><span class="mtag">系列 · 第 3 卷</span><span class="mtag">全彩</span>
+            </div>
+          </div>
+        </div>
+        <div class="thumbs" data-thumbs></div>
+        <div class="sel-bar" data-selbar hidden>
+          <b data-selcount>已选 0 项</b>
+          <button class="b ghost">全选</button>
+          <button class="b primary">批量打标签</button>
+          <button class="b danger">批量删除</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+const check = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'
+const palettes = [
+  ['#f6d365','#fda085'], ['#a18cd1','#fbc2eb'], ['#84fab0','#8fd3f4'],
+  ['#e66465','#9198e5'],
+]
+const grad = (p, a = 160) => `linear-gradient(${a}deg,${p[0]},${p[1]})`
+
+document.querySelectorAll('.pane').forEach(pane => {
+  // 书架卡片：点击切换选中，联动本栏悬浮操作条
+  const cardsEl = pane.querySelector('[data-cards]')
+  const selbar = pane.querySelector('[data-selbar]')
+  const selcount = pane.querySelector('[data-selcount]')
+  const update = () => {
+    const n = cardsEl.querySelectorAll('.badge.on').length
+    selbar.hidden = n === 0
+    selcount.textContent = `已选 ${n} 项`
+  }
+  palettes.forEach((p, i) => {
+    const d = document.createElement('div')
+    d.className = 'mcard' + (i === 1 ? ' selected' : '')
+    d.innerHTML = `<div class="art" style="background:${grad(p)}"></div>
+      <div class="badge ${i === 1 ? 'on' : ''}">${i === 1 ? check : ''}</div>`
+    d.onclick = () => {
+      const b = d.querySelector('.badge')
+      b.classList.toggle('on'); d.classList.toggle('selected')
+      b.innerHTML = b.classList.contains('on') ? check : ''
+      update()
+    }
+    cardsEl.appendChild(d)
+  })
+  update()
+  // 详情演示：封面与缩略图
+  pane.querySelector('[data-cover]').style.background = grad(['#e66465', '#9198e5'], 155)
+  const thumbsEl = pane.querySelector('[data-thumbs]')
+  for (let i = 0; i < 24; i++) {
+    const t = document.createElement('div')
+    t.className = 'thumb'
+    t.style.background = `linear-gradient(${120 + i * 30}deg, hsl(${i * 37 % 360} 60% 55%), hsl(${(i * 37 + 60) % 360} 70% 40%))`
+    thumbsEl.appendChild(t)
+  }
+  // 软 UI 侧：滚动时为顶栏加投影分层
+  const demo = pane.querySelector('[data-demo]')
+  demo.addEventListener('scroll', () => {
+    demo.classList.toggle('scrolled', demo.scrollTop > 4)
+  }, { passive: true })
+})
+</script>
+</body>
+</html>

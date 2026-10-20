@@ -206,7 +206,7 @@ async function run() {
 .footer { display: flex; justify-content: flex-end; }
 .cache-row { display: flex; align-items: center; gap: 12px; }
 .hint-inline { flex: 1; font-size: 12px; opacity: .55; line-height: 1.5; }
-.verify-panel { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; }
+.verify-panel { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border); }
 .verify-ok { font-size: 13px; color: var(--ms-primary); }
 .fix-checks { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
 .abnormal-list { max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }

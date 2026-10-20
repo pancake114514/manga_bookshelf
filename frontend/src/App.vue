@@ -4,7 +4,6 @@
       <n-dialog-provider>
         <div class="app-shell" :class="[`theme-${store.theme}`, {
                'sidebar-dragging': !!store.sidebarDragging,
-               'scroll-edge': store.view.name === 'shelf',
              }]"
              :style="cssVars(store.theme)">
           <TitleBar v-if="showTitleBar" />

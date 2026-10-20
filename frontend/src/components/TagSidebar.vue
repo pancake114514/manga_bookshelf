@@ -109,14 +109,11 @@ function clearAll() { store.filters = {} }
 <style scoped>
 .sidebar {
   position: relative; flex: none;   /* 宽度由行内 style 绑定（收起/拖动联动 --sidebar-w） */
-  /* padding-top = 12 + 58：书架视图顶栏悬浮，侧栏顶部内容避开顶栏覆盖区 */
-  padding: 70px 16px 18px;
+  padding: 12px 16px 18px;
   border-right: 1px solid var(--border);
   overflow-y: auto;
 }
 .sidebar.collapsed { overflow: hidden; padding: 0; }
-/* 收起态细条同样下移，展开钮不被悬浮顶栏遮挡 */
-.sidebar.collapsed .side-rail { padding-top: 68px; }
 .r18-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
 .r18-label { color: var(--ms-danger); font-size: 13px; font-weight: 600; }
 .group { margin-bottom: 16px; }
@@ -126,7 +123,7 @@ function clearAll() { store.filters = {} }
 }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
-  padding: 3px 10px; border-radius: 6px;
+  padding: 3px 10px;
   border: 1px solid transparent;
   font-size: 12px; cursor: pointer; user-select: none;
   background: var(--chip-bg);
