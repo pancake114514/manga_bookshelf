@@ -881,14 +881,17 @@ impl Database {
         Ok(rows.pop())
     }
 
-    pub fn get_image_count(&self, obj_id: &str) -> Result<i64, String> {
+    /// 追加页的起始序号：现有最大 sort_order + 1（无图时为 0）。
+    /// 不能用 COUNT(*)：删过中间页或补登记后 count < MAX(sort_order)，新页会与已有页
+    /// 同号，被 `ORDER BY sort_order, filename` 的文件名兜底插进已有页中间。
+    pub fn next_sort_order(&self, obj_id: &str) -> Result<i64, String> {
         self.conn
             .query_row(
-                "SELECT COUNT(*) as cnt FROM images WHERE object_id=?",
+                "SELECT COALESCE(MAX(sort_order) + 1, 0) FROM images WHERE object_id=?",
                 params![obj_id],
                 |row| row.get::<_, i64>(0),
             )
-            .map_err(|e| format!("查询图片数量失败: {e}"))
+            .map_err(|e| format!("查询页序号失败: {e}"))
     }
 
     /// 全部对象的封面路径（缓存维护用）

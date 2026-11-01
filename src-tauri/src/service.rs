@@ -13,7 +13,7 @@ use std::sync::Mutex;
 
 use crate::db::{AssembledObject, BookmarkRow, Database, ImageRow, SeriesRow, Tags, new_uuid};
 use crate::file_ops::{
-    collect_images, copy_image_keep_name, find_thumb_cover,
+    collect_images, copy_image_keep_name, find_thumb_cover, natural_key,
 };
 use crate::thumbnail::{clear_cached_thumbs, get_thumb_cache_dir};
 use crate::library_manager::normalize_path;
@@ -371,9 +371,11 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
                     .into_iter()
                     .map(|i| i.filename)
                     .collect();
-                (names, db.get_image_count(obj_id).unwrap_or(0))
+                (names, db.next_sort_order(obj_id).unwrap_or(0))
             };
             let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+            // 序号在本对象内连续递增：跨对象累计会让第二个对象起出现空洞并插到已有页之后很远
+            let mut next_order = sort_start;
             for p in collect_images(&sp) {
                 let fname = Path::new(&p)
                     .file_name()
@@ -382,7 +384,8 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
                 if registered_names.contains(&fname) {
                     continue;
                 }
-                db.add_image(&new_uuid(), obj_id, &fname, &p, sort_start + registered as i64)?;
+                db.add_image(&new_uuid(), obj_id, &fname, &p, next_order)?;
+                next_order += 1;
                 registered += 1;
             }
         }
@@ -722,7 +725,7 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
             let total = images.len();
             let sort_start = {
                 let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
-                db.get_image_count(obj_id).unwrap_or(0)
+                db.next_sort_order(obj_id).unwrap_or(0)
             };
 
             // .thumb 封面：源目录存在 .thumb 文件时，复制进存储目录（保持
@@ -854,11 +857,11 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
 
         let result: Result<(i64, i64), String> = (|| {
             // ── 短锁：解析目标目录 ──
-            let (storage_obj_dir, cur_count) = {
+            let (storage_obj_dir, sort_start) = {
                 let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
                 let dir = Self::resolve_append_target_dir(&db, obj_id, "unnamed", storage_root)?;
-                let count = db.get_image_count(obj_id).unwrap_or(0);
-                (dir, count)
+                let start = db.next_sort_order(obj_id).unwrap_or(0);
+                (dir, start)
             };
 
             // ── 无锁：复制文件 ──
@@ -871,10 +874,11 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
                     .unwrap_or(true)).cloned()
                 .collect();
             sorted.sort_by_key(|p| {
-                Path::new(p)
+                let name = Path::new(p)
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_default()
+                    .unwrap_or_default();
+                natural_key(&name)
             });
 
             let mut rows: Vec<(String, String, i64)> = Vec::new(); // (filename, dest, sort_order)
@@ -884,7 +888,7 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
             for src in &sorted {
                 if let Some((filename, dest)) = copy_image_keep_name(src, &storage_obj_dir) {
                     copied_files.push(dest.clone());
-                    rows.push((filename, dest, cur_count + ok));
+                    rows.push((filename, dest, sort_start + ok));
                     ok += 1;
                 } else {
                     fail += 1;
@@ -1172,6 +1176,27 @@ mod tests {
         assert_eq!(svc.get_object(&oid).unwrap().unwrap().image_count, 6);
     }
 
+    /// 删过页的对象再追加：新页必须排在末尾。用 COUNT(*) 当起点会让新页与已有页同号，
+    /// 被 `ORDER BY sort_order, filename` 的文件名兜底插到已有页之前（0.png < b.png）
+    #[test]
+    fn append_after_removal_continues_from_max_sort_order() {
+        let (svc, d, oid) = seeded("appmax", "续后", tags(vec![]));
+        let first = svc.db.lock().unwrap().get_images(&oid).unwrap().remove(0);
+        svc.db.lock().unwrap().delete_image(&first.id).unwrap();
+
+        let more = d.join("more2");
+        fs::create_dir_all(&more).unwrap();
+        mk_img(&more, "0.png");
+        let (ok, fail) = svc.import_directory(&oid, "续后", &tags(vec![]),
+            more.to_str().unwrap(), d.join("storage").to_str().unwrap(), false, None, None).unwrap();
+        assert_eq!((ok, fail), (1, 0));
+
+        let order: Vec<String> = svc.db.lock().unwrap().get_images(&oid).unwrap()
+            .into_iter().map(|i| i.filename).collect();
+        assert_eq!(order, vec!["b.png".to_string(), "0.png".to_string()],
+            "追加页应排在末尾而不是插到前面: {order:?}");
+    }
+
     #[test]
     fn import_rejects_nonempty_unowned_dir() {
         let (svc, d) = new_svc("rej");
@@ -1364,6 +1389,40 @@ mod tests {
         // 对象保留且仍为 2 张（删 1 补 1）
         assert!(svc.get_object(&oid).unwrap().is_some());
         assert_eq!(svc.get_object(&oid).unwrap().unwrap().image_count, 2);
+    }
+
+    /// 补登记的序号必须各自连续：用跨对象累计的计数器时，第二个对象的新页会从
+    /// 上一个对象的累计数之后开始，与自身已有页号脱节
+    #[test]
+    fn apply_verify_fixes_registers_pages_contiguously_per_object() {
+        let (svc, d) = new_svc("vfix2obj");
+        let src = d.join("src");
+        fs::create_dir_all(&src).unwrap();
+        mk_img(&src, "a.png");
+        let root = d.join("storage");
+        fs::create_dir_all(&root).unwrap();
+
+        let mut ids = Vec::new();
+        for name in ["对象一", "对象二"] {
+            let oid = uuid::Uuid::new_v4().to_string();
+            svc.import_directory(&oid, name, &tags(vec![]), src.to_str().unwrap(),
+                root.to_str().unwrap(), true, None, None).unwrap();
+            ids.push(oid);
+        }
+        for oid in &ids {
+            let sp = PathBuf::from(svc.get_object(oid).unwrap().unwrap().storage_path.clone().unwrap());
+            image::RgbImage::from_pixel(30, 40, image::Rgb([7, 8, 9]))
+                .save(sp.join("zz.png")).unwrap();
+        }
+
+        let plan = VerifyFixPlan { register: ids.clone(), ..Default::default() };
+        let r = svc.apply_verify_fixes(&plan).unwrap();
+        assert_eq!(r.registered, 2, "两个对象各补登记 1 张");
+        for oid in &ids {
+            let orders: Vec<i64> = svc.get_images(oid).unwrap()
+                .into_iter().map(|i| i.sort_order).collect();
+            assert_eq!(orders, vec![0, 1], "补登记序号应紧接本对象已有页: {orders:?}");
+        }
     }
 
     #[test]

@@ -5,7 +5,39 @@ use std::path::Path;
 
 use crate::config::is_supported_image;
 
-/// 收集目录中所有支持格式的图片，按文件名升序排列。
+/// 自然排序的分段：数字段按数值比较，其余按字符比较。
+/// 声明顺序即优先级——数字段排在字母段之前（1.png 在 a.png 前）。
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum NatSeg {
+    Num(u128),
+    Ch(char),
+}
+
+/// 页序比较键：数字段按数值成序，未补零命名（1/2/…/10）不再退化成 1,10,2；
+/// 已补零的库字典序本就等价，键相同。数值相同的补零/不补零（0001 与 1）用整串
+/// 兜底，保证顺序确定而非依赖稳定排序的输入顺序。
+pub(crate) fn natural_key(name: &str) -> (Vec<NatSeg>, String) {
+    let lowered = name.to_lowercase();
+    let chars: Vec<char> = lowered.chars().collect();
+    let mut keys = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i].is_ascii_digit() {
+            let start = i;
+            while i < chars.len() && chars[i].is_ascii_digit() {
+                i += 1;
+            }
+            let digits: String = chars[start..i].iter().collect();
+            keys.push(NatSeg::Num(digits.parse::<u128>().unwrap_or(u128::MAX)));
+        } else {
+            keys.push(NatSeg::Ch(chars[i]));
+            i += 1;
+        }
+    }
+    (keys, lowered)
+}
+
+/// 收集目录中所有支持格式的图片，按自然顺序升序排列。
 /// 以 '.' 开头的隐藏文件不收集。
 pub fn collect_images(directory: &str) -> Vec<String> {
     let mut result = Vec::new();
@@ -19,7 +51,7 @@ pub fn collect_images(directory: &str) -> Vec<String> {
         .filter(|n| !n.starts_with('.'))
         .filter(|n| is_supported_image(n))
         .collect();
-    names.sort();
+    names.sort_by_key(|n| natural_key(n));
     for name in names {
         result.push(
             Path::new(directory)
@@ -195,6 +227,51 @@ mod tests {
         assert_eq!(names.len(), 2, "只收集受支持格式且跳过隐藏文件: {names:?}");
         assert!(names.contains(&"a.png".to_string()));
         assert!(names.contains(&"b.jpg".to_string()));
+    }
+
+    #[test]
+    fn collect_images_sorts_numbers_naturally() {
+        let d = tmp("nat");
+        for n in ["10.png", "2.png", "1.png", "p10.jpg", "a.png", "p02.jpg"] {
+            mk_img(&d, n);
+        }
+        let names: Vec<String> = collect_images(d.to_str().unwrap())
+            .into_iter()
+            .map(|p| PathBuf::from(p).file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        // 数字段按数值成序（字典序会得到 1,10,2）；数字段先于字母段
+        assert_eq!(
+            names,
+            vec!["1.png", "2.png", "10.png", "a.png", "p02.jpg", "p10.jpg"],
+            "{names:?}"
+        );
+    }
+
+    #[test]
+    fn collect_images_padded_names_keep_lexical_order() {
+        let d = tmp("natpad");
+        for n in ["0003.jpg", "0001.jpg", "0010.jpg"] {
+            mk_img(&d, n);
+        }
+        let names: Vec<String> = collect_images(d.to_str().unwrap())
+            .into_iter()
+            .map(|p| PathBuf::from(p).file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(names, vec!["0001.jpg", "0003.jpg", "0010.jpg"], "补零库应等同字典序");
+    }
+
+    #[test]
+    fn collect_images_tiebreak_is_deterministic_for_padded_and_bare() {
+        let d = tmp("nattie");
+        for n in ["1.png", "0001.png"] {
+            mk_img(&d, n);
+        }
+        let names: Vec<String> = collect_images(d.to_str().unwrap())
+            .into_iter()
+            .map(|p| PathBuf::from(p).file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        // 数值相同 → 整串兜底（'0' < '1'），不依赖 read_dir 返回顺序
+        assert_eq!(names, vec!["0001.png", "1.png"], "{names:?}");
     }
 
     #[test]
