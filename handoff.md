@@ -1,9 +1,54 @@
 # MangaShelf 交接说明（handoff）
 
-更新时间：2026-11-01 · 分支 `master` · 版本 v0.1.1（`src-tauri/Cargo.toml` / `frontend/package.json` 未递增，仍是 0.1.1）
+更新时间：2026-11-01（快照）· 增量补记 2026-11-10 · 分支 `master` · 版本 v0.1.1（`src-tauri/Cargo.toml` / `frontend/package.json` 未递增，仍是 0.1.1）
 
-> **历史快照**：本文记录 2026-11-01 的交接状态，不是当前需求。产品与技术事实源见
-> `wiki/`、`docs/technical/`、`SPEC.md`（路由见 `AGENTS.MD` §7）。文中与代码不一致处以代码为准。
+> **历史快照**：§1–§6 记录 2026-11-01 的交接状态，不是当前需求；§0 为 2026-11-10 的增量补记。
+> 产品与技术事实源见 `wiki/`、`docs/technical/`、`SPEC.md`（路由见 `AGENTS.MD` §7）。文中与代码不一致处以代码为准。
+
+## 0. 2026-11-10 增量补记
+
+### 0.1 文档体系补齐（`2944c5b`、`db7cf97`）
+
+`AGENTS.MD` 路由表指向的 `wiki/`、`docs/technical/`、`docs/milestones.md`、`SPEC.md`、`specs/` 此前**全部不存在**，本次按代码反推补齐 12 份（2,570 行）：
+
+- `wiki/`：产品定义与边界、产品术语表、M1-Requirements（8 模块 88 条，每条带可验证验收口径）
+- `docs/technical/`：README 总入口 + 架构与模块、数据模型、接口清单、前端结构、质量与构建
+- `docs/milestones.md`、`SPEC.md`、`specs/2026-11-doc-backfill.md`
+- README/handoff 与代码对齐：搜索优先于筛选、单页对象即判「读完」、R-18 标签不可点、双页以奇数页为基页、
+  导入无中途取消入口、孤儿目录仅报告、老库不重跑基线 DDL。8 条差异（D1–D8）留档在 `wiki/M1-Requirements.md` §10.4。
+
+### 0.2 P1 修复（`f783a18`）
+
+| 问题 | 处理 |
+|---|---|
+| 搜索建议不弹出 | ①建议只读 `tagValues`/`series`，而这两个值仅 `boot()` 加载——走 SetupGate 重设目录后恒为空且无报错；抽出 `loadLibraryMeta()` 并在设置目录成功后调用 ②建议增加对象名匹配（输入框已承诺「搜索对象名或标签」）并按值去重 |
+| 点建议误触发窗口拖动 | 建议项 `mousedown` 只 `prevent` 未 `stop`，冒泡到顶栏 `barMouseDown` → `startDrag`；改为 `@mousedown.stop.prevent` |
+| 评分删不掉 | naive-ui `NRate` 的 `clearable` 默认 false；5 处 `n-rate` 全部补上，卡片 tooltip 的「再次点击清除」才成立 |
+
+### 0.3 P2 修复（`c0883e1`）
+
+| 问题 | 处理 |
+|---|---|
+| 详情侧栏竞态 | 加 `loadGen` 代际守卫，快速切换同系列卷时旧请求不再覆盖新卷书签/分卷 |
+| 双页自由缩放副页变形 | 左右两图各用自己的 `naturalWidth`；进入自由模式改读 `img.naturalWidth`（原用主位基准，RTL 下会算错） |
+| 多选态 R-18 遮罩吞点击 | 多选时不渲染遮罩（R-18 徽标保留），点击回到卡片选中逻辑 |
+| `created_at` 时区偏移 | SQLite `CURRENT_TIMESTAMP` 为 UTC 且无后缀，解析补 `Z` 后按本地显示 |
+| 可关闭列表下标 key | `:key="i"` → `:key="file"`，删除中间项不再复用错位 |
+
+### 0.4 仓库状态
+
+- 分支仅 `master`；已完全合并的 `minimalism` 于本次删除（本地 + 远程），远程现存 `v0.1.0`/`v0.1.1` 两个 tag。
+- 提交序列：`2944c5b`（文档）→ `db7cf97`（文档对齐）→ `f783a18`（P1）→ `c0883e1`（P2）。
+- 前端构建 `vite build` 通过；后端 `cargo test --lib` 66 项通过（本次未改后端）。
+
+### 0.5 仍未处理
+
+- §5 批次 2–4 的**代码缺陷一项未动**，包括 `get_objects` 搜索时丢弃筛选（handoff 2.1）、`set_config_value` 无 key 白名单（4.1）、
+  `collect_images` 吞错、查询命令非 async、删除持锁做物理 IO、整文件读入无上限。
+- 前端 P3：静默 `catch` 无用户提示、键盘可达性缺 `:focus-visible`、3 个未使用图标、
+  卡片双击打开但光标为 pointer、最大化状态仅挂载/拖动时同步、
+  **排序进度用 `idx/image_count`、进度条用 `idx/(image_count-1)` 的口径不一致**。
+- 真机未验证：R-18 遮罩解除、阅读器偏好恢复、迁移/删除关闭拦截，以及本次 P1/P2 的全部修复。
 
 ## 1. 当前状态
 
