@@ -77,20 +77,26 @@ const width = computed(() => sidebarWidth('directory'))
 const vols = ref([])
 const bookmarks = ref([])
 
+// 代际守卫：换卷时旧请求可能晚到，直接回写会让新卷显示上一卷的书签/分卷
+let loadGen = 0
 watch(() => props.obj.id, load, { immediate: true })
 
 async function load() {
+  const my = ++loadGen
   vols.value = []
   bookmarks.value = []
   const o = props.obj
   if (!o) return
   // 加载失败进控制台告警而非静默吞掉（否则表现为侧栏内容无声消失，无法诊断）
-  bookmarks.value = await api.bookmarks(o.id)
+  const bms = await api.bookmarks(o.id)
     .catch(e => { console.warn('[详情侧栏] 书签加载失败:', e); return [] })
-  if (o.series_id) {
-    vols.value = await api.seriesVolumes(o.series_id)
-      .catch(e => { console.warn('[详情侧栏] 分卷加载失败:', e); return [] })
-  }
+  if (my !== loadGen) return
+  bookmarks.value = bms
+  if (!o.series_id) return
+  const vs = await api.seriesVolumes(o.series_id)
+    .catch(e => { console.warn('[详情侧栏] 分卷加载失败:', e); return [] })
+  if (my !== loadGen) return
+  vols.value = vs
 }
 
 const progressPct = computed(() => readProgressPct(props.obj))

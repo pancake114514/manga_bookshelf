@@ -8,7 +8,8 @@
       <img v-if="coverOk" :src="coverUrl" loading="lazy" alt="" @error="coverOk = false">
       <template v-if="isR18 && !revealed">
         <span class="r18-badge">R-18</span>
-        <div class="r18-lock" title="点击显示封面" @click.stop="$emit('reveal', obj)">
+        <!-- 多选态不渲染遮罩：它 z-index 高于卡片且 click.stop，会吞掉选中点击 -->
+        <div v-if="!selectMode" class="r18-lock" title="点击显示封面" @click.stop="$emit('reveal', obj)">
           <IconLock :size="20" />
           <span>内容已隐藏，点击显示</span>
         </div>
@@ -127,7 +128,9 @@ const tagList = computed(() => {
   return out
 })
 const timeLabel = computed(() => {
-  const d = props.obj.created_at ? new Date(props.obj.created_at.replace(' ', 'T')) : null
+  // SQLite CURRENT_TIMESTAMP 写入的是 UTC 且无时区后缀；按本地时间解析会整体偏移
+  // （UTC+8 下"N 天前"最多多算 8 小时、跨日判断出错），补 Z 声明为 UTC 再转本地
+  const d = props.obj.created_at ? new Date(props.obj.created_at.replace(' ', 'T') + 'Z') : null
   if (!d || isNaN(d)) return ''
   const days = Math.floor((Date.now() - d.getTime()) / 86400000)
   if (days <= 0) return '今天'

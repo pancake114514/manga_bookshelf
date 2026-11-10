@@ -49,7 +49,7 @@
         <div class="file-tags">
           <n-tag
             v-for="(file, i) in selectedFiles"
-            :key="i"
+            :key="file"
             closable
             @close="removeFile(i)"
           >{{ basename(file) }}</n-tag>

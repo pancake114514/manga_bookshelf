@@ -68,8 +68,8 @@
       <div v-if="!total" class="empty-page">该对象没有内容</div>
       <template v-else-if="double">
         <div class="spread">
-          <img v-if="shownLeft" :src="shownLeft" alt="" :style="freeStyle">
-          <img v-if="shownRight" :src="shownRight" alt="" :style="freeStyle">
+          <img v-if="shownLeft" :src="shownLeft" alt="" :style="freeStyleLeft">
+          <img v-if="shownRight" :src="shownRight" alt="" :style="freeStyleRight">
         </div>
         <n-spin v-if="!(rtl ? shownRight : shownLeft)" size="large" class="spread-spin" />
       </template>
@@ -119,7 +119,9 @@ const double = ref(false)
 const zoom = ref('fit')
 // 自由缩放（Ctrl+滚轮进入）：zoom === 'free' 时生效，基于原图自然宽的百分比
 const zoomPct = ref(100)
-const naturalW = ref(0)
+const naturalW = ref(0)   // 单页模式的原图自然宽
+const naturalLW = ref(0)  // 双页左图自然宽
+const naturalRW = ref(0)  // 双页右图自然宽
 const stageEl = ref(null)
 const isPanning = ref(false)
 const rtl = ref(true)
@@ -307,7 +309,9 @@ watch([spreadLeft, spreadRight], ([l, r]) => {
       if (g !== spreadGen) return
       shownLeft.value = l
       shownRight.value = r
-      // 主位（随阅读方向）图片的自然宽作为自由缩放基准
+      naturalLW.value = lw
+      naturalRW.value = rw
+      // 主位（随阅读方向）图片的自然宽作为单页切换时的回退基准
       naturalW.value = (rtl.value ? rw : lw) || lw || rw || 0
     })
 }, { immediate: true })
@@ -333,10 +337,13 @@ function setZoom(z) {
 
 // ── 自由缩放（Ctrl+滚轮）与拖拽平移 ──
 // 自由模式的图片宽度 = 原图自然宽 × zoomPct%，stage 溢出滚动 + 指针拖拽平移
-const freeStyle = computed(() =>
-  zoom.value === 'free' && naturalW.value
-    ? { width: `${Math.round((naturalW.value * zoomPct.value) / 100)}px` }
-    : undefined)
+function freeWidth(natural, pct) {
+  return natural ? { width: `${Math.round((natural * pct) / 100)}px` } : undefined
+}
+// 双页时左、右两图各有自己的自然宽：共用同一个基准会把副页拉伸变形
+const freeStyle = computed(() => (zoom.value === 'free' ? freeWidth(naturalW.value, zoomPct.value) : undefined))
+const freeStyleLeft = computed(() => (zoom.value === 'free' ? freeWidth(naturalLW.value, zoomPct.value) : undefined))
+const freeStyleRight = computed(() => (zoom.value === 'free' ? freeWidth(naturalRW.value, zoomPct.value) : undefined))
 
 function clampPct(p) { return Math.max(20, Math.min(800, p)) }
 
@@ -355,7 +362,8 @@ async function ctrlZoom(e) {
   if (zoom.value !== 'free') {
     // 以当前显示尺寸为基准进入自由模式，画面无跳变
     const img = stage.querySelector('img')
-    const base = img && naturalW.value ? (img.clientWidth / naturalW.value) * 100 : 100
+    // 直接问 DOM 要自然宽：双页时第一张图可能是副页，用主位基准会算错进入倍率
+    const base = img && img.naturalWidth ? (img.clientWidth / img.naturalWidth) * 100 : 100
     zoom.value = 'free'
     zoomPct.value = clampPct(Math.round(base))
   }
