@@ -16,7 +16,7 @@
             {{ detail.series_name }}<template v-if="detail.volume != null"> · 第 {{ detail.volume }} 卷</template>
           </div>
           <div class="rate-row">
-            <n-rate size="small" :value="rating" @update:value="rate" />
+            <n-rate size="small" clearable :value="rating" @update:value="rate" />
           </div>
           <div v-for="(vals, cat) in tagRows" :key="cat" class="tag-row">
             <span class="cat">{{ catLabel(cat) }}：</span>

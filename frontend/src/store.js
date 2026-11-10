@@ -81,10 +81,7 @@ export async function boot() {
     if (wShelf >= SIDEBAR_MIN && wShelf <= SIDEBAR_MAX) store.sidebarW.shelf = wShelf
     const wDir = parseInt(sbWDir, 10)
     if (wDir >= SIDEBAR_MIN && wDir <= SIDEBAR_MAX) store.sidebarW.directory = wDir
-    if (store.storageRoot) {
-      store.tagValues = await api.tagValues().catch(() => ({}))
-      await loadSeries()
-    }
+    if (store.storageRoot) await loadLibraryMeta()
   } catch (e) {
     store.bootError = e.message || String(e)
   } finally {
@@ -94,6 +91,14 @@ export async function boot() {
 
 export async function refreshTagValues() {
   store.tagValues = await api.tagValues().catch(() => ({}))
+}
+
+// 图库元数据（标签值 + 系列）：boot() 与「设置图库目录成功后」都必须加载。
+// 只放在 boot() 里是不够的——走 SetupGate 重新设置目录时 boot() 不会重跑，
+// 结果是筛选侧栏全空、搜索建议永不弹出（且没有任何报错）。
+export async function loadLibraryMeta() {
+  await refreshTagValues()
+  await loadSeries()
 }
 
 export async function loadSeries() {

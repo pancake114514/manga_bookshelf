@@ -23,7 +23,7 @@
 import { ref } from 'vue'
 import { NCard, NButton, NInput, NInputGroup, NAlert, useMessage } from 'naive-ui'
 import { api, dialog } from '../api'
-import { store } from '../store'
+import { store, loadLibraryMeta } from '../store'
 
 const message = useMessage()
 const path = ref('')
@@ -47,6 +47,8 @@ async function confirm() {
       return
     }
     store.storageRoot = path.value
+    // 补加载标签值/系列，否则筛选侧栏与搜索建议要等到下一次导入/编辑才会出现
+    await loadLibraryMeta()
     message.success('图库目录已设置')
   } catch (e) {
     warn.value = e.message

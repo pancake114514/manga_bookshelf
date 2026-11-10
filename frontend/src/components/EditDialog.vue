@@ -48,7 +48,7 @@
       </template>
 
       <div class="field-label">评分</div>
-      <n-rate v-model:value="rating" />
+      <n-rate v-model:value="rating" clearable />
 
       <div class="field-label">系列</div>
       <!-- 下拉选择已有系列（可筛选/可输入新系列/可清除）；选中后自动预填下一卷号 -->

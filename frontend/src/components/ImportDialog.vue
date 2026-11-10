@@ -25,7 +25,7 @@
       <n-input v-model:value="name" placeholder="输入对象名称" />
       <TagFields v-model:tags="newTags" />
       <div class="field-label">评分</div>
-      <n-rate v-model:value="rating" />
+      <n-rate v-model:value="rating" clearable />
     </template>
 
     <!-- 追加到已有目录 -->
@@ -78,7 +78,7 @@
       <div class="field-label">统一标签（应用到所有勾选项，可留空）</div>
       <TagFields v-model:tags="newTags" />
       <div class="field-label">评分</div>
-      <n-rate v-model:value="rating" :disabled="batchRunning" />
+      <n-rate v-model:value="rating" clearable :disabled="batchRunning" />
 
       <!-- 进度与逐项结果 -->
       <template v-if="batchRunning || batchResults.length">

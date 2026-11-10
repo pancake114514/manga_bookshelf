@@ -22,7 +22,7 @@
         <!-- 搜索建议：匹配标签值/系列名，标注类别；点击以该词发起搜索 -->
         <div v-if="suggestOpen && suggestions.length" class="suggest-panel">
           <div v-for="s in suggestions" :key="s.key" class="suggest-item"
-               @mousedown.prevent="pickSuggestion(s)">
+               @mousedown.stop.prevent="pickSuggestion(s)">
             <span class="suggest-type">{{ s.type }}</span>
             <span class="suggest-value">{{ s.value }}</span>
           </div>
@@ -81,9 +81,17 @@ const suggestions = computed(() => {
     const v = s.name
     if (v && v.toLowerCase().includes(q)) out.push({ key: `s-${v}`, type: '系列', value: v })
   }
+  // 对象名也参与匹配：占位符承诺"搜索对象名或标签"，只给标签建议会让人以为功能没生效
+  for (const o of store.objects || []) {
+    const v = o.name
+    if (v && v.toLowerCase().includes(q)) out.push({ key: `o-${o.id}`, type: '对象', value: v })
+  }
   const pri = { '作者': 0, '系列': 1 }
+  // 同名（如对象名与作品标签同值）只保留第一条，避免列表里重复两行
+  const seen = new Set()
   return out
     .sort((a, b) => (pri[a.type] ?? 2) - (pri[b.type] ?? 2))
+    .filter(s => !seen.has(s.value) && seen.add(s.value))
     .slice(0, 8)
 })
 

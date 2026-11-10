@@ -27,7 +27,7 @@
           <span v-for="t in tagList" :key="t" class="mini-tag">{{ t }}</span>
         </div>
         <div class="ov-rate" title="点击打分，再次点击当前分值清除" @click.stop @dblclick.stop>
-          <n-rate size="small" :value="rating" @update:value="v => $emit('rate', obj, v)" />
+          <n-rate size="small" clearable :value="rating" @update:value="v => $emit('rate', obj, v)" />
         </div>
         <div class="actions">
           <n-button size="tiny" quaternary title="继续阅读（从上次进度）" @click.stop="$emit('read', obj)"><IconPlay :size="13" /></n-button>
