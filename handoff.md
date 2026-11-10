@@ -2,6 +2,9 @@
 
 更新时间：2026-11-01 · 分支 `master` · 版本 v0.1.1（`src-tauri/Cargo.toml` / `frontend/package.json` 未递增，仍是 0.1.1）
 
+> **历史快照**：本文记录 2026-11-01 的交接状态，不是当前需求。产品与技术事实源见
+> `wiki/`、`docs/technical/`、`SPEC.md`（路由见 `AGENTS.MD` §7）。文中与代码不一致处以代码为准。
+
 ## 1. 当前状态
 
 两路子代理审查（前端 Vue / 后端 Rust）共报出 **27 项缺陷 + 24 项死代码冗余**。本轮已处理：死代码全部（可安全删除的部分）、前端 5 项缺陷、后端批次 1（迁移数据安全）、页序修正。**后端批次 2–4 待做**，清单见 §5。
@@ -95,7 +98,7 @@ cd frontend && npx vite build && node --test test/naming.test.mjs
 |---|---|---|---|
 | 3.1 | `service.rs:558` `delete_object`（`601` 处删目录） | 持 DB 锁跑 `clear_cached_thumbs` + `remove_dir_all` → 大目录/机械盘时所有 DB 命令被堵住数秒 | 锁内取快照并完成行删除，`drop(db)` 后再删缓存与目录（warnings 语义不变） |
 | 3.2 | `lib.rs:212` `read_file_response`；`file_ops.rs` `.thumb` 嗅探 | `std::fs::read` 整文件入内存且无大小上限；嗅探也整读 → 超大 TIFF/PNG 并发有 OOM 风险 | 先 `metadata()` 取 `Content-Length`，超阈值（如 64MB）返 413 或改分块；嗅探只读前 12 字节 |
-| 3.3 | `commands.rs:350` 等查询命令 | 非 `#[tauri::command(async)]`，默认在 IPC 主线程执行 → 与 3.1/批次 1 的持锁阶段叠加会冻结窗口 | `get_objects`/`get_object_detail`/`get_series_volumes`/`verify_library` 改 async（分页不动，见 §4） |
+| 3.3 | `commands.rs:350` 等查询命令 | 非 `#[tauri::command(async)]`，默认在 IPC 主线程执行 → 与 3.1/批次 1 的持锁阶段叠加会冻结窗口 | `get_objects`/`get_object_detail`/`get_series_volumes`/`verify_library` 改 async（分页不动，见 §4）。⚠ 2026-11 复核：`verify_library` 已是 `#[tauri::command(async)]`，该子项已过时 |
 | 3.4 | `lib.rs:67/71` | DB 初始化失败直接 `panic!`，release 是 `windows_subsystem="windows"` 无控制台 → 用户只见进程消失；且 `LibraryService::new` 在 single-instance 注册之前执行，二次启动的进程会短暂并发打开 SQLite | 改记日志 + 原生 dialog 报错（db 路径与 `.bak` 提示）后退出；把建服务挪到单实例插件之后 |
 
 ### 批次 4｜P3 收尾（每条局部小改）
