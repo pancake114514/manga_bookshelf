@@ -58,28 +58,42 @@
 
 测试 66 → 71（越界名称导入、越界改名、历史名未改放行、库外存储目录跳过删除、配置键白名单）。
 
-### 0.6 仓库状态
+### 0.6 P1 修复（`ce9cc4c`，2026-11-11）
+
+| 问题 | 处理 |
+|---|---|
+| 搜索时筛选被丢弃（2.1） | 新增 `service::search_objects_filtered`：在搜索结果上继续套用系列/标签筛选，`get_objects` 的 `q` 非空分支改走它 |
+| `update_object` 四次独立提交（2.2） | 新增 `service::update_object` + `ObjectUpdate`，四项同一事务；`db::set_tags` 拆出 `write_tags_rows`（不自开事务），否则外层事务里嵌套会报错 |
+| `collect_images` 吞错（2.4） | 改为 `Result`：导入与补登记上抛（触发回滚）；计数上抛给前端；库校验记 `warn` 后跳过该项 |
+| DB 初始化失败 panic（3.4） | 服务改在 `Builder::build()` 之后、`App::run()` 之前建立——单实例判重在 build 阶段的 `initialize_all` 内完成（已核对 tauri `app.rs:2440`）；失败弹原生对话框后 `exit(1)` |
+| 名称按字节计长（4.4） | 改按字符数；保留名先 `trim()` 空格/点，堵住 `CON .txt` |
+| 老库缺唯一索引（2.5） | 新增 **v4 迁移**：补齐 4 个基线索引、先去重再建 `idx_tags_unique`、清孤儿标签/图片、补 `schema_version`；幂等，新库为空操作 |
+
+> ⚠ **v4 迁移会改动真实库**（删重复标签行、建索引、清孤儿行）。应用只在图库迁移时做 `.bak` 备份，
+> schema 迁移不备份，升级前建议手动 `Copy-Item library.db library.db.bak-v3`，或用 `MANGASHELF_DB` 指向副本先验证。
+
+测试 71 → 74（v4 迁移、搜索∩筛选、冲突整单回滚）。
+
+### 0.7 仓库状态
 
 - 分支仅 `master`；已完全合并的 `minimalism` 于本次删除（本地 + 远程），远程现存 `v0.1.0`/`v0.1.1` 两个 tag。
 - 提交序列：`2944c5b`（文档）→ `db7cf97`（文档对齐）→ `f783a18`（P1）→ `c0883e1`（P2）→ `4b5dadf`（P3）
-  → `c01e7af` / `d2fc1ed`（handoff 补记与订正）→ `874eb45`（P0 安全）。
-- 前端构建 `vite build` 通过；后端 `cargo test --lib` **71 项**通过、`cargo clippy --all-targets -D warnings` 零警告（含 P0 新增的 5 个用例；本批首次改动后端）。
+  → `c01e7af` / `d2fc1ed`（handoff 补记与订正）→ `874eb45`（P0 安全）→ `ce9cc4c`（P1）。
+- 前端构建 `vite build` 通过；后端 `cargo test --lib` **74 项**通过、`cargo clippy --all-targets -D warnings` 零警告（P0 新增 5 例、P1 新增 3 例）。
 - 真机冒烟（2026-11-11）：用户在 `node dev.mjs` 下实际启动查看，**未发现问题**；
-  覆盖范围为启动与日常渲染，未逐项回归 P1/P2/P3 的具体交互（见 §0.7）。
+  覆盖范围为启动与日常渲染，未逐项回归 P1/P2/P3 的具体交互（见 §0.8）。
 
-### 0.7 仍未处理
+### 0.8 仍未处理
 
-- §5 批次 2–4 剩余未修：`get_objects` 搜索时丢弃筛选（2.1）、`update_object` 非单事务（2.2）、
-  `collect_images` 吞错（2.4）、老库缺唯一索引（2.5，条件性）、删除持锁做物理 IO（3.1）、
-  整文件读入无上限（3.2）、三条查询命令非 async（3.3）、DB 初始化 panic（3.4）、
-  缩略图 `.tmp` 竞争（4.2）、复制 TOCTOU（4.3）、名称按字节计长（4.4）、
+- §5 批次 2–4 剩余未修：删除持锁做物理 IO（3.1）、整文件读入无上限（3.2）、
+  三条查询命令非 async（3.3）、缩略图 `.tmp` 竞争（4.2）、复制 TOCTOU（4.3）、
   `collect_images` 不判 `is_file`（4.5）、`filter_map` 吞错（4.6）、`find_thumb_cover` 顺序（4.7）。
-  **已完成 2.3（路径校验）与 4.1（配置白名单）**，见 §0.5。
+  **已完成 2.1–2.5、3.4、4.1、4.4**，见 §0.5 / §0.6。
 - **完整 ARIA/键盘体系未做**：书签行、搜索建议项、详情页缩略图仍是 `div`/`span + click`；
   卡片内嵌套可聚焦按钮，`role` 语义不完整。属独立重构，建议单独立项。
 - **前端无组件级自动化测试**：仅 `naming.js` 有单测，CI 也不执行前端测试。
 - **逐项真机回归未做**：P1/P2/P3 的交互项（建议面板、评分清除、侧栏切换、双页自由缩放、R-18 多选）
-  只有构建级验证 + §0.6 的启动冒烟，未逐条走查。
+  只有构建级验证 + §0.7 的启动冒烟，未逐条走查。
 - 历史遗留未验证：R-18 遮罩解除、阅读器偏好恢复、迁移/删除的关闭拦截。
 
 ## 1. 当前状态
@@ -163,11 +177,11 @@ cd frontend && npx vite build && node --test test/naming.test.mjs
 
 | # | 位置 | 现状与影响 | 建议改法 |
 |---|---|---|---|
-| 2.1 | `commands.rs:383` `get_objects` | `q` 非空时只走 `search_objects`，`series_filter`/`tag_filters` 被整体丢弃 → 搜索框与标签/系列筛选可共存，但结果忽略筛选 | db 层新增 `search_objects_filtered(q, series, tags, include_r18)`，LIKE 与标签/系列 EXISTS 子句进同一条参数化查询（复用 `db.rs` 既有 filters 构造器）；`get_objects` 收成一个入口 |
-| 2.2 | `commands.rs:446` `update_object` | 系列/名称/标签/封面分 4 次独立提交 → 中途失败留下"部分保存成功"，与代码注释承诺的"整单不落库"矛盾 | service 加单事务 `update_object(oid, patch)`；把 `set_series_for_object` 拆出 `fn set_series(db: &Database, ...)` 内部版本（模式同 `resolve_append_target_dir`） |
+| 2.1 | `commands.rs:383` `get_objects` | `q` 非空时只走 `search_objects`，`series_filter`/`tag_filters` 被整体丢弃 → 搜索框与标签/系列筛选可共存，但结果忽略筛选 | db 层新增 `search_objects_filtered(q, series, tags, include_r18)`，LIKE 与标签/系列 EXISTS 子句进同一条参数化查询（复用 `db.rs` 既有 filters 构造器）；`get_objects` 收成一个入口。<br>**✅ 已修（`ce9cc4c`）** |
+| 2.2 | `commands.rs:446` `update_object` | 系列/名称/标签/封面分 4 次独立提交 → 中途失败留下"部分保存成功"，与代码注释承诺的"整单不落库"矛盾 | service 加单事务 `update_object(oid, patch)`；把 `set_series_for_object` 拆出 `fn set_series(db: &Database, ...)` 内部版本（模式同 `resolve_append_target_dir`）。<br>**✅ 已修（`ce9cc4c`）** |
 | 2.3 | 导入与改名 | 服务层不校验名称（前端有校验但 IPC 可绕过），`Path::join(name)` 可含 `..`/绝对路径 → 能把图片写到库外，再配合 `delete_object(delete_files)` 删库外目录 | `import_directory`/`import_single_files`/`update_object_name` 入口统一 `validate_windows_path_name`；join 后用 `normalize_path` 组件比较断言仍在 `storage_root` 内；删除前做同一断言。<br>**部分已修（`874eb45`）**：三个入口补名称校验 + 删除前库根断言；未加 join 后的 normalize 断言（避免 8.3 短名误判） |
-| 2.4 | `file_ops.rs:42` `collect_images` | `read_dir` 出错返回空 Vec（无 `Result`）→ 无权限/网络盘断开时导入继续、创建空对象、返回成功 | 改返回 `Result<Vec<String>, String>` 并上抛；`count_images` 命令同步；前端已能显示读取失败原因 |
-| 2.5 | `db.rs:167 MIGRATE_STEPS` / `154 idx_tags_unique` | 老库（`user_version=0` 且已有 `objects`）只置版本 1 跑增量，不执行基线 DDL → 唯一索引 `idx_tags_unique` 与部分索引在历史库上缺失，重复标签留着 | 新增幂等增量步骤：先按 `(object_id,category,value)` 去重，再 `CREATE UNIQUE INDEX IF NOT EXISTS`，与版本号同事务；老库/新库两条路径都要有用例 |
+| 2.4 | `file_ops.rs:42` `collect_images` | `read_dir` 出错返回空 Vec（无 `Result`）→ 无权限/网络盘断开时导入继续、创建空对象、返回成功 | 改返回 `Result<Vec<String>, String>` 并上抛；`count_images` 命令同步；前端已能显示读取失败原因。<br>**✅ 已修（`ce9cc4c`）** |
+| 2.5 | `db.rs:167 MIGRATE_STEPS` / `154 idx_tags_unique` | 老库（`user_version=0` 且已有 `objects`）只置版本 1 跑增量，不执行基线 DDL → 唯一索引 `idx_tags_unique` 与部分索引在历史库上缺失，重复标签留着 | 新增幂等增量步骤：先按 `(object_id,category,value)` 去重，再 `CREATE UNIQUE INDEX IF NOT EXISTS`，与版本号同事务；老库/新库两条路径都要有用例。<br>**✅ 已修（v4 迁移，`ce9cc4c`）** |
 
 ### 批次 3｜响应性与健壮性（P2）
 
@@ -176,11 +190,11 @@ cd frontend && npx vite build && node --test test/naming.test.mjs
 | 3.1 | `service.rs:558` `delete_object`（`601` 处删目录） | 持 DB 锁跑 `clear_cached_thumbs` + `remove_dir_all` → 大目录/机械盘时所有 DB 命令被堵住数秒 | 锁内取快照并完成行删除，`drop(db)` 后再删缓存与目录（warnings 语义不变） |
 | 3.2 | `lib.rs:212` `read_file_response`；`file_ops.rs` `.thumb` 嗅探 | `std::fs::read` 整文件入内存且无大小上限；嗅探也整读 → 超大 TIFF/PNG 并发有 OOM 风险 | 先 `metadata()` 取 `Content-Length`，超阈值（如 64MB）返 413 或改分块；嗅探只读前 12 字节 |
 | 3.3 | `commands.rs:350` 等查询命令 | `get_objects`/`get_object_detail`/`get_series_volumes` 仍非 `#[tauri::command(async)]`，在 IPC 主线程执行 → 与 3.1/批次 1 的持锁阶段叠加会冻结窗口（`verify_library` 已是 async） | 上述三个命令改 async |
-| 3.4 | `lib.rs:67/71` | DB 初始化失败直接 `panic!`，release 是 `windows_subsystem="windows"` 无控制台 → 用户只见进程消失；且 `LibraryService::new` 在 single-instance 注册之前执行，二次启动的进程会短暂并发打开 SQLite | 改记日志 + 原生 dialog 报错（db 路径与 `.bak` 提示）后退出；把建服务挪到单实例插件之后 |
+| 3.4 | `lib.rs:67/71` | DB 初始化失败直接 `panic!`，release 是 `windows_subsystem="windows"` 无控制台 → 用户只见进程消失；且 `LibraryService::new` 在 single-instance 注册之前执行，二次启动的进程会短暂并发打开 SQLite | 改记日志 + 原生 dialog 报错（db 路径与 `.bak` 提示）后退出；把建服务挪到单实例插件之后。<br>**✅ 已修（`ce9cc4c`）** |
 
 ### 批次 4｜P3 收尾（每条局部小改）
 
-`commands.rs:623 set_config_value` 加 key 白名单并拒绝 `storage_root`（否则 IPC 可绕过 setup/迁移直接改库根）**✅ 已修（`874eb45`）**；`thumbnail.rs:136` 缩略图 `*.tmp` 加唯一后缀，避免同缓存键并发 `rename` 竞争失败回退发原图；`file_ops.rs:87` `copy_image_keep_name` 用 `OpenOptions::create_new` 占位，消除 `exists()+copy` 的 TOCTOU 与半文件；`file_ops.rs:163` 名称长度按 `chars().count()`、过滤控制字符、覆盖 `CON .txt` 这类带空格保留名；`collect_images` 增 `file_type().is_file()`（名为 `cover.jpg` 的子目录现在会被收）；`db.rs` 多处 `filter_map(\|r\| r.ok())` 改为收集错误并 `log::warn`；`find_thumb_cover` 多个 `.thumb*` 候选时排序后取首个（当前依赖 `read_dir` 顺序，封面不确定）。
+`commands.rs:623 set_config_value` 加 key 白名单并拒绝 `storage_root`（否则 IPC 可绕过 setup/迁移直接改库根）**✅ 已修（`874eb45`）**；`thumbnail.rs:136` 缩略图 `*.tmp` 加唯一后缀，避免同缓存键并发 `rename` 竞争失败回退发原图；`file_ops.rs:87` `copy_image_keep_name` 用 `OpenOptions::create_new` 占位，消除 `exists()+copy` 的 TOCTOU 与半文件；`file_ops.rs:163` 名称长度按 `chars().count()`、过滤控制字符、覆盖 `CON .txt` 这类带空格保留名**✅ 已修（`ce9cc4c`）**；`collect_images` 增 `file_type().is_file()`（名为 `cover.jpg` 的子目录现在会被收）；`db.rs` 多处 `filter_map(\|r\| r.ok())` 改为收集错误并 `log::warn`；`find_thumb_cover` 多个 `.thumb*` 候选时排序后取首个（当前依赖 `read_dir` 顺序，封面不确定）。
 
 ## 6. 已知未覆盖
 
