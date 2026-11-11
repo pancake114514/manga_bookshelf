@@ -15,6 +15,13 @@ input, textarea {
 }
 img { -webkit-user-drag: none; }
 
+/* 键盘焦点可见性：应用去掉了大量默认材质，若不显式给焦点样式，
+   纯键盘用户无法判断焦点位置（卡片、筛选 chip、评分星都可聚焦） */
+:focus-visible {
+  outline: 2px solid var(--ms-primary);
+  outline-offset: 2px;
+}
+
 .app-shell {
   height: 100vh; display: flex; flex-direction: column;
   /* 布局令牌：--sidebar-w 为顶栏 logo 虚拟框固定宽（228px，与侧栏实际宽度解耦——

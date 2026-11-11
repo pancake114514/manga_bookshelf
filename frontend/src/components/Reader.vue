@@ -99,7 +99,7 @@
 
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import { NButton, NButtonGroup, NSpin, NPopover, NInput } from 'naive-ui'
+import { NButton, NButtonGroup, NSpin, NPopover, NInput, useMessage } from 'naive-ui'
 import { api, win } from '../api'
 import { store } from '../store'
 import { barMouseDown } from '../windowState'
@@ -111,6 +111,7 @@ const CFG_DOUBLE = 'ui_reader_double'
 const CFG_ZOOM = 'ui_reader_zoom'
 const CFG_DIR = 'ui_reader_direction'
 
+const message = useMessage()
 const reader = store.reader
 const index = ref(Math.max(0, Math.min(reader.index, reader.images.length - 1)))
 const dragging = ref(false)
@@ -235,14 +236,14 @@ async function toggleBookmark() {
     try {
       await api.removeBookmark(existing.id)
       bookmarks.value = bookmarks.value.filter(b => b.id !== existing.id)
-    } catch (e) { console.error(e) }
+    } catch (e) { message.error(`移除书签失败：${e?.message || e}`) }
   } else {
     try {
       const row = await api.addBookmark({
         obj_id: reader.obj.id, page_idx: index.value, note: null,
       })
       bookmarks.value = [...bookmarks.value, row].sort((a, b) => a.page_idx - b.page_idx)
-    } catch (e) { console.error(e) }
+    } catch (e) { message.error(`添加书签失败：${e?.message || e}`) }
   }
 }
 
@@ -271,7 +272,7 @@ async function saveEdit(b) {
       note: editNote.value.trim() || null,
     })
     bookmarks.value = bookmarks.value.map(x => x.page_idx === row.page_idx ? row : x)
-  } catch (e) { console.error(e) }
+  } catch (e) { message.error(`保存备注失败：${e?.message || e}`) }
   editingId.value = null
   editNote.value = ''
 }
@@ -279,7 +280,7 @@ async function removeBm(b) {
   try {
     await api.removeBookmark(b.id)
     bookmarks.value = bookmarks.value.filter(x => x.id !== b.id)
-  } catch (e) { console.error(e) }
+  } catch (e) { message.error(`删除书签失败：${e?.message || e}`) }
 }
 
 // 单页：异步解码完成后整体切换，旧图保持显示

@@ -182,6 +182,7 @@ async function run() {
   try {
     const result = await api.migrate(newRoot.value)
     store.storageRoot = newRoot.value
+    store.reloadTick++        // 库根已变更，书架按新路径重新拉取
     if (result.warnings?.length) {
       message.warning(`迁移完成（${result.moved} 个对象），有 ${result.warnings.length} 条库外路径警告`)
       console.warn('迁移警告：', result.warnings)

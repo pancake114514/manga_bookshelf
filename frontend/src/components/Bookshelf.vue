@@ -99,6 +99,7 @@ import { useMessage, useDialog, NCheckbox, NSelect, NButton, NButtonGroup, NModa
 import { api, dialog as fileDialog } from '../api'
 import { store, refreshTagValues, loadSeries, setSort, setDensity, setGrouped } from '../store'
 import { CATS } from '../constants'
+import { readProgressPct } from '../utils'
 import { IconArrowUp, IconArrowDown, IconCheckSquare, IconX, IconGrid, IconList, IconChevronRight } from './icons'
 import ObjectCard from './ObjectCard.vue'
 import EditDialog from './EditDialog.vue'
@@ -153,7 +154,9 @@ const SORTERS = {
   name: o => o.name || '',
   images: o => o.image_count || 0,
   rating: o => Number(o.tags?.rating?.[0] || 0),
-  progress: o => (o.image_count ? (o.last_read_idx || 0) / o.image_count : 0),
+  // 与卡片进度条共用同一口径（utils.readProgressPct）：末页即 100%，
+  // 否则按进度排序时「已读完」的书永远排不到最前
+  progress: o => readProgressPct(o) / 100,
 }
 const sortOptions = [
   { label: '添加时间', value: 'created_at' },

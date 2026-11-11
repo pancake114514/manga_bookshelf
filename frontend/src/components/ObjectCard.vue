@@ -1,7 +1,10 @@
 <template>
   <div class="obj-card" :class="{ 'is-r18': isR18 && !revealed, selected }" :style="animStyle"
+       tabindex="0" :title="selectMode ? '点击选中' : '双击打开详情'"
        @click="selectMode && $emit('toggle-select', obj.id)"
        @dblclick.stop="!selectMode && $emit('open', obj)"
+       @keydown.enter="!selectMode && $emit('open', obj)"
+       @keydown.space.prevent="selectMode && $emit('toggle-select', obj.id)"
        @contextmenu.prevent="onContextMenu">
     <div class="cover-box">
       <!-- 封面加载失败（无封面/文件缺失）时隐藏 img，显示容器底色的空白卡片而非破碎图标 -->

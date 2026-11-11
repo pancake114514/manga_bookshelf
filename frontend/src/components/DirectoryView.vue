@@ -46,13 +46,14 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { NButton, NRate } from 'naive-ui'
+import { NButton, NRate, useMessage } from 'naive-ui'
 import { api } from '../api'
 import { store } from '../store'
 import { catLabel } from '../constants'
 import { IconBack, IconPlay, IconBookmark } from './icons'
 
 const props = defineProps({ obj: { type: Object, required: true } })
+const message = useMessage()
 const detail = computed(() => props.obj)
 
 // 书签页集合：卡片右上角显示标记。
@@ -98,7 +99,7 @@ async function rate(v) {
   try {
     await api.updateObject(props.obj.id, { tags })
     props.obj.tags = tags        // 就地更新，界面即时生效
-  } catch (e) { console.error(e) }
+  } catch (e) { message.error(`评分保存失败：${e?.message || e}`) }
 }
 
 // 点击标签 → 作为筛选条件回到书架

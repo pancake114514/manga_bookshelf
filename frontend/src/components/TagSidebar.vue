@@ -16,7 +16,10 @@
         <div class="group-title">评分</div>
         <div class="stars">
           <span v-for="n in 5" :key="n" class="star" :class="{ on: n <= minRating }"
-                :title="`${n} 星及以上`" @click="setRatingFilter(n)">
+                tabindex="0" :title="`${n} 星及以上`"
+                @click="setRatingFilter(n)"
+                @keydown.enter.prevent="setRatingFilter(n)"
+                @keydown.space.prevent="setRatingFilter(n)">
             <IconStarFill :size="17" />
           </span>
           <span v-if="minRating" class="star-clear" @click="clearRatingFilter">清除</span>
@@ -29,7 +32,10 @@
         <div class="chips">
           <span v-for="v in seriesNames" :key="v" class="chip"
                 :class="{ active: (store.filters.series || []).includes(v) }"
-                @click="toggle('series', v)">{{ v }}</span>
+                tabindex="0"
+                @click="toggle('series', v)"
+                @keydown.enter.prevent="toggle('series', v)"
+                @keydown.space.prevent="toggle('series', v)">{{ v }}</span>
         </div>
       </div>
 
@@ -38,7 +44,10 @@
         <div class="chips">
           <span v-for="v in values" :key="v" class="chip"
                 :class="{ active: (store.filters[cat] || []).includes(v) }"
-                @click="toggle(cat, v)">{{ v }}</span>
+                tabindex="0"
+                @click="toggle(cat, v)"
+                @keydown.enter.prevent="toggle(cat, v)"
+                @keydown.space.prevent="toggle(cat, v)">{{ v }}</span>
         </div>
       </div>
 

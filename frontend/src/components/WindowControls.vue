@@ -15,7 +15,7 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
 import { win } from '../api'
 import { maximized, syncMaximized } from '../windowState'
 import { IconMinus, IconWinMax, IconWinRestore, IconX } from './icons'
@@ -24,7 +24,22 @@ import { IconMinus, IconWinMax, IconWinRestore, IconX } from './icons'
 async function toggleMax() {
   maximized.value = await win.toggleMaximize()
 }
-onMounted(() => syncMaximized())
+
+// 最大化状态还要跟随系统侧变化（Win+↑、贴靠、双击标题栏），这些都不经过本组件。
+// 用 DOM resize 兜底：尺寸变化即重同步；150ms 防抖避免拖动缩放时高频 IPC。
+let syncTimer = null
+function onResize() {
+  clearTimeout(syncTimer)
+  syncTimer = setTimeout(syncMaximized, 150)
+}
+onMounted(() => {
+  syncMaximized()
+  window.addEventListener('resize', onResize)
+})
+onUnmounted(() => {
+  window.removeEventListener('resize', onResize)
+  clearTimeout(syncTimer)
+})
 </script>
 
 <style scoped>
