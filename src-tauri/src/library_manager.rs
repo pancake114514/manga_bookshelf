@@ -53,7 +53,7 @@ pub(crate) fn normalize_path(path: &str) -> String {
     s
 }
 
-fn is_relative_to(path: &str, parent: &str) -> bool {
+pub(crate) fn is_relative_to(path: &str, parent: &str) -> bool {
     // 必须按路径组件比较：字符串 starts_with 会把 D:\Manga2 判成在 D:\Manga 之内
     let path = PathBuf::from(normalize_path(path));
     let parent = PathBuf::from(normalize_path(parent));

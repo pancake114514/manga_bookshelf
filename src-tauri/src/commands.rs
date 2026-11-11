@@ -619,11 +619,23 @@ pub fn get_config_value(
     Ok(ConfigResponse { key, value })
 }
 
+/// 允许经 IPC 写入的配置键：只放行 UI 偏好（`ui_` 前缀）。
+/// `storage_root` 必须走 setup / migrate（带可写校验与迁移流程），
+/// 其余内部键（如 `schema_version`）也不接受 IPC 直写——
+/// 否则任意 WebView 脚本都能绕过校验改掉库根。
+fn is_writable_config_key(key: &str) -> bool {
+    let k = key.trim();
+    !k.is_empty() && k.len() <= 64 && k.starts_with("ui_")
+}
+
 #[tauri::command]
 pub fn set_config_value(
     svc: State<'_, LibraryService>,
     body: ConfigBody,
 ) -> Result<SimpleResult, String> {
+    if !is_writable_config_key(&body.key) {
+        return Err(format!("不是可写的配置项：{}", body.key));
+    }
     svc.set_config(&body.key, &body.value)?;
     Ok(SimpleResult { ok: true, error: None })
 }
@@ -811,6 +823,18 @@ mod tests {
             image_count: 0,
             first_image: Some("/lib/封面目录/0001.png".into()),
         }
+    }
+
+    #[test]
+    fn config_key_whitelist_only_allows_ui_prefs() {
+        assert!(is_writable_config_key("ui_theme"));
+        assert!(is_writable_config_key("ui_sidebar_w_shelf"));
+        assert!(is_writable_config_key("ui_reader_double"));
+        assert!(!is_writable_config_key("storage_root"));
+        assert!(!is_writable_config_key("schema_version"));
+        assert!(!is_writable_config_key(""));
+        assert!(!is_writable_config_key("   "));
+        assert!(!is_writable_config_key(&format!("ui_{}", "x".repeat(80))));
     }
 
     /// 封面 URL 的版本参数必须随封面路径变化，否则 WebView 会一直显示缓存旧图

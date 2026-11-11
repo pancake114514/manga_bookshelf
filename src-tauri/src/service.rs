@@ -14,6 +14,7 @@ use std::sync::Mutex;
 use crate::db::{AssembledObject, BookmarkRow, Database, ImageRow, SeriesRow, Tags, new_uuid};
 use crate::file_ops::{
     collect_images, copy_image_keep_name, find_thumb_cover, natural_key,
+    validate_windows_path_name,
 };
 use crate::thumbnail::{clear_cached_thumbs, get_thumb_cache_dir};
 use crate::library_manager::normalize_path;
@@ -450,6 +451,16 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
     // ── 变更 ───────────────────────────────────────────────────────────────
 
     pub fn update_object_name(&self, obj_id: &str, name: &str) -> Result<(), String> {
+        // 名称参与后续追加导入的目录重建（resolve_append_target_dir），变更前必须校验；
+        // 但未改名时直接放行：历史对象名可能含旧版本允许的字符，
+        // 用户只改标签/系列时不应因为名称校验而整单失败
+        {
+            let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+            if db.get_object_opt(obj_id)?.map(|o| o.name == name).unwrap_or(false) {
+                return Ok(());
+            }
+        }
+        validate_windows_path_name(name)?;
         self.db.lock().unwrap_or_else(|p| p.into_inner()).update_object_name(obj_id, name)
     }
 
@@ -596,8 +607,16 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
             if let Some(obj) = &obj {
                 if let Some(sp) = &obj.storage_path {
                     if Path::new(sp).is_dir() {
-                        // 防御：历史数据可能存在多对象共享同一存储目录
-                        if !Self::storage_path_taken(&db, sp, None) {
+                        // 防御：历史数据/异常 IPC 可能把 storage_path 指向库根之外，
+                        // 直接 remove_dir_all 会删掉库外目录
+                        let outside_root = root
+                            .as_deref()
+                            .map(|r| !crate::library_manager::is_relative_to(sp, r))
+                            .unwrap_or(false);
+                        if outside_root {
+                            log::warn!("对象 {} 的存储目录不在库根内，跳过物理删除: {}", obj_id, sp);
+                            warnings.push(format!("存储目录不在库根内，已跳过物理删除：{sp}"));
+                        } else if !Self::storage_path_taken(&db, sp, None) {
                             if let Err(e) = fs::remove_dir_all(sp) {
                                 log::warn!("对象 {} 的本地文件删除失败: {sp}: {e}", obj_id);
                                 warnings.push(format!(
@@ -641,6 +660,8 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
             .as_ref()
             .map(|o| o.name.as_str())
             .unwrap_or(obj_name);
+        // 对象名可能来自旧版本/历史数据，重建目录前同样必须校验
+        validate_windows_path_name(name)?;
         let rebuilt = Path::new(storage_root).join(name).to_string_lossy().to_string();
         if Self::storage_path_taken(db, &rebuilt, Some(obj_id)) {
             return Err(format!("存储目录已被其他对象占用，无法重建：{rebuilt}"));
@@ -683,6 +704,9 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
         let result: Result<(i64, i64), String> = (|| {
             // ── ① 短锁：建对象，或解析追加目标 ──
             if is_new {
+                // 服务层必须自己校验：IPC 可绕过前端的 validate_name 直接调用本命令，
+                // 未校验的 name 含 ".." 或路径分隔符时 join 会逃出库根
+                validate_windows_path_name(name)?;
                 let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
                 let dir = Path::new(storage_root).join(name).to_string_lossy().to_string();
                 if Self::storage_path_taken(&db, &dir, None) {
@@ -1253,6 +1277,63 @@ mod tests {
         assert!(Path::new(&sp1).is_dir(), "共享目录不应被物理删除");
         assert!(svc.get_object(&oid1).unwrap().is_none(), "DB 记录应已删除");
         assert!(svc.get_object(&oid2).unwrap().is_some(), "另一对象不受影响");
+    }
+
+    #[test]
+    fn import_rejects_unsafe_object_name() {
+        // IPC 可绕过前端 validate_name 直接调用服务层，校验必须在服务层再做一次，
+        // 否则 ".."、分隔符等会让 join 逃出库根
+        let (svc, d) = new_svc("traversal");
+        let src = d.join("src");
+        fs::create_dir_all(&src).unwrap();
+        mk_img(&src, "a.png");
+        let root = d.join("storage");
+        fs::create_dir_all(&root).unwrap();
+        for bad in ["..", "../escape", "a/b", "a\\b", "CON", "\u{0}null"] {
+            let oid = uuid::Uuid::new_v4().to_string();
+            let err = svc
+                .import_directory(&oid, bad, &tags(vec![]), src.to_str().unwrap(), root.to_str().unwrap(), true, None, None)
+                .unwrap_err();
+            assert!(!err.is_empty(), "应给出可读错误：{bad}");
+            assert!(svc.get_object(&oid).unwrap().is_none(), "不应创建对象：{bad}");
+        }
+        assert!(!d.join("escape").exists(), "不应在库根外创建目录");
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 0, "库根内不应残留目录");
+    }
+
+    #[test]
+    fn rename_allows_unchanged_legacy_name() {
+        // 历史对象名可能含旧版本允许的字符；只改标签时名称原样回传，不应被新校验拦下
+        let (svc, _d, oid) = seeded("renamelegacy", "Alpha", tags(vec![]));
+        svc.db.lock().unwrap().update_object_name(&oid, "旧:名字").unwrap();
+        assert!(svc.update_object_name(&oid, "旧:名字").is_ok(), "未改名应放行");
+        assert!(svc.update_object_name(&oid, "旧:新名").is_err(), "改名仍应校验");
+    }
+
+    #[test]
+    fn rename_rejects_unsafe_name() {
+        let (svc, _d, oid) = seeded("renametraversal", "Alpha", tags(vec![]));
+        assert!(svc.update_object_name(&oid, "../evil").is_err());
+        assert_eq!(svc.get_object(&oid).unwrap().unwrap().name, "Alpha");
+    }
+
+    #[test]
+    fn delete_skips_storage_dir_outside_root() {
+        // 人为把 storage_path 指到库根之外：记录照删，但库外目录不得物理删除
+        let (svc, d, oid) = seeded("deloutside", "越界", tags(vec![]));
+        let outside = d.join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("keep.txt"), b"keep").unwrap();
+        svc.db
+            .lock()
+            .unwrap()
+            .update_object_storage_path(&oid, outside.to_str().unwrap())
+            .unwrap();
+        let root = d.join("storage");
+        let warnings = svc.delete_object(&oid, true, Some(root.to_str().unwrap())).unwrap();
+        assert!(warnings.iter().any(|w| w.contains("库根")), "应提示跳过：{warnings:?}");
+        assert!(outside.join("keep.txt").is_file(), "库外目录不应被删除");
+        assert!(svc.get_object(&oid).unwrap().is_none());
     }
 
     #[test]

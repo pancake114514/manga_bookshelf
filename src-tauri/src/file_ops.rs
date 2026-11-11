@@ -163,6 +163,10 @@ pub fn validate_windows_path_name(name: &str) -> Result<(), String> {
     if name.len() > 200 {
         return Err("名称过长（最多 200 个字符）".to_string());
     }
+    // 控制字符不可能出现在合法路径名里，放行会让目录名无法在资源管理器中打开
+    if let Some(c) = name.chars().find(|c| c.is_control()) {
+        return Err(format!("包含控制字符：U+{:04X}", c as u32));
+    }
     let illegal_chars = ['\\', '/', ':', '*', '?', '"', '<', '>', '|'];
     let bad: Vec<char> = name.chars().filter(|c| illegal_chars.contains(c)).collect();
     if !bad.is_empty() {
