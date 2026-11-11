@@ -59,7 +59,7 @@
 ### 0.6 仍未处理
 
 - §5 批次 2–4 的**代码缺陷一项未动**，包括 `get_objects` 搜索时丢弃筛选（handoff 2.1）、`set_config_value` 无 key 白名单（4.1）、
-  `collect_images` 吞错、查询命令非 async、删除持锁做物理 IO、整文件读入无上限。
+  `collect_images` 吞错、三条查询命令非 async（`get_objects`/`get_object_detail`/`get_series_volumes`）、删除持锁做物理 IO、整文件读入无上限。
 - **完整 ARIA/键盘体系未做**：书签行、搜索建议项、详情页缩略图仍是 `div`/`span + click`；
   卡片内嵌套可聚焦按钮，`role` 语义不完整。属独立重构，建议单独立项。
 - **前端无组件级自动化测试**：仅 `naming.js` 有单测，CI 也不执行前端测试。
@@ -136,7 +136,7 @@ cd frontend && npx vite build && node --test test/naming.test.mjs
 ## 4. 明确不做 / 需要产品先定
 
 - **不重排存量 `sort_order`**。`objects.last_read_idx` 与 `bookmarks.page_idx` 都是位置索引，重排会让阅读进度和书签集体跳错页；`bookmarks` 有 `UNIQUE(object_id, page_idx)`，重映射要两阶段偏移或 DELETE+重插才不撞约束。另外追加导入是"续到末尾"语义，全局按名重排会把后补的页插回中间。实测你的库（1 对象 25 页，`IMG_*`/哈希名/中文名混合，`sort_order` 0..24 无重复，0 书签）重排是倒退。留口子方案：校验/修复向导加**单对象显式**动作"按文件名重排本书"，同事务 remap 索引。
-- **不改行为**：详情页与侧栏两次 `list_bookmarks`、导入完成后两侧都刷 tags/series、`get_series` 的 `count/first_cover` 相关子查询、恒传 `None` 的进度/取消参数（仅测试在用）、`get_objects` 分页。前两条要去重必须提共享状态，属改行为。
+- **不改行为**：详情页与侧栏两次 `list_bookmarks`、导入完成后两侧都刷 tags/series、`get_series` 的 `count/first_cover` 相关子查询、恒传 `None` 的进度/取消参数（仅测试在用）。前两条要去重必须提共享状态，属改行为。
 - **待你判断**：`commands.rs:746 get_series_volumes` 固定传 `include_r18=true`，全局关闭 R-18 时系列侧栏仍显示 R-18 分卷——是设计还是缺陷；`tauri.conf.json:32 "csp": null` 是否需要设 CSP。
 - 你原本未跟踪的 `package.json`（仓库根）与 `frontend/public/` 不属于本轮工作，我没有纳入任何提交。
 
@@ -160,7 +160,7 @@ cd frontend && npx vite build && node --test test/naming.test.mjs
 |---|---|---|---|
 | 3.1 | `service.rs:558` `delete_object`（`601` 处删目录） | 持 DB 锁跑 `clear_cached_thumbs` + `remove_dir_all` → 大目录/机械盘时所有 DB 命令被堵住数秒 | 锁内取快照并完成行删除，`drop(db)` 后再删缓存与目录（warnings 语义不变） |
 | 3.2 | `lib.rs:212` `read_file_response`；`file_ops.rs` `.thumb` 嗅探 | `std::fs::read` 整文件入内存且无大小上限；嗅探也整读 → 超大 TIFF/PNG 并发有 OOM 风险 | 先 `metadata()` 取 `Content-Length`，超阈值（如 64MB）返 413 或改分块；嗅探只读前 12 字节 |
-| 3.3 | `commands.rs:350` 等查询命令 | 非 `#[tauri::command(async)]`，默认在 IPC 主线程执行 → 与 3.1/批次 1 的持锁阶段叠加会冻结窗口 | `get_objects`/`get_object_detail`/`get_series_volumes`/`verify_library` 改 async（分页不动，见 §4）。⚠ 2026-11 复核：`verify_library` 已是 `#[tauri::command(async)]`，该子项已过时 |
+| 3.3 | `commands.rs:350` 等查询命令 | `get_objects`/`get_object_detail`/`get_series_volumes` 仍非 `#[tauri::command(async)]`，在 IPC 主线程执行 → 与 3.1/批次 1 的持锁阶段叠加会冻结窗口（`verify_library` 已是 async） | 上述三个命令改 async |
 | 3.4 | `lib.rs:67/71` | DB 初始化失败直接 `panic!`，release 是 `windows_subsystem="windows"` 无控制台 → 用户只见进程消失；且 `LibraryService::new` 在 single-instance 注册之前执行，二次启动的进程会短暂并发打开 SQLite | 改记日志 + 原生 dialog 报错（db 路径与 `.bak` 提示）后退出；把建服务挪到单实例插件之后 |
 
 ### 批次 4｜P3 收尾（每条局部小改）
