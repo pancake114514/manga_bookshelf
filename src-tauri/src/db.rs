@@ -187,6 +187,23 @@ const MIGRATE_STEPS: &[(i64, &str)] = &[
             UNIQUE(object_id, page_idx)
         );
     "#),
+    (4, r#"
+        -- v3→v4：老库当年跳过了基线 DDL，可能缺索引、缺唯一约束、留着重复与孤儿行。
+        -- 本步幂等：新库跑一遍是空操作，老库补上基线的等价物。
+        CREATE INDEX IF NOT EXISTS idx_tags_object ON tags(object_id);
+        CREATE INDEX IF NOT EXISTS idx_images_object ON images(object_id);
+        CREATE INDEX IF NOT EXISTS idx_tags_category_value ON tags(category, value);
+        CREATE INDEX IF NOT EXISTS idx_objects_created ON objects(created_at DESC);
+        -- 先去重再建唯一索引：有重复标签时 CREATE UNIQUE 会直接失败
+        DELETE FROM tags WHERE id NOT IN (
+            SELECT MIN(id) FROM tags GROUP BY object_id, category, value
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_unique
+            ON tags(object_id, category, value);
+        DELETE FROM tags WHERE object_id NOT IN (SELECT id FROM objects);
+        DELETE FROM images WHERE object_id NOT IN (SELECT id FROM objects);
+        INSERT OR IGNORE INTO config(key, value) VALUES('schema_version', '1');
+    "#),
 ];
 
 // ── Database ──────────────────────────────────────────────────────────────────
@@ -766,6 +783,19 @@ impl Database {
 
     /// 整体替换对象标签（原子事务）
     pub fn set_tags(&self, obj_id: &str, tags: &Tags) -> Result<(), String> {
+        let tx = self.conn.unchecked_transaction().map_err(|e| format!("开启事务失败: {e}"))?;
+        Self::write_tags_rows(&tx, obj_id, tags)?;
+        tx.commit().map_err(|e| format!("提交标签事务失败: {e}"))?;
+        Ok(())
+    }
+
+    /// 供已持有事务的调用方复用（`service::update_object`）：不自开事务
+    pub(crate) fn write_tags_in_tx(&self, obj_id: &str, tags: &Tags) -> Result<(), String> {
+        Self::write_tags_rows(&self.conn, obj_id, tags)
+    }
+
+    /// 删除并重插标签行；事务边界由调用方负责
+    fn write_tags_rows(conn: &Connection, obj_id: &str, tags: &Tags) -> Result<(), String> {
         // 构建标签行并保序去重
         let mut rows: Vec<(String, String, String)> = Vec::new();
         for (cat, val) in &tags.0 {
@@ -786,20 +816,18 @@ impl Database {
         let mut seen = std::collections::HashSet::new();
         rows.retain(|r| seen.insert(r.clone()));
 
-        let tx = self.conn.unchecked_transaction().map_err(|e| format!("开启事务失败: {e}"))?;
-        tx.execute(
+        conn.execute(
             "DELETE FROM tags WHERE object_id=?",
             params![obj_id],
         )
         .map_err(|e| format!("清空标签失败: {e}"))?;
         for (oid, cat, val) in &rows {
-            tx.execute(
+            conn.execute(
                 "INSERT INTO tags(object_id,category,value) VALUES(?,?,?)",
                 params![oid, cat, val],
             )
             .map_err(|e| format!("插入标签失败: {e}"))?;
         }
-        tx.commit().map_err(|e| format!("提交标签事务失败: {e}"))?;
         Ok(())
     }
 
@@ -1141,7 +1169,7 @@ mod tests {
         let db = Database::open(path.to_str().unwrap()).unwrap();
         assert!(table_exists(&db.conn, "series"), "迁移应创建 series 表");
         assert!(table_exists(&db.conn, "bookmarks"), "迁移应创建 bookmarks 表");
-        assert_eq!(user_version(&db.conn), 3);
+        assert_eq!(user_version(&db.conn), 4, "应迁移到最新版本 v4");
         // 老数据未丢
         let obj = db.get_object_opt("o1").unwrap().unwrap();
         assert_eq!(obj.name, "老对象");
@@ -1165,6 +1193,70 @@ mod tests {
     }
 
     /// 全新库：基线 DDL + 增量步骤一次到位
+    /// 老库升级路径：v3 库跳过基线 DDL，v4 必须补齐索引、去重并清孤儿
+    #[test]
+    fn migrate_v4_dedupes_tags_and_adds_missing_indexes() {
+        let d = tmp_db("v4");
+        {
+            let conn = Connection::open(&d).unwrap();
+            conn.execute_batch(
+                r#"
+                PRAGMA user_version = 3;
+                CREATE TABLE config (key TEXT PRIMARY KEY, value TEXT);
+                CREATE TABLE series (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_at DATETIME);
+                CREATE TABLE objects (
+                    id TEXT PRIMARY KEY, type TEXT NOT NULL, name TEXT NOT NULL,
+                    source_path TEXT, storage_path TEXT, cover_image TEXT,
+                    last_read_idx INTEGER DEFAULT 0, created_at DATETIME,
+                    series_id TEXT, volume INTEGER
+                );
+                CREATE TABLE tags (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, object_id TEXT NOT NULL,
+                    category TEXT NOT NULL, value TEXT NOT NULL
+                );
+                CREATE TABLE images (
+                    id TEXT PRIMARY KEY, object_id TEXT NOT NULL, filename TEXT NOT NULL,
+                    filepath TEXT NOT NULL, sort_order INTEGER DEFAULT 0, created_at DATETIME
+                );
+                CREATE TABLE bookmarks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, object_id TEXT NOT NULL,
+                    page_idx INTEGER NOT NULL, note TEXT, created_at DATETIME,
+                    UNIQUE(object_id, page_idx)
+                );
+                INSERT INTO objects(id, type, name) VALUES ('o1', 'directory', 'A');
+                INSERT INTO tags(object_id, category, value) VALUES
+                    ('o1', 'work', 'X'), ('o1', 'work', 'X'), ('o1', 'work', 'X');
+                INSERT INTO tags(object_id, category, value) VALUES ('ghost', 'work', 'Y');
+                "#,
+            )
+            .unwrap();
+        }
+
+        let db = Database::open(d.to_str().unwrap()).unwrap();
+        assert_eq!(user_version(&db.conn), 4, "应迁移到 v4");
+
+        // 重复标签去重
+        let t = db.get_tags("o1").unwrap();
+        match t.0.get("work") {
+            Some(TagValue::List(v)) => assert_eq!(v, &vec!["X".to_string()], "重复标签应被去重"),
+            other => panic!("标签缺失或类型异常: {other:?}"),
+        }
+        // 孤儿标签被清
+        let ghost: i64 = db
+            .conn
+            .query_row("SELECT COUNT(*) FROM tags WHERE object_id='ghost'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(ghost, 0, "孤儿标签应被清理");
+        // 基线索引补齐
+        for idx in ["idx_tags_unique", "idx_tags_category_value", "idx_objects_created", "idx_images_object"] {
+            let n: i64 = db
+                .conn
+                .query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?1", [idx], |r| r.get(0))
+                .unwrap();
+            assert_eq!(n, 1, "缺少索引：{idx}");
+        }
+    }
+
     #[test]
     fn migrate_fresh_db_creates_all_tables() {
         let path = tmp_db("freshmig");
@@ -1172,7 +1264,7 @@ mod tests {
         for t in ["config", "objects", "tags", "images", "series", "bookmarks"] {
             assert!(table_exists(&db.conn, t), "表 {t} 应存在");
         }
-        assert_eq!(user_version(&db.conn), 3);
+        assert_eq!(user_version(&db.conn), 4, "应迁移到最新版本 v4");
     }
 
     /// 二次打开应直接跳过迁移且不破坏数据
@@ -1187,7 +1279,7 @@ mod tests {
             db.add_bookmark("oid-1", 3, Some("bk")).unwrap();
         }
         let db2 = Database::open(path.to_str().unwrap()).unwrap();
-        assert_eq!(user_version(&db2.conn), 3);
+        assert_eq!(user_version(&db2.conn), 4, "重开不应再降级或重复迁移");
         let series = db2.list_series().unwrap();
         assert_eq!(series.len(), 1);
         assert_eq!(series[0].name, "稳定系列");

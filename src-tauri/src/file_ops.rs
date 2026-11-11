@@ -39,12 +39,11 @@ pub(crate) fn natural_key(name: &str) -> (Vec<NatSeg>, String) {
 
 /// 收集目录中所有支持格式的图片，按自然顺序升序排列。
 /// 以 '.' 开头的隐藏文件不收集。
-pub fn collect_images(directory: &str) -> Vec<String> {
+pub fn collect_images(directory: &str) -> Result<Vec<String>, String> {
     let mut result = Vec::new();
-    let entries = match fs::read_dir(directory) {
-        Ok(e) => e,
-        Err(_) => return result,
-    };
+    // 读目录失败必须上抛：吞成空列表会让上层"成功导入 0 张"并建出空对象
+    let entries = fs::read_dir(directory)
+        .map_err(|e| format!("读取目录失败（{directory}）：{e}"))?;
     let mut names: Vec<String> = entries
         .filter_map(|e| e.ok())
         .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
@@ -60,7 +59,7 @@ pub fn collect_images(directory: &str) -> Vec<String> {
                 .to_string(),
         );
     }
-    result
+    Ok(result)
 }
 
 /// 扫描存储目录，返回下一个可用序号（已有文件最大序号 + 1，从 1 开始）。
@@ -160,7 +159,8 @@ pub fn validate_windows_path_name(name: &str) -> Result<(), String> {
     if trimmed.is_empty() {
         return Err("名称不能为空".to_string());
     }
-    if name.len() > 200 {
+    // 按字符数而非字节数：中文名 200 个字符约 600 字节，按字节判会误拒
+    if name.chars().count() > 200 {
         return Err("名称过长（最多 200 个字符）".to_string());
     }
     // 控制字符不可能出现在合法路径名里，放行会让目录名无法在资源管理器中打开
@@ -187,7 +187,13 @@ pub fn validate_windows_path_name(name: &str) -> Result<(), String> {
         "COM6", "COM7", "COM8", "COM9", "LPT0", "LPT1", "LPT2", "LPT3", "LPT4",
         "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
-    let stem = name.split('.').next().unwrap_or("").to_uppercase();
+    // Windows 会忽略保留名后的空格/点（"CON .txt" 等价于 CON），故先 trim
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_uppercase();
     if reserved.contains(&stem.as_str()) {
         return Err(format!("'{name}' 是 Windows 保留名称"));
     }
@@ -225,6 +231,7 @@ mod tests {
         fs::write(d.join("c.txt"), "x").unwrap();
         fs::write(d.join(".hidden.png"), "x").unwrap();
         let names: Vec<String> = collect_images(d.to_str().unwrap())
+            .unwrap()
             .into_iter()
             .map(|p| PathBuf::from(p).file_name().unwrap().to_string_lossy().to_string())
             .collect();
@@ -240,6 +247,7 @@ mod tests {
             mk_img(&d, n);
         }
         let names: Vec<String> = collect_images(d.to_str().unwrap())
+            .unwrap()
             .into_iter()
             .map(|p| PathBuf::from(p).file_name().unwrap().to_string_lossy().to_string())
             .collect();
@@ -258,6 +266,7 @@ mod tests {
             mk_img(&d, n);
         }
         let names: Vec<String> = collect_images(d.to_str().unwrap())
+            .unwrap()
             .into_iter()
             .map(|p| PathBuf::from(p).file_name().unwrap().to_string_lossy().to_string())
             .collect();
@@ -271,6 +280,7 @@ mod tests {
             mk_img(&d, n);
         }
         let names: Vec<String> = collect_images(d.to_str().unwrap())
+            .unwrap()
             .into_iter()
             .map(|p| PathBuf::from(p).file_name().unwrap().to_string_lossy().to_string())
             .collect();

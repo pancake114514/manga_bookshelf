@@ -64,15 +64,10 @@ pub fn run() {
     let db_path = config::db_path();
     log::info!("数据库路径: {db_path}");
 
-    let service = match LibraryService::new(&db_path) {
-        Ok(s) => s,
-        Err(e) => {
-            log::error!("初始化数据库失败: {e}");
-            panic!("初始化数据库失败: {e}");
-        }
-    };
-
-    tauri::Builder::default()
+    // 服务推迟到 Builder::build() 之后建立：
+    // 1) 单实例插件在 build 阶段完成判重，二次启动的进程此时已退出，不会并发打开 SQLite；
+    // 2) 配置窗口要到 App::run() 才创建，因此不存在"协议请求早于服务注册"的窗口期。
+    let app = tauri::Builder::default()
         // 单实例：二次启动时唤起已有主窗口，随后新进程立即退出
         // （须注册为第一个插件；避免多进程并发写同一 SQLite 库）
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -84,7 +79,6 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .manage(service)
         .register_asynchronous_uri_scheme_protocol("mangashelf", move |ctx, request, responder| {
             // wry 在 Windows 上将 http://mangashelf.localhost/path 还原为
             // mangashelf://localhost/path 后传给此 handler
@@ -205,8 +199,37 @@ pub fn run() {
                 }
             }
         })
-        .run(tauri::generate_context!())
-        .expect("启动 MangaShelf 失败");
+        .build(tauri::generate_context!())
+        .unwrap_or_else(|e| {
+            log::error!("构建 MangaShelf 失败: {e}");
+            eprintln!("构建 MangaShelf 失败: {e}");
+            std::process::exit(1);
+        });
+
+    // 数据库初始化失败不再 panic：release 是 windows_subsystem="windows" 无控制台，
+    // panic 表现为进程静默消失。改为弹原生错误对话框后以非零码退出。
+    let service = match LibraryService::new(&db_path) {
+        Ok(s) => s,
+        Err(e) => {
+            log::error!("初始化数据库失败: {e}");
+            show_startup_error(app.handle(), &db_path, &e);
+            std::process::exit(1);
+        }
+    };
+    app.manage(service);
+    app.run(|_app, _event| {});
+}
+
+/// 启动期致命错误：release 下没有控制台，必须用原生对话框把原因告诉用户
+fn show_startup_error(app: &tauri::AppHandle, db_path: &str, err: &str) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+    app.dialog()
+        .message(format!(
+            "数据库初始化失败，MangaShelf 无法启动。\n\n数据库：{db_path}\n原因：{err}\n\n若数据库损坏，可尝试用同目录下的 .bak 备份覆盖后重试。"
+        ))
+        .title("MangaShelf 启动失败")
+        .kind(MessageDialogKind::Error)
+        .blocking_show();
 }
 
 fn read_file_response(path: &str) -> tauri::http::Response<std::borrow::Cow<'static, [u8]>> {

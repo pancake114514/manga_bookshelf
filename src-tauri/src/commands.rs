@@ -148,7 +148,7 @@ pub fn count_images(dir: String) -> Result<i64, String> {
     if !Path::new(&dir).is_dir() {
         return Err(format!("目录不存在：{dir}"));
     }
-    Ok(collect_images(&dir).len() as i64)
+    Ok(collect_images(&dir)?.len() as i64)
 }
 
 #[derive(Serialize)]
@@ -381,7 +381,8 @@ pub fn get_objects(
     }
 
     let objects = if !q.is_empty() {
-        svc.search_objects(&q, include_r18)?
+        // 搜索与筛选可共存：结果取交集（原实现只走搜索，筛选被丢弃）
+        svc.search_objects_filtered(&q, &series_filter, &tag_filters, include_r18)?
     } else if !series_filter.is_empty() {
         svc.filter_by_series(&series_filter, &tag_filters, include_r18)?
     } else if !tag_filters.is_empty() {
@@ -448,26 +449,16 @@ pub fn update_object(
     oid: String,
     body: ObjectPatch,
 ) -> Result<SimpleResult, String> {
-    let obj = svc.get_object(&oid)?.ok_or("对象不存在".to_string())?;
-    // 系列与卷号（三态：缺省=不改，null=清除，传值=设置）最先处理——
-    // 卷号查重失败时整单不落库（名称/标签不会被半途修改）。
-    // 未传的字段回退当前值（unwrap_or）；两者都未传时不触碰系列字段，
-    // 只改卷号时系列名原样回传、由服务层按名幂等解析
-    if body.series_name.is_some() || body.volume.is_some() {
-        let series_name = body.series_name.clone().unwrap_or(obj.series_name.clone());
-        let volume = body.volume.unwrap_or(obj.volume);
-        svc.set_series_for_object(&oid, series_name.as_deref(), volume)?;
-    }
-    if let Some(name) = body.name {
-        svc.update_object_name(&oid, &name)?;
-    }
-    if let Some(tags) = body.tags {
-        let tags = json_to_tags(&tags);
-        svc.set_object_tags(&oid, &tags)?;
-    }
-    if let Some(cover) = body.cover_image {
-        svc.update_object_cover(&oid, &cover)?;
-    }
+    // 三态：缺省=不改，null=清除，传值=设置。
+    // 四项写在同一个事务里——原实现分四次提交，中途失败会留下"部分保存"。
+    let patch = crate::service::ObjectUpdate {
+        name: body.name,
+        tags: body.tags.map(|t| json_to_tags(&t)),
+        cover_image: body.cover_image,
+        series_name: body.series_name,
+        volume: body.volume,
+    };
+    svc.update_object(&oid, patch)?;
     Ok(SimpleResult { ok: true, error: None })
 }
 

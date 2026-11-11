@@ -84,6 +84,16 @@ pub struct VerifyFixResult {
 /// 校验快照：对象（id、名称、存储路径）与其图片记录（文件名、路径）
 type VerifySnapshot = Vec<(String, String, Option<String>, Vec<(String, String)>)>;
 
+/// 对象字段补丁（与 IPC 的三态语义一致）：None = 不改，Some(None) = 清除。
+#[derive(Default)]
+pub struct ObjectUpdate {
+    pub name: Option<String>,
+    pub tags: Option<Tags>,
+    pub cover_image: Option<String>,
+    pub series_name: Option<Option<String>>,
+    pub volume: Option<Option<i64>>,
+}
+
 impl LibraryService {
     pub fn new(db_path: &str) -> Result<Self, String> {
         let db = Database::open(db_path)?;
@@ -131,6 +141,32 @@ impl LibraryService {
         include_r18: bool,
     ) -> Result<Vec<AssembledObject>, String> {
         self.db.lock().unwrap_or_else(|p| p.into_inner()).search_objects(keyword, include_r18)
+    }
+
+    /// 搜索 + 系列/标签筛选的组合查询。
+    /// 原实现里 `q` 非空时只走 search_objects，筛选条件被整体丢弃，
+    /// 用户"搜索后筛选无效"；此处在搜索结果上继续套用与列表一致的筛选语义。
+    pub fn search_objects_filtered(
+        &self,
+        keyword: &str,
+        series_names: &[String],
+        filters: &HashMap<String, Vec<String>>,
+        include_r18: bool,
+    ) -> Result<Vec<AssembledObject>, String> {
+        let mut list = self.search_objects(keyword, include_r18)?;
+        if !series_names.is_empty() {
+            // 与 filter_by_series 的 SQL 语义一致：系列名精确匹配
+            list.retain(|o| {
+                o.series_name
+                    .as_deref()
+                    .map(|n| series_names.iter().any(|s| s == n))
+                    .unwrap_or(false)
+            });
+        }
+        if filters.is_empty() {
+            return Ok(list);
+        }
+        Ok(crate::db::filter_assembled_by_tags(list, filters))
     }
 
     pub fn filter_by_tags(
@@ -273,7 +309,12 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
                         missing.push(fname.clone());
                     }
                 }
-                for p in collect_images(&sp) {
+                // 校验是只读报告：单个目录读不了不应让整份报告失败，但要留痕
+                let listed = collect_images(&sp).unwrap_or_else(|e| {
+                    log::warn!("校验时读取目录失败，跳过未登记检查：{sp}: {e}");
+                    Vec::new()
+                });
+                for p in listed {
                     let n = Path::new(&p)
                         .file_name()
                         .map(|n| n.to_string_lossy().to_string())
@@ -377,7 +418,8 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
             let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
             // 序号在本对象内连续递增：跨对象累计会让第二个对象起出现空洞并插到已有页之后很远
             let mut next_order = sort_start;
-            for p in collect_images(&sp) {
+            // 修复是显式操作：目录读不了必须上抛，不能悄悄少登记
+            for p in collect_images(&sp)? {
                 let fname = Path::new(&p)
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
@@ -450,24 +492,66 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
 
     // ── 变更 ───────────────────────────────────────────────────────────────
 
-    pub fn update_object_name(&self, obj_id: &str, name: &str) -> Result<(), String> {
+    /// 改名的内部实现（调用方已持锁，可在事务内复用）
+    fn apply_rename(db: &Database, obj_id: &str, name: &str) -> Result<(), String> {
         // 名称参与后续追加导入的目录重建（resolve_append_target_dir），变更前必须校验；
         // 但未改名时直接放行：历史对象名可能含旧版本允许的字符，
         // 用户只改标签/系列时不应因为名称校验而整单失败
-        {
-            let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
-            if db.get_object_opt(obj_id)?.map(|o| o.name == name).unwrap_or(false) {
-                return Ok(());
-            }
+        if db.get_object_opt(obj_id)?.map(|o| o.name == name).unwrap_or(false) {
+            return Ok(());
         }
         validate_windows_path_name(name)?;
-        self.db.lock().unwrap_or_else(|p| p.into_inner()).update_object_name(obj_id, name)
+        db.update_object_name(obj_id, name)
     }
 
+    #[cfg(test)] // 生产路径统一走 update_object（单事务），此入口仅测试使用
+    pub fn update_object_name(&self, obj_id: &str, name: &str) -> Result<(), String> {
+        let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+        Self::apply_rename(&db, obj_id, name)
+    }
+
+    /// 单事务更新对象：系列/卷号、名称、标签、封面要么全部生效，要么全部不落库。
+    /// 原实现是四次独立提交，中途失败会留下"部分保存成功"。
+    pub fn update_object(&self, obj_id: &str, patch: ObjectUpdate) -> Result<(), String> {
+        let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+        let obj = db.get_object_opt(obj_id)?.ok_or("对象不存在".to_string())?;
+        let tx = db
+            .conn
+            .unchecked_transaction()
+            .map_err(|e| format!("开启事务失败: {e}"))?;
+        let result: Result<(), String> = (|| {
+            if patch.series_name.is_some() || patch.volume.is_some() {
+                let series_name = patch.series_name.clone().unwrap_or(obj.series_name.clone());
+                let volume = patch.volume.unwrap_or(obj.volume);
+                Self::apply_series(&db, obj_id, series_name.as_deref(), volume)?;
+            }
+            if let Some(name) = patch.name.as_deref() {
+                Self::apply_rename(&db, obj_id, name)?;
+            }
+            if let Some(tags) = patch.tags.as_ref() {
+                // 用不自开事务的版本：外层已开启事务，set_tags 会因嵌套而失败
+                db.write_tags_in_tx(obj_id, tags)?;
+            }
+            if let Some(cover) = patch.cover_image.as_deref() {
+                db.update_object_cover(obj_id, cover)?;
+            }
+            Ok(())
+        })();
+        match result {
+            Ok(()) => tx.commit().map_err(|e| format!("提交事务失败: {e}")),
+            Err(e) => {
+                let _ = tx.rollback();
+                Err(e)
+            }
+        }
+    }
+
+    #[cfg(test)] // 生产路径统一走 update_object（单事务），此入口仅测试使用
     pub fn set_object_tags(&self, obj_id: &str, tags: &Tags) -> Result<(), String> {
         self.db.lock().unwrap_or_else(|p| p.into_inner()).set_tags(obj_id, tags)
     }
 
+    #[cfg(test)] // 同上：仅测试使用
     pub fn update_object_cover(&self, obj_id: &str, cover_image: &str) -> Result<(), String> {
         self.db
             .lock()
@@ -488,13 +572,13 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
     /// 设置对象所属系列与卷号。
     /// series_name 为 None/空串 → series_id 置 NULL；非空 → 按名查找或创建系列。
     /// 调用方若只想改卷号，应先读取当前 series_name 一并传入以保持不变。
-    pub fn set_series_for_object(
-        &self,
+    /// 系列/卷号写入的内部实现（调用方已持锁，可在事务内复用）
+    fn apply_series(
+        db: &Database,
         obj_id: &str,
         series_name: Option<&str>,
         volume: Option<i64>,
     ) -> Result<(), String> {
-        let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
         let series_id = match series_name.filter(|s| !s.is_empty()) {
             Some(name) => Some(db.get_or_create_series_by_name(name)?),
             None => None,
@@ -509,6 +593,17 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
         // 对象移出原系列后，原系列可能已无引用——顺手清理空系列
         db.prune_empty_series()?;
         Ok(())
+    }
+
+    #[cfg(test)] // 同上：仅测试使用
+    pub fn set_series_for_object(
+        &self,
+        obj_id: &str,
+        series_name: Option<&str>,
+        volume: Option<i64>,
+    ) -> Result<(), String> {
+        let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
+        Self::apply_series(&db, obj_id, series_name, volume)
     }
 
     // ── 书签 ───────────────────────────────────────────────────────────────
@@ -745,7 +840,7 @@ pub fn verify_library(&self) -> Result<VerifyReport, String> {
             }
 
             // ── ② 无锁：复制文件（慢 IO），支持取消/进度 ──
-            let images = collect_images(source_dir);
+            let images = collect_images(source_dir)?;
             let total = images.len();
             let sort_start = {
                 let db = self.db.lock().unwrap_or_else(|p| p.into_inner());
@@ -1132,6 +1227,89 @@ mod tests {
         let _ = d;
         assert_eq!(svc.search_objects("深夜", true).unwrap().len(), 1);
         assert_eq!(svc.search_objects("不存在的关键字", true).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn search_combines_with_series_and_tag_filters() {
+        // 原实现 q 非空时筛选被整体丢弃，此处验证三者取交集
+        let (svc, d) = new_svc("searchfilter");
+        let src = d.join("src");
+        fs::create_dir_all(&src).unwrap();
+        mk_img(&src, "a.png");
+        let root = d.join("storage");
+        fs::create_dir_all(&root).unwrap();
+        let o1 = uuid::Uuid::new_v4().to_string();
+        let o2 = uuid::Uuid::new_v4().to_string();
+        svc.import_directory(&o1, "Alpha One", &tags(vec![("work", list(&["A"]))]), src.to_str().unwrap(), root.to_str().unwrap(), true, None, None).unwrap();
+        svc.import_directory(&o2, "Alpha Two", &tags(vec![("work", list(&["B"]))]), src.to_str().unwrap(), root.to_str().unwrap(), true, None, None).unwrap();
+        svc.set_series_for_object(&o1, Some("S1"), Some(1)).unwrap();
+
+        let mut tag_filter = HashMap::new();
+        tag_filter.insert("work".to_string(), vec!["A".to_string()]);
+        let by_tag = svc.search_objects_filtered("Alpha", &[], &tag_filter, false).unwrap();
+        assert_eq!(by_tag.len(), 1, "关键字 + 标签应取交集：{by_tag:?}");
+        assert_eq!(by_tag[0].name, "Alpha One");
+
+        let by_series = svc
+            .search_objects_filtered("Alpha", &["S1".to_string()], &HashMap::new(), false)
+            .unwrap();
+        assert_eq!(by_series.len(), 1, "关键字 + 系列应取交集");
+        assert_eq!(by_series[0].id, o1);
+
+        // 无筛选时行为不变
+        assert_eq!(svc.search_objects_filtered("Alpha", &[], &HashMap::new(), false).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn update_object_is_single_transaction() {
+        // 卷号冲突发生在系列步骤：名称/标签不应被半途写进去
+        let (svc, d) = new_svc("txrollback");
+        let src = d.join("src");
+        fs::create_dir_all(&src).unwrap();
+        mk_img(&src, "a.png");
+        let root = d.join("storage");
+        fs::create_dir_all(&root).unwrap();
+        let o1 = uuid::Uuid::new_v4().to_string();
+        let o2 = uuid::Uuid::new_v4().to_string();
+        svc.import_directory(&o1, "甲", &tags(vec![]), src.to_str().unwrap(), root.to_str().unwrap(), true, None, None).unwrap();
+        svc.import_directory(&o2, "乙", &tags(vec![]), src.to_str().unwrap(), root.to_str().unwrap(), true, None, None).unwrap();
+        svc.set_series_for_object(&o1, Some("S"), Some(1)).unwrap();
+
+        let err = svc
+            .update_object(
+                &o2,
+                ObjectUpdate {
+                    name: Some("丙".to_string()),
+                    tags: Some(tags(vec![("work", list(&["X"]))])),
+                    cover_image: None,
+                    series_name: Some(Some("S".to_string())),
+                    volume: Some(Some(1)),
+                },
+            )
+            .unwrap_err();
+        assert!(err.contains("卷"), "应报卷号冲突：{err}");
+        let obj2 = svc.get_object(&o2).unwrap().unwrap();
+        assert_eq!(obj2.name, "乙", "名称不应被写入");
+        assert!(obj2.tags.0.is_empty(), "标签不应被写入");
+        assert!(obj2.series_id.is_none(), "系列不应被写入");
+
+        // 正常路径：四项一起生效
+        svc.update_object(
+            &o2,
+            ObjectUpdate {
+                name: Some("丙".to_string()),
+                tags: Some(tags(vec![("work", list(&["X"]))])),
+                cover_image: None,
+                series_name: Some(Some("S".to_string())),
+                volume: Some(Some(2)),
+            },
+        )
+        .unwrap();
+        let obj2 = svc.get_object(&o2).unwrap().unwrap();
+        assert_eq!(obj2.name, "丙");
+        assert_eq!(obj2.series_name.as_deref(), Some("S"));
+        assert_eq!(obj2.volume, Some(2));
+        assert_eq!(obj2.tags.0.get("work").map(|v| match v { TagValue::List(l) => l.clone(), _ => vec![] }), Some(vec!["X".to_string()]));
     }
 
     #[test]
