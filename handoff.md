@@ -47,24 +47,39 @@
 | 最大化图标失真 | 监听 DOM `resize` 重同步（覆盖 Win+↑、贴靠、双击标题栏），150ms 防抖并在卸载时清理 |
 | 迁移后书架不刷新 | 迁移成功 `store.reloadTick++`，书架按新库根重取 |
 
-### 0.5 仓库状态
+### 0.5 P0 安全修复（`874eb45`，2026-11-11）
+
+| 问题 | 处理 |
+|---|---|
+| 名称/路径校验只在前端命令里生效（§5 2.3） | `import_directory`（新建分支）、`resolve_append_target_dir`（按对象名重建）、`update_object_name` 三处补 `validate_windows_path_name`；未改名时跳过校验，避免历史名导致「只改标签也整单失败」 |
+| 删除可越出库根（§5 2.3） | `remove_dir_all` 前用 `is_relative_to` 断言在库根内（该函数提升为 `pub(crate)`）；库外路径只删记录并回一条 warning |
+| 配置写入无限制（§5 4.1） | `set_config_value` 只放行 `ui_` 前缀且 ≤64 字符，拒绝 `storage_root`/`schema_version` 等内部键 |
+| 校验器遗漏控制字符 | `validate_windows_path_name` 增加控制字符拒绝 |
+
+测试 66 → 71（越界名称导入、越界改名、历史名未改放行、库外存储目录跳过删除、配置键白名单）。
+
+### 0.6 仓库状态
 
 - 分支仅 `master`；已完全合并的 `minimalism` 于本次删除（本地 + 远程），远程现存 `v0.1.0`/`v0.1.1` 两个 tag。
-- 提交序列：`2944c5b`（文档）→ `db7cf97`（文档对齐）→ `f783a18`（P1）→ `c0883e1`（P2）→ `4b5dadf`（P3）。
-  除 `4b5dadf` 与本文档提交外均已推送（远端最新 `8887966`）。
-- 前端构建 `vite build` 通过；后端 `cargo test --lib` 66 项通过（全程未改后端与数据库）。
+- 提交序列：`2944c5b`（文档）→ `db7cf97`（文档对齐）→ `f783a18`（P1）→ `c0883e1`（P2）→ `4b5dadf`（P3）
+  → `c01e7af` / `d2fc1ed`（handoff 补记与订正）→ `874eb45`（P0 安全）。
+- 前端构建 `vite build` 通过；后端 `cargo test --lib` **71 项**通过、`cargo clippy --all-targets -D warnings` 零警告（含 P0 新增的 5 个用例；本批首次改动后端）。
 - 真机冒烟（2026-11-11）：用户在 `node dev.mjs` 下实际启动查看，**未发现问题**；
-  覆盖范围为启动与日常渲染，未逐项回归 P1/P2/P3 的具体交互（见 §0.6）。
+  覆盖范围为启动与日常渲染，未逐项回归 P1/P2/P3 的具体交互（见 §0.7）。
 
-### 0.6 仍未处理
+### 0.7 仍未处理
 
-- §5 批次 2–4 的**代码缺陷一项未动**，包括 `get_objects` 搜索时丢弃筛选（handoff 2.1）、`set_config_value` 无 key 白名单（4.1）、
-  `collect_images` 吞错、三条查询命令非 async（`get_objects`/`get_object_detail`/`get_series_volumes`）、删除持锁做物理 IO、整文件读入无上限。
+- §5 批次 2–4 剩余未修：`get_objects` 搜索时丢弃筛选（2.1）、`update_object` 非单事务（2.2）、
+  `collect_images` 吞错（2.4）、老库缺唯一索引（2.5，条件性）、删除持锁做物理 IO（3.1）、
+  整文件读入无上限（3.2）、三条查询命令非 async（3.3）、DB 初始化 panic（3.4）、
+  缩略图 `.tmp` 竞争（4.2）、复制 TOCTOU（4.3）、名称按字节计长（4.4）、
+  `collect_images` 不判 `is_file`（4.5）、`filter_map` 吞错（4.6）、`find_thumb_cover` 顺序（4.7）。
+  **已完成 2.3（路径校验）与 4.1（配置白名单）**，见 §0.5。
 - **完整 ARIA/键盘体系未做**：书签行、搜索建议项、详情页缩略图仍是 `div`/`span + click`；
   卡片内嵌套可聚焦按钮，`role` 语义不完整。属独立重构，建议单独立项。
 - **前端无组件级自动化测试**：仅 `naming.js` 有单测，CI 也不执行前端测试。
 - **逐项真机回归未做**：P1/P2/P3 的交互项（建议面板、评分清除、侧栏切换、双页自由缩放、R-18 多选）
-  只有构建级验证 + §0.5 的启动冒烟，未逐条走查。
+  只有构建级验证 + §0.6 的启动冒烟，未逐条走查。
 - 历史遗留未验证：R-18 遮罩解除、阅读器偏好恢复、迁移/删除的关闭拦截。
 
 ## 1. 当前状态
@@ -150,7 +165,7 @@ cd frontend && npx vite build && node --test test/naming.test.mjs
 |---|---|---|---|
 | 2.1 | `commands.rs:383` `get_objects` | `q` 非空时只走 `search_objects`，`series_filter`/`tag_filters` 被整体丢弃 → 搜索框与标签/系列筛选可共存，但结果忽略筛选 | db 层新增 `search_objects_filtered(q, series, tags, include_r18)`，LIKE 与标签/系列 EXISTS 子句进同一条参数化查询（复用 `db.rs` 既有 filters 构造器）；`get_objects` 收成一个入口 |
 | 2.2 | `commands.rs:446` `update_object` | 系列/名称/标签/封面分 4 次独立提交 → 中途失败留下"部分保存成功"，与代码注释承诺的"整单不落库"矛盾 | service 加单事务 `update_object(oid, patch)`；把 `set_series_for_object` 拆出 `fn set_series(db: &Database, ...)` 内部版本（模式同 `resolve_append_target_dir`） |
-| 2.3 | 导入与改名 | 服务层不校验名称（前端有校验但 IPC 可绕过），`Path::join(name)` 可含 `..`/绝对路径 → 能把图片写到库外，再配合 `delete_object(delete_files)` 删库外目录 | `import_directory`/`import_single_files`/`update_object_name` 入口统一 `validate_windows_path_name`；join 后用 `normalize_path` 组件比较断言仍在 `storage_root` 内；删除前做同一断言 |
+| 2.3 | 导入与改名 | 服务层不校验名称（前端有校验但 IPC 可绕过），`Path::join(name)` 可含 `..`/绝对路径 → 能把图片写到库外，再配合 `delete_object(delete_files)` 删库外目录 | `import_directory`/`import_single_files`/`update_object_name` 入口统一 `validate_windows_path_name`；join 后用 `normalize_path` 组件比较断言仍在 `storage_root` 内；删除前做同一断言。<br>**部分已修（`874eb45`）**：三个入口补名称校验 + 删除前库根断言；未加 join 后的 normalize 断言（避免 8.3 短名误判） |
 | 2.4 | `file_ops.rs:42` `collect_images` | `read_dir` 出错返回空 Vec（无 `Result`）→ 无权限/网络盘断开时导入继续、创建空对象、返回成功 | 改返回 `Result<Vec<String>, String>` 并上抛；`count_images` 命令同步；前端已能显示读取失败原因 |
 | 2.5 | `db.rs:167 MIGRATE_STEPS` / `154 idx_tags_unique` | 老库（`user_version=0` 且已有 `objects`）只置版本 1 跑增量，不执行基线 DDL → 唯一索引 `idx_tags_unique` 与部分索引在历史库上缺失，重复标签留着 | 新增幂等增量步骤：先按 `(object_id,category,value)` 去重，再 `CREATE UNIQUE INDEX IF NOT EXISTS`，与版本号同事务；老库/新库两条路径都要有用例 |
 
@@ -165,7 +180,7 @@ cd frontend && npx vite build && node --test test/naming.test.mjs
 
 ### 批次 4｜P3 收尾（每条局部小改）
 
-`commands.rs:623 set_config_value` 加 key 白名单并拒绝 `storage_root`（否则 IPC 可绕过 setup/迁移直接改库根）；`thumbnail.rs:136` 缩略图 `*.tmp` 加唯一后缀，避免同缓存键并发 `rename` 竞争失败回退发原图；`file_ops.rs:87` `copy_image_keep_name` 用 `OpenOptions::create_new` 占位，消除 `exists()+copy` 的 TOCTOU 与半文件；`file_ops.rs:163` 名称长度按 `chars().count()`、过滤控制字符、覆盖 `CON .txt` 这类带空格保留名；`collect_images` 增 `file_type().is_file()`（名为 `cover.jpg` 的子目录现在会被收）；`db.rs` 多处 `filter_map(\|r\| r.ok())` 改为收集错误并 `log::warn`；`find_thumb_cover` 多个 `.thumb*` 候选时排序后取首个（当前依赖 `read_dir` 顺序，封面不确定）。
+`commands.rs:623 set_config_value` 加 key 白名单并拒绝 `storage_root`（否则 IPC 可绕过 setup/迁移直接改库根）**✅ 已修（`874eb45`）**；`thumbnail.rs:136` 缩略图 `*.tmp` 加唯一后缀，避免同缓存键并发 `rename` 竞争失败回退发原图；`file_ops.rs:87` `copy_image_keep_name` 用 `OpenOptions::create_new` 占位，消除 `exists()+copy` 的 TOCTOU 与半文件；`file_ops.rs:163` 名称长度按 `chars().count()`、过滤控制字符、覆盖 `CON .txt` 这类带空格保留名；`collect_images` 增 `file_type().is_file()`（名为 `cover.jpg` 的子目录现在会被收）；`db.rs` 多处 `filter_map(\|r\| r.ok())` 改为收集错误并 `log::warn`；`find_thumb_cover` 多个 `.thumb*` 候选时排序后取首个（当前依赖 `read_dir` 顺序，封面不确定）。
 
 ## 6. 已知未覆盖
 
